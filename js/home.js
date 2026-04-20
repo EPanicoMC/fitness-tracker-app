@@ -29,6 +29,7 @@ function saveToLocal() {
       day_override:     logData.day_override,
       extra_meals:      logData.extra_meals || [],
       meals_state,
+      meals_overrides:  logData.meals_overrides || {},
       nutrition_totals: logData.nutrition?.totals || {}
     };
     localStorage.setItem(LS_KEY, JSON.stringify(toSave));
@@ -103,6 +104,7 @@ async function init() {
     if (local.day_override != null) logData.day_override = local.day_override;
     if (local.extra_meals?.length)  logData.extra_meals = local.extra_meals;
     if (local.meals_state)          logData.meals_state = local.meals_state;
+    if (local.meals_overrides)      logData.meals_overrides = local.meals_overrides;
   }
 
   const name = appSettings?.profile?.name || appSettings?.name || '';
@@ -304,14 +306,19 @@ function buildMeals() {
   const dayKey = isTrainingDay ? 'day_on' : 'day_off';
   const meals  = activeDiet?.[dayKey]?.meals || [];
 
-  if (mealStates.length === 0 || mealStates.length !== meals.length) {
-    mealStates = meals.map((m, i) => ({
+  mealStates = meals.map((m, i) => {
+    const ov = logData.meals_overrides?.[i];
+    return {
       ...m,
-      eaten: logData.meals_state?.[i]?.eaten ?? logData.meals_eaten?.[i] ?? false,
+      kcal:           ov?.kcal    ?? m.kcal,
+      protein:        ov?.protein ?? m.protein,
+      carbs:          ov?.carbs   ?? m.carbs,
+      fats:           ov?.fats    ?? m.fats,
+      eaten:          logData.meals_state?.[i]?.eaten ?? logData.meals_eaten?.[i] ?? false,
       active_variant: logData.meals_state?.[i]?.variant ?? logData.meals_variant?.[i] ?? null,
-      override_kcal: logData.meals_override?.[i]?.kcal ?? null
-    }));
-  }
+      override_kcal:  ov?.kcal ?? null
+    };
+  });
 
   const el = document.getElementById('meals-list');
   if (!meals.length) {
@@ -375,6 +382,10 @@ function renderMealRow(m, mi) {
           <textarea id="meal-txt-${mi}" class="fi" rows="2" style="font-size:13px">${m.items || ''}</textarea>
           <button class="btn btn-ghost btn-sm" onclick="recalcMeal(${mi})" style="margin-top:8px">✨ Ricalcola con AI</button>
           <div id="meal-ai-${mi}" style="display:none;margin-top:8px"></div>
+          <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+            <button class="btn btn-ghost btn-sm" onclick="openManualMacro(${mi})">✏️ Inserisci manuale</button>
+            <button class="btn btn-ghost btn-sm" onclick="recalcMealAI(${mi})">✨ Ricalcola AI</button>
+          </div>
         </div>
         <div class="meal-delta" id="meal-delta-${mi}"></div>
       </div>
@@ -434,13 +445,8 @@ window.recalcMeal = async function(mi) {
 };
 
 window.applyMealAI = function(mi, kcal, protein, carbs, fats) {
-  mealStates[mi].override_kcal = kcal;
-  mealStates[mi].protein = protein;
-  mealStates[mi].carbs   = carbs;
-  mealStates[mi].fats    = fats;
-  if (!logData.meals_state) logData.meals_state = {};
-  if (!logData.meals_state[mi]) logData.meals_state[mi] = {};
-  logData.meals_state[mi].custom_macros = { kcal, protein, carbs, fats };
+  if (!logData.meals_overrides) logData.meals_overrides = {};
+  logData.meals_overrides[mi] = { kcal, protein, carbs, fats };
   saveToLocal();
   buildMeals();
   buildNutrition();
@@ -775,6 +781,79 @@ window.saveExtraMeal = async function() {
   document.getElementById('add-meal-modal')?.remove();
   showToast('✅ Pasto aggiunto!');
   buildMeals();
+};
+
+window.openManualMacro = function(mealIndex) {
+  const plan = isTrainingDay ? activeDiet?.day_on?.meals : activeDiet?.day_off?.meals;
+  const meal = plan?.[mealIndex];
+  const existing = logData.meals_overrides?.[mealIndex] || {};
+
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg';
+  bg.id = 'manual-macro-modal';
+  bg.innerHTML = `
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <h3>✏️ ${meal?.label || 'Pasto'}</h3>
+      <p style="font-size:13px;color:var(--t2);margin-bottom:16px">Inserisci i valori reali di questo pasto</p>
+      <div class="grid2">
+        <div class="fg"><label class="fl">Kcal</label>
+          <input type="number" class="fi" id="mm-kcal" value="${existing.kcal || meal?.kcal || ''}" placeholder="${meal?.kcal || 0}"></div>
+        <div class="fg"><label class="fl">Proteine (g)</label>
+          <input type="number" class="fi" id="mm-pro" value="${existing.protein || meal?.protein || ''}" placeholder="${meal?.protein || 0}" step="0.1"></div>
+        <div class="fg"><label class="fl">Carboidrati (g)</label>
+          <input type="number" class="fi" id="mm-carb" value="${existing.carbs || meal?.carbs || ''}" placeholder="${meal?.carbs || 0}" step="0.1"></div>
+        <div class="fg"><label class="fl">Grassi (g)</label>
+          <input type="number" class="fi" id="mm-fat" value="${existing.fats || meal?.fats || ''}" placeholder="${meal?.fats || 0}" step="0.1"></div>
+      </div>
+      <div class="fg">
+        <label class="fl">Note ingredienti (opzionale)</label>
+        <textarea class="fi" id="mm-note" rows="2" placeholder="Es: 120g pollo invece di 150g...">${existing.items_text || meal?.items || ''}</textarea>
+      </div>
+      <div class="modal-btns" style="margin-top:16px">
+        <button class="btn btn-flat" onclick="document.getElementById('manual-macro-modal').remove()">Annulla</button>
+        <button class="btn btn-g" onclick="saveManualMacro(${mealIndex})">✅ Salva</button>
+      </div>
+    </div>`;
+  document.body.appendChild(bg);
+  bg.onclick = e => { if (e.target === bg) bg.remove(); };
+};
+
+window.saveManualMacro = function(mealIndex) {
+  const kcal    = parseFloat(document.getElementById('mm-kcal')?.value)  || 0;
+  const protein = parseFloat(document.getElementById('mm-pro')?.value)   || 0;
+  const carbs   = parseFloat(document.getElementById('mm-carb')?.value)  || 0;
+  const fats    = parseFloat(document.getElementById('mm-fat')?.value)   || 0;
+  const note    = document.getElementById('mm-note')?.value || '';
+
+  if (!logData.meals_overrides) logData.meals_overrides = {};
+  logData.meals_overrides[mealIndex] = { kcal, protein, carbs, fats, items_text: note };
+
+  saveToLocal();
+  buildMeals();
+  buildNutrition();
+  document.getElementById('manual-macro-modal')?.remove();
+  showToast('✅ Macro aggiornati!');
+};
+
+window.recalcMealAI = async function(mealIndex) {
+  const plan = isTrainingDay ? activeDiet?.day_on?.meals : activeDiet?.day_off?.meals;
+  const meal = plan?.[mealIndex];
+  const text = meal?.items;
+
+  if (!text?.trim()) { showToast('Nessun ingrediente da calcolare', 'err'); return; }
+
+  showToast('⏳ Calcolo AI...', 'info');
+  const r = await calcMacrosFromText(text);
+  if (!r.success) { showToast('AI: ' + r.error, 'err'); return; }
+
+  if (!logData.meals_overrides) logData.meals_overrides = {};
+  logData.meals_overrides[mealIndex] = { kcal: r.kcal, protein: r.protein, carbs: r.carbs, fats: r.fats, items_text: text };
+
+  saveToLocal();
+  buildMeals();
+  buildNutrition();
+  showToast('✅ Macro aggiornati con AI!');
 };
 
 init();
