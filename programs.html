@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FitTracker – Schede</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="wrap">
+
+  <div class="ph">
+    <h1>💪 Schede Allenamento</h1>
+  </div>
+
+  <button class="btn btn-v" id="add-btn"
+    onclick="window.showProgramForm()" style="margin-bottom:20px">
+    ＋ Nuovo Programma
+  </button>
+
+  <div id="programs-list"><div class="spin-wrap"></div></div>
+  <div id="program-form-wrap" style="display:none"></div>
+
+</div>
+
+<nav class="bnav">
+  <a href="index.html"><span class="ni">🏠</span><span>Home</span></a>
+  <a href="programs.html" class="active"><span class="ni">💪</span><span>Schede</span></a>
+  <a href="diet.html"><span class="ni">🥗</span><span>Dieta</span></a>
+  <a href="settings.html"><span class="ni">⚙️</span><span>Settings</span></a>
+</nav>
+
+<script type="module" src="js/programs.js"></script>
+</body>
+</html>

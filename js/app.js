@@ -2,48 +2,66 @@ export function getTodayString() {
   return new Date().toISOString().split('T')[0];
 }
 
-export function formatDateDisplay(dateString) {
-  const [year, month, day] = dateString.split('-').map(Number);
-  const date = new Date(year, month - 1, day);
+export function getDayOfWeek() {
+  const days = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+  return days[new Date().getDay()];
+}
+
+export function formatDateIT(str) {
+  const [y, m, d] = str.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
   return date.toLocaleDateString('it-IT', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric'
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
   });
 }
 
-export function showToast(message, type = 'success') {
-  const existing = document.querySelector('.toast');
-  if (existing) existing.remove();
-  const toast = document.createElement('div');
-  toast.className = `toast toast-${type}`;
-  toast.textContent = message;
-  document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), 3000);
+export function showToast(msg, type = 'ok') {
+  document.querySelector('.toast')?.remove();
+  const t = document.createElement('div');
+  t.className = `toast toast-${type}`;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
 }
 
-export function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max);
+export function showModal(title, text, confirmLabel, onConfirm) {
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg';
+  bg.innerHTML = `
+    <div class="modal">
+      <h3>${title}</h3>
+      <p>${text}</p>
+      <div class="modal-btns">
+        <button class="btn btn-ghost" id="_m_cancel">Annulla</button>
+        <button class="btn btn-del" id="_m_ok"
+          style="border-radius:var(--r);padding:15px;font-size:15px;width:100%">
+          ${confirmLabel}
+        </button>
+      </div>
+    </div>`;
+  document.body.appendChild(bg);
+  bg.querySelector('#_m_cancel').onclick = () => bg.remove();
+  bg.querySelector('#_m_ok').onclick    = () => { bg.remove(); onConfirm(); };
 }
 
-export function setProgress(elementId, value, max) {
-  const el = document.getElementById(elementId);
-  if (el) el.style.width = clamp((value / max) * 100, 0, 100) + '%';
+export function setWidth(id, pct) {
+  const el = document.getElementById(id);
+  if (el) el.style.width = Math.min(100, Math.max(0, pct)) + '%';
 }
 
-export function setText(elementId, text) {
-  const el = document.getElementById(elementId);
-  if (el) el.textContent = text;
+export function setText(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
 }
 
 export const DEFAULT_TARGETS = {
-  kcal_on: 2500,
-  protein_on: 150,
-  carbs_on: 250,
-  fats_on: 70,
-  kcal_off: 2200,
-  protein_off: 130,
-  carbs_off: 200,
-  fats_off: 65
+  kcal_on: 2500, pro_on: 160,  carb_on: 260,  fat_on: 72,
+  kcal_off:2200, pro_off:140,  carb_off:200,  fat_off:65
 };
+
+export const DAYS_IT = {
+  monday:'Lunedì', tuesday:'Martedì', wednesday:'Mercoledì',
+  thursday:'Giovedì', friday:'Venerdì', saturday:'Sabato', sunday:'Domenica'
+};
+
+export const DAYS_ORDER = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];

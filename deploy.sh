@@ -1,11 +1,11 @@
 #!/bin/bash
-echo "🚀 Deploy in corso..."
+echo "🚀 Deploying..."
 git add .
 if git diff --staged --quiet; then
-  echo "✅ Nessuna modifica da committare"
+  echo "✅ Nothing to commit"
 else
-  TIMESTAMP=$(date '+%Y-%m-%d %H:%M')
-  git commit -m "update: $TIMESTAMP"
+  MSG=${1:-"update: $(date '+%Y-%m-%d %H:%M')"}
+  git commit -m "$MSG"
   git push origin main
-  echo "✅ Push completato: $TIMESTAMP"
+  echo "✅ Done: $MSG"
 fi
