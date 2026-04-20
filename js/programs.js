@@ -328,7 +328,8 @@ window.saveProgram = async function() {
     closeForm();
     await loadPrograms();
   } catch(e) {
-    showToast('Errore salvataggio', 'err');
+    console.error('Errore salvataggio programma:', e);
+    showToast('❌ Errore: ' + e.message, 'err');
   }
 };
 

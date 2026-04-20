@@ -2,6 +2,16 @@ import {
   db, USER_ID, collection, doc, getDoc, getDocs, setDoc, query, orderBy, limit
 } from './firebase-config.js';
 import { getTodayString, getDayOfWeek, showToast, showModal, fmtTimer, DAYS_IT, DAY_ORDER } from './app.js';
+
+function calcTotalVolume() {
+  return exState.reduce((total, ex) =>
+    total + ex.sets.reduce((s, set) => {
+      if (!set.done) return s;
+      const w = parseFloat(set.actual_weight) || 0;
+      const r = parseInt(set.actual_reps) || parseInt(set.reps_target) || 0;
+      return s + (w * r);
+    }, 0), 0);
+}
 import { AutoComplete, saveToLibrary } from './autocomplete.js';
 
 const TODAY = getTodayString();
@@ -80,16 +90,21 @@ window.startWithSession = async function(dayKey) {
   const session = programData?.schedule?.[dayKey];
   if (!session) { showToast('Sessione non trovata', 'err'); return; }
 
-  // Load prev session log for weight pre-fill
+  // Load last session for weight pre-fill (from last_sessions first, then daily_logs)
   let prevLog = null;
   try {
-    const snap = await getDocs(
-      query(collection(db, 'users', USER_ID, 'daily_logs'), orderBy('date', 'desc'), limit(20))
-    );
-    for (const d of snap.docs) {
-      const ld = d.data();
-      if (ld.date !== TODAY && ld.workout?.session_day === dayKey && ld.workout?.exercises?.length) {
-        prevLog = ld; break;
+    const lastSnap = await getDoc(doc(db, 'users', USER_ID, 'last_sessions', dayKey));
+    if (lastSnap.exists()) {
+      prevLog = { workout: { exercises: lastSnap.data().exercises } };
+    } else {
+      const snap = await getDocs(
+        query(collection(db, 'users', USER_ID, 'daily_logs'), orderBy('date', 'desc'), limit(20))
+      );
+      for (const d of snap.docs) {
+        const ld = d.data();
+        if (ld.date !== TODAY && ld.workout?.session_day === dayKey && ld.workout?.exercises?.length) {
+          prevLog = ld; break;
+        }
       }
     }
   } catch(e) {}
@@ -107,13 +122,19 @@ function buildExState(session, dayKey, prevLog) {
       name: ex.name,
       rest_seconds: ex.rest_seconds || 90,
       notes: ex.notes || '',
-      sets: Array.from({ length: setCount }, (_, i) => ({
-        reps_target:   ex.reps || '8',
-        ref_weight:    prevEx?.sets?.[i]?.weight ?? (ex.weight_per_set?.[i] || 0),
-        actual_weight: prevEx?.sets?.[i]?.weight ?? (ex.weight_per_set?.[i] || 0),
-        actual_reps:   '',
-        done:          false
-      }))
+      sets: Array.from({ length: setCount }, (_, i) => {
+        const prevSet = prevEx?.sets?.[i];
+        const w = prevSet?.weight ?? (ex.weight_per_set?.[i] || 0);
+        return {
+          reps_target:   ex.reps || '8',
+          ref_weight:    w,
+          actual_weight: w,
+          actual_reps:   '',
+          last_weight:   prevSet?.weight || 0,
+          last_reps:     prevSet?.reps   || ex.reps || '8',
+          done:          false
+        };
+      })
     };
   });
 }
@@ -209,7 +230,7 @@ function renderSetRow(ex, ei, si, s) {
           style="width:70px;padding:8px;text-align:center;font-size:15px;font-weight:700;
             background:var(--bg3);border:1px solid var(--border2);border-radius:8px;color:var(--t1);outline:none"
           oninput="onWeight(${ei},${si},this.value)">
-        ${s.ref_weight > 0 ? `<div class="set-prev">↩${s.ref_weight}kg</div>` : ''}
+        ${s.last_weight > 0 ? `<div class="set-prev">↩${s.last_weight}kg × ${s.last_reps}</div>` : s.ref_weight > 0 ? `<div class="set-prev">↩${s.ref_weight}kg</div>` : ''}
       </div>
       <input type="text" placeholder="${s.reps_target}" value="${s.actual_reps}"
         style="width:62px;padding:8px;text-align:center;font-size:15px;font-weight:700;
@@ -418,6 +439,25 @@ window.finishSession = async function() {
     await setDoc(doc(db, 'users', USER_ID, 'daily_logs', TODAY),
       { workout: workoutLog, date: TODAY }, { merge: true });
 
+    // Salva ultima sessione per pre-compilazione pesi
+    await setDoc(doc(db, 'users', USER_ID, 'last_sessions', sessionData.dayKey), {
+      session_day:      sessionData.dayKey,
+      session_name:     sessionData.name,
+      completed_date:   TODAY,
+      duration_seconds: sessionSec,
+      total_volume:     Math.round(calcTotalVolume()),
+      session_notes:    document.getElementById('s-notes')?.value || '',
+      exercises: exState.map(ex => ({
+        name: ex.name,
+        sets: ex.sets.map((s, i) => ({
+          set_num: i + 1,
+          weight:  parseFloat(s.actual_weight) || 0,
+          reps:    s.actual_reps || s.reps_target,
+          done:    s.done
+        }))
+      }))
+    }, { merge: false });
+
     for (const ex of exState) {
       await saveToLibrary('exercise_library', { name: ex.name, last_used: TODAY });
     }
@@ -425,7 +465,8 @@ window.finishSession = async function() {
     showToast('🏁 Sessione completata! 💪');
     setTimeout(() => { window.location.href = 'index.html'; }, 1500);
   } catch(e) {
-    showToast('Errore salvataggio', 'err');
+    console.error('Errore salvataggio sessione:', e);
+    showToast('Errore salvataggio: ' + e.message, 'err');
   }
 };
 

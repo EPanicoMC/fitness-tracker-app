@@ -290,7 +290,8 @@ window.saveDiet = async function() {
     closeDietForm();
     await loadDiets();
   } catch(e) {
-    showToast('Errore salvataggio', 'err');
+    console.error('Errore salvataggio dieta:', e);
+    showToast('❌ Errore: ' + e.message, 'err');
   }
 };
 

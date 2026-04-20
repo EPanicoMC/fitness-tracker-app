@@ -2,7 +2,7 @@ import {
   db, USER_ID, doc, getDoc, setDoc, getDocs, collection, query, orderBy, limit
 } from './firebase-config.js';
 import {
-  getTodayString, getDayOfWeek, formatDateIT, formatDateShort, addDays, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER, cleanOldLogs
+  getTodayString, getYesterdayString, getDayOfWeek, formatDateIT, formatDateShort, addDays, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER, cleanOldLogs
 } from './app.js';
 import { calcMacrosFromText } from './gemini.js';
 
@@ -50,9 +50,37 @@ function loadFromLocal() {
   }
 }
 
+// ── Day rollover auto-save ─────────────────────────────────
+async function checkDayRollover() {
+  const yesterday = getYesterdayString();
+  const yesterdayLS = localStorage.getItem('fittracker_home_' + yesterday);
+  if (!yesterdayLS) return;
+  try {
+    const data = JSON.parse(yesterdayLS);
+    const snap = await getDoc(doc(db, 'users', USER_ID, 'daily_logs', yesterday));
+    if (!snap.exists()) {
+      await setDoc(doc(db, 'users', USER_ID, 'daily_logs', yesterday), {
+        date: yesterday,
+        is_training_day: data.is_training_day || false,
+        steps: data.steps || null,
+        burned_kcal: data.burned_kcal || null,
+        daily_note: data.daily_note || '',
+        nutrition: { totals: data.nutrition_totals || {} },
+        auto_saved: true
+      }, { merge: false });
+      console.log('Auto-salvato giorno precedente:', yesterday);
+    }
+    localStorage.removeItem('fittracker_home_' + yesterday);
+  } catch(e) {
+    console.warn('Errore auto-save yesterday:', e);
+  }
+}
+
 // ── Init ───────────────────────────────────────────────────
 async function init() {
   document.getElementById('date-label').textContent = formatDateIT(TODAY);
+
+  await checkDayRollover();
 
   const [logSnap, progSnap, dietSnap, settSnap] = await Promise.all([
     getDoc(doc(db, 'users', USER_ID, 'daily_logs', TODAY)),
@@ -251,6 +279,26 @@ function calcTotals() {
 
 function updateNutritionTotals() { buildNutrition(); }
 
+// ── Macro compare helper ───────────────────────────────────
+function renderMacroCompare(target, actual) {
+  if (!actual || actual.kcal === 0) return '';
+  const deltaKcal = actual.kcal - target.kcal;
+  const deltaPro  = actual.protein - target.protein;
+  const deltaCarb = actual.carbs - target.carbs;
+  const deltaFat  = actual.fats - target.fats;
+  function fmtD(val, isKcal) {
+    const sign  = val >= 0 ? '+' : '';
+    const thr   = isKcal ? 50 : 5;
+    const color = Math.abs(val) <= thr ? 'var(--green)' : val > 0 ? 'var(--orange)' : 'var(--red)';
+    const unit  = isKcal ? 'kcal' : 'g';
+    return `<span style="color:${color};font-weight:700">${sign}${Math.round(val)}${unit}</span>`;
+  }
+  return `<div style="margin-top:8px;padding:8px 10px;background:rgba(255,255,255,.03);border-radius:8px;font-size:11px;color:var(--t2)">
+    <span style="font-weight:700;margin-right:8px">vs piano:</span>
+    Kcal ${fmtD(deltaKcal, true)} &nbsp; Pro ${fmtD(deltaPro)} &nbsp; Carb ${fmtD(deltaCarb)} &nbsp; Fat ${fmtD(deltaFat)}
+  </div>`;
+}
+
 // ── Meals ──────────────────────────────────────────────────
 function buildMeals() {
   const dayKey = isTrainingDay ? 'day_on' : 'day_off';
@@ -316,6 +364,12 @@ function renderMealRow(m, mi) {
         <p style="font-size:13px;color:var(--t2);line-height:1.6;margin-bottom:8px">${m.items || ''}</p>
         ${varsHtml}
         ${selVariantDetail}
+        ${logData.meals_state?.[mi]?.custom_macros
+          ? renderMacroCompare(
+              { kcal: m.kcal, protein: m.protein, carbs: m.carbs, fats: m.fats },
+              logData.meals_state[mi].custom_macros
+            )
+          : ''}
         <div style="margin-top:12px">
           <label class="fl">✏️ Ingredienti (modifica)</label>
           <textarea id="meal-txt-${mi}" class="fi" rows="2" style="font-size:13px">${m.items || ''}</textarea>
@@ -384,6 +438,10 @@ window.applyMealAI = function(mi, kcal, protein, carbs, fats) {
   mealStates[mi].protein = protein;
   mealStates[mi].carbs   = carbs;
   mealStates[mi].fats    = fats;
+  if (!logData.meals_state) logData.meals_state = {};
+  if (!logData.meals_state[mi]) logData.meals_state[mi] = {};
+  logData.meals_state[mi].custom_macros = { kcal, protein, carbs, fats };
+  saveToLocal();
   buildMeals();
   buildNutrition();
   showToast('Macro aggiornati ✅');
@@ -494,7 +552,7 @@ window.saveDay = async function() {
 
 // ── Recupero giorni passati ────────────────────────────────
 async function checkYesterdayLog() {
-  const yesterday = addDays(TODAY, -1);
+  const yesterday = getYesterdayString();
   const snap = await getDoc(doc(db, 'users', USER_ID, 'daily_logs', yesterday));
   if (snap.exists()) return;
 
