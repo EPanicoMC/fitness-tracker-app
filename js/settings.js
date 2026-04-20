@@ -4,16 +4,14 @@ import { showToast } from './app.js';
 let settings = {
   auto_save: false,
   auto_save_minutes: 5,
-  profile_name: '',
-  profile_weight: null,
-  profile_height: null
+  profile: { name: '', weight_target: null, height: null }
 };
 
 async function loadSettings() {
   try {
     const snap = await getDoc(doc(db, 'users', USER_ID, 'settings', 'app'));
     if (snap.exists()) settings = { ...settings, ...snap.data() };
-  } catch (e) { console.error('loadSettings', e); }
+  } catch(e) { console.error('loadSettings', e); }
 
   const toggle   = document.getElementById('auto-save-toggle');
   const interval = document.getElementById('auto-save-interval');
@@ -27,9 +25,10 @@ async function loadSettings() {
   const weight = document.getElementById('profile-weight');
   const height = document.getElementById('profile-height');
 
-  if (name   && settings.profile_name)   name.value   = settings.profile_name;
-  if (weight && settings.profile_weight) weight.value = settings.profile_weight;
-  if (height && settings.profile_height) height.value = settings.profile_height;
+  const profile = settings.profile || {};
+  if (name   && profile.name)          name.value   = profile.name;
+  if (weight && profile.weight_target) weight.value = profile.weight_target;
+  if (height && profile.height)        height.value = profile.height;
 }
 
 window._toggleAutoSave = function(on) {
@@ -45,17 +44,19 @@ window.saveSettings = async function() {
   const height   = document.getElementById('profile-height');
 
   settings = {
-    auto_save:           toggle?.checked   || false,
-    auto_save_minutes:   +(interval?.value || 5),
-    profile_name:        name?.value.trim() || '',
-    profile_weight:      weight?.value ? +weight.value : null,
-    profile_height:      height?.value ? +height.value : null
+    auto_save:         toggle?.checked || false,
+    auto_save_minutes: +(interval?.value || 5),
+    profile: {
+      name:          name?.value.trim() || '',
+      weight_target: weight?.value ? +weight.value : null,
+      height:        height?.value ? +height.value : null
+    }
   };
 
   try {
     await setDoc(doc(db, 'users', USER_ID, 'settings', 'app'), settings, { merge: true });
     showToast('Impostazioni salvate! ✅');
-  } catch (e) {
+  } catch(e) {
     console.error('saveSettings', e);
     showToast('Errore nel salvataggio', 'err');
   }

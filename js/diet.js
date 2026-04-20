@@ -3,18 +3,12 @@ import {
 } from './firebase-config.js';
 import { showToast, showModal, DEFAULT_TARGETS } from './app.js';
 
-const MEAL_TYPES = ['colazione','pranzo','cena','spuntino'];
-const MEAL_ICONS = { colazione:'🌅', pranzo:'☀️', cena:'🌙', spuntino:'🍎' };
+const MEAL_TYPES  = ['colazione','pranzo','cena','spuntino'];
+const MEAL_ICONS  = { colazione:'🌅', pranzo:'☀️', cena:'🌙', spuntino:'🍎' };
 
 let plans     = [];
 let editingId = null;
-
-// formPlan holds the current form state
-let formPlan = {
-  name: '',
-  day_on:  { kcal:0, protein:0, carbs:0, fats:0, meals:[] },
-  day_off: { kcal:0, protein:0, carbs:0, fats:0, meals:[] }
-};
+let formPlan  = {};
 
 function emptyPlan() {
   return {
@@ -24,17 +18,16 @@ function emptyPlan() {
   };
 }
 
-// ─── LOAD & RENDER ────────────────────────────────────────────────────────────
-
+// ── Load & render ──────────────────────────────────────────────────────────────
 async function loadDietPlans() {
   const list = document.getElementById('diet-list');
   list.innerHTML = '<div class="spin-wrap"></div>';
   try {
     const snap = await getDocs(collection(db, 'users', USER_ID, 'diet_plans'));
     plans = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    plans.sort((a,b) => (b.active?1:0) - (a.active?1:0));
+    plans.sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0));
     renderList();
-  } catch (e) {
+  } catch(e) {
     console.error(e);
     list.innerHTML = '<p style="color:var(--t2);text-align:center;padding:24px">Errore caricamento</p>';
   }
@@ -54,9 +47,7 @@ function renderList() {
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <div style="flex:1;min-width:0">
             <div style="font-size:17px;font-weight:700;margin-bottom:4px">${p.name}</div>
-            <div style="font-size:12px;color:var(--t2)">
-              ON: ${onKcal} kcal · OFF: ${offKcal} kcal
-            </div>
+            <div style="font-size:12px;color:var(--t2)">ON: ${onKcal} kcal · OFF: ${offKcal} kcal</div>
           </div>
           <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;margin-left:8px">
             ${p.active ? '<span class="badge badge-g">✓ Attivo</span>' : ''}
@@ -90,12 +81,13 @@ function renderList() {
               ${(dd.meals||[]).map(m => `
                 <div class="meal-item">
                   <div>
-                    <div class="meal-name">${MEAL_ICONS[m.type]||''} ${m.name}</div>
+                    <div class="meal-name">${MEAL_ICONS[m.type]||''} ${m.label||m.name||''}</div>
+                    ${m.time ? `<div style="font-size:10px;color:var(--t3)">${m.time}</div>` : ''}
                     <div class="meal-macro">P:${m.protein||0}g C:${m.carbs||0}g F:${m.fats||0}g</div>
                   </div>
                   <span class="meal-kcal">${m.kcal||0}</span>
                 </div>`).join('')}`;
-          }).join('<hr style="border:none;border-top:1px solid var(--border);margin:14px 0">')}
+          }).join('<hr>')}
         </div>
       </div>`;
   }).join('');
@@ -117,17 +109,21 @@ window._activateDiet = async function(id) {
 };
 
 window._deleteDiet = function(id) {
-  showModal('Elimina piano', 'Vuoi eliminare questo piano alimentare?', 'Elimina', async () => {
-    try {
-      await deleteDoc(doc(db, 'users', USER_ID, 'diet_plans', id));
-      showToast('Piano eliminato');
-      await loadDietPlans();
-    } catch { showToast('Errore', 'err'); }
+  showModal({
+    title: 'Elimina piano',
+    text:  'Vuoi eliminare questo piano alimentare?',
+    confirmLabel: 'Elimina',
+    onConfirm: async () => {
+      try {
+        await deleteDoc(doc(db, 'users', USER_ID, 'diet_plans', id));
+        showToast('Piano eliminato');
+        await loadDietPlans();
+      } catch { showToast('Errore', 'err'); }
+    }
   });
 };
 
-// ─── FORM ─────────────────────────────────────────────────────────────────────
-
+// ── Form ───────────────────────────────────────────────────────────────────────
 window.showDietForm = function() {
   editingId = null;
   formPlan  = emptyPlan();
@@ -145,7 +141,7 @@ window._editDiet = function(id) {
 window.hideDietForm = function() {
   document.getElementById('diet-form-wrap').style.display = 'none';
   document.getElementById('diet-list').style.display = 'block';
-  document.getElementById('add-diet-btn').style.display = 'block';
+  document.getElementById('add-diet-btn').style.display = '';
 };
 
 function renderForm(plan) {
@@ -161,7 +157,7 @@ function renderForm(plan) {
     <div class="card">
       <div class="fg">
         <label class="fl">Nome piano</label>
-        <input class="fi" id="df-name" placeholder="Es. Bulk 2025…" value="${plan?.name||''}">
+        <input class="fi" id="df-name" placeholder="Es. Bulk 2025…" value="${plan?.name || ''}">
       </div>
     </div>
     ${renderDaySection('day_on',  '💪 Giorno ON (allenamento)')}
@@ -174,7 +170,6 @@ function renderForm(plan) {
 
 function renderDaySection(dk, label) {
   const d = formPlan[dk];
-  const mealsHtml = (d.meals||[]).map((m,i) => renderMealRow(dk,i,m)).join('');
   const tots = calcDayTotals(dk);
   const borderCol = dk === 'day_on' ? 'var(--green)' : 'var(--t3)';
   return `
@@ -206,12 +201,11 @@ function renderDaySection(dk, label) {
             oninput="window._updTarget('${dk}','fats',this.value)">
         </div>
       </div>
-      <!-- Totali pasti -->
       <div id="tots-${dk}" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;font-size:12px;color:var(--t2)">
         ${renderTotLine(tots)}
       </div>
       <p class="sdiv" style="margin-top:0">Pasti</p>
-      <div id="meals-wrap-${dk}">${mealsHtml}</div>
+      <div id="meals-wrap-${dk}">${(d.meals||[]).map((m,i) => renderMealRow(dk,i,m)).join('')}</div>
       <button class="btn btn-ghost btn-sm" onclick="window._addMeal('${dk}')" style="margin-top:8px">＋ Pasto</button>
     </div>`;
 }
@@ -234,6 +228,7 @@ function calcDayTotals(dk) {
 }
 
 function renderMealRow(dk, mi, m) {
+  const variantsText = (m.variants || []).join('\n');
   return `
     <div class="ex-card" id="meal-row-${dk}-${mi}">
       <div class="ex-head">
@@ -243,10 +238,22 @@ function renderMealRow(dk, mi, m) {
         </select>
         <button class="btn-del" onclick="window._removeMeal('${dk}',${mi})">🗑️</button>
       </div>
+      <div class="grid2">
+        <div class="fg">
+          <label class="fl">Label / Nome</label>
+          <input class="fi" placeholder="Es. Pranzo…" value="${m.label||''}"
+            oninput="window._updMeal('${dk}',${mi},'label',this.value)">
+        </div>
+        <div class="fg">
+          <label class="fl">Orario</label>
+          <input type="time" class="fi" value="${m.time||''}"
+            oninput="window._updMeal('${dk}',${mi},'time',this.value)">
+        </div>
+      </div>
       <div class="fg">
-        <label class="fl">Nome pasto</label>
-        <input class="fi" placeholder="Es. Pollo con riso…" value="${m.name||''}"
-          oninput="window._updMeal('${dk}',${mi},'name',this.value)">
+        <label class="fl">Alimenti</label>
+        <input class="fi" placeholder="Es. Pollo 150g + riso 100g…" value="${m.items||''}"
+          oninput="window._updMeal('${dk}',${mi},'items',this.value)">
       </div>
       <div class="grid4">
         <div class="fg" style="margin:0">
@@ -274,24 +281,32 @@ function renderMealRow(dk, mi, m) {
             oninput="window._updMeal('${dk}',${mi},'kcal',+this.value)">
         </div>
       </div>
+      <div class="fg" style="margin-top:4px">
+        <label class="fl">Varianti carboidrati (una per riga)</label>
+        <textarea class="notes-area" placeholder="Es. Riso 100g&#10;Pasta 90g&#10;Patate 200g"
+          oninput="window._updVariants('${dk}',${mi},this.value)">${variantsText}</textarea>
+      </div>
     </div>`;
 }
 
-// Field updates
 window._updTarget = function(dk, field, val) {
   if (formPlan[dk]) formPlan[dk][field] = +val || 0;
 };
 
 window._updMeal = function(dk, mi, field, val) {
   const m = formPlan[dk]?.meals?.[mi];
-  if (m) { m[field] = val; updateDayTots(dk); }
+  if (m) { m[field] = val; if (field === 'kcal') updateDayTots(dk); }
+};
+
+window._updVariants = function(dk, mi, text) {
+  const m = formPlan[dk]?.meals?.[mi];
+  if (m) m.variants = text.split('\n').map(l => l.trim()).filter(Boolean);
 };
 
 window._updMacro = function(dk, mi, field, val) {
   const m = formPlan[dk]?.meals?.[mi];
   if (!m) return;
   m[field] = parseFloat(val) || 0;
-  // Auto-calc kcal
   const kcal = Math.round((m.protein||0)*4 + (m.carbs||0)*4 + (m.fats||0)*9);
   m.kcal = kcal;
   const el = document.getElementById(`kcal-${dk}-${mi}`);
@@ -305,18 +320,16 @@ function updateDayTots(dk) {
   if (el) el.innerHTML = renderTotLine(tots);
 }
 
-// Add / remove meals
 window._addMeal = function(dk) {
   if (!formPlan[dk]) return;
-  const m = { type:'colazione', name:'', kcal:0, protein:0, carbs:0, fats:0 };
+  const m = { type:'colazione', label:'', time:'', items:'', kcal:0, protein:0, carbs:0, fats:0, variants:[] };
   formPlan[dk].meals.push(m);
   const wrap = document.getElementById(`meals-wrap-${dk}`);
   if (wrap) wrap.insertAdjacentHTML('beforeend', renderMealRow(dk, formPlan[dk].meals.length-1, m));
 };
 
 window._removeMeal = function(dk, mi) {
-  if (!formPlan[dk]) return;
-  formPlan[dk].meals.splice(mi, 1);
+  formPlan[dk]?.meals?.splice(mi, 1);
   reRenderMeals(dk);
 };
 
@@ -326,7 +339,6 @@ function reRenderMeals(dk) {
   updateDayTots(dk);
 }
 
-// Save
 window.saveDietForm = async function() {
   const name = document.getElementById('df-name')?.value.trim();
   if (!name) { showToast('Inserisci il nome del piano', 'err'); return; }
@@ -347,11 +359,10 @@ window.saveDietForm = async function() {
     }
     window.hideDietForm();
     await loadDietPlans();
-  } catch (e) {
+  } catch(e) {
     console.error(e);
     showToast('Errore nel salvataggio', 'err');
   }
 };
 
-// ─── INIT ─────────────────────────────────────────────────────────────────────
 loadDietPlans();

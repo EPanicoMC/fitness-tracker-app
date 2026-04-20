@@ -3,19 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FitTracker – Dieta</title>
+  <title>FitTracker – Check-in</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 <div class="wrap">
 
   <div class="ph">
-    <h1>🥗 Piano Alimentare</h1>
-    <button class="btn btn-v btn-sm" id="add-diet-btn" onclick="window.showDietForm()">＋ Nuovo</button>
+    <h1>📏 Check-in</h1>
+    <button class="btn btn-v btn-sm" onclick="window.showCheckForm()">＋ Nuovo</button>
   </div>
 
-  <div id="diet-list"><div class="spin-wrap"></div></div>
-  <div id="diet-form-wrap" style="display:none"></div>
+  <div id="check-list"><div class="spin-wrap"></div></div>
+  <div id="check-form-wrap" style="display:none"></div>
 
 </div>
 
@@ -23,10 +23,10 @@
   <a href="index.html"><span class="ni">🏠</span><span>Home</span></a>
   <a href="live.html" class="nav-workout"><span class="ni">▶️</span><span>Live</span></a>
   <a href="programs.html"><span class="ni">💪</span><span>Schede</span></a>
-  <a href="diet.html" class="active"><span class="ni">🥗</span><span>Dieta</span></a>
+  <a href="diet.html"><span class="ni">🥗</span><span>Dieta</span></a>
   <a href="settings.html"><span class="ni">⚙️</span><span>Settings</span></a>
 </nav>
 
-<script type="module" src="js/diet.js"></script>
+<script type="module" src="js/checks.js"></script>
 </body>
 </html>

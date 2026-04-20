@@ -27,7 +27,7 @@
         <span class="tgl-s"></span>
       </label>
     </div>
-    <div class="fg" id="interval-wrap">
+    <div class="fg" id="interval-wrap" style="display:none">
       <label class="fl">Intervallo salvataggio</label>
       <select class="fi" id="auto-save-interval">
         <option value="1">1 minuto</option>
@@ -48,7 +48,7 @@
     <div class="grid2">
       <div class="fg">
         <label class="fl">Peso target (kg)</label>
-        <input type="number" class="fi" id="profile-weight" placeholder="75" step="0.1">
+        <input type="number" class="fi" id="profile-weight" placeholder="78" step="0.1">
       </div>
       <div class="fg">
         <label class="fl">Altezza (cm)</label>
@@ -61,10 +61,26 @@
     💾 Salva Impostazioni
   </button>
 
+  <!-- CHECK-IN -->
+  <div class="card">
+    <span class="clabel">Monitoraggio corpo</span>
+    <a href="checks.html" class="btn btn-ghost" style="text-decoration:none;display:flex;align-items:center;justify-content:center;gap:8px">
+      📏 Vai ai Check-in
+    </a>
+  </div>
+
+  <!-- SEED -->
+  <div class="card">
+    <span class="clabel">Database</span>
+    <a href="seed.html" class="btn btn-ghost" style="text-decoration:none;display:flex;align-items:center;justify-content:center;gap:8px;color:var(--t2)">
+      🌱 Seed dati iniziali
+    </a>
+  </div>
+
   <!-- INFO APP -->
   <div class="card" style="text-align:center">
     <p style="font-size:22px;margin-bottom:8px">🏋️</p>
-    <p style="font-weight:800;font-size:18px;margin-bottom:4px">FitTracker v2.0</p>
+    <p style="font-weight:800;font-size:18px;margin-bottom:4px">FitTracker v3.0</p>
     <p style="font-size:13px;color:var(--t2)">Il tuo diario personale fitness</p>
     <p style="font-size:12px;color:var(--t3);margin-top:12px">Firebase · HTML · CSS · JavaScript</p>
   </div>
@@ -73,6 +89,7 @@
 
 <nav class="bnav">
   <a href="index.html"><span class="ni">🏠</span><span>Home</span></a>
+  <a href="live.html" class="nav-workout"><span class="ni">▶️</span><span>Live</span></a>
   <a href="programs.html"><span class="ni">💪</span><span>Schede</span></a>
   <a href="diet.html"><span class="ni">🥗</span><span>Dieta</span></a>
   <a href="settings.html" class="active"><span class="ni">⚙️</span><span>Settings</span></a>
