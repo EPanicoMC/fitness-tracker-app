@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <title>FitTracker – Genera Icone</title>
+  <style>
+    body { background:#07070f; color:#eeeeff; font-family:sans-serif; display:flex; flex-direction:column; align-items:center; padding:40px; gap:20px; }
+    canvas { border-radius:20%; display:block; }
+    button { background:#7c6fff; color:#fff; border:none; padding:12px 24px; border-radius:12px; font-size:14px; font-weight:700; cursor:pointer; }
+    .btns { display:flex; gap:12px; }
+  </style>
+</head>
+<body>
+  <h2>🎨 Genera Icone FitTracker</h2>
+  <canvas id="cv" width="512" height="512"></canvas>
+  <div class="btns">
+    <button onclick="download(192)">⬇️ Scarica 192px</button>
+    <button onclick="download(512)">⬇️ Scarica 512px</button>
+  </div>
+
+  <script>
+    const cv = document.getElementById('cv');
+    const ctx = cv.getContext('2d');
+
+    function draw(size) {
+      const s = size || 512;
+      cv.width = s; cv.height = s;
+
+      const grad = ctx.createLinearGradient(0, 0, s, s);
+      grad.addColorStop(0, '#5c4fff');
+      grad.addColorStop(1, '#7c6fff');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.roundRect(0, 0, s, s, s * 0.22);
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `900 ${s * 0.44}px Outfit, Arial Black, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('FT', s / 2, s / 2 + s * 0.03);
+    }
+
+    draw(512);
+
+    function download(size) {
+      draw(size);
+      const a = document.createElement('a');
+      a.download = `icon-${size}.png`;
+      a.href = cv.toDataURL('image/png');
+      a.click();
+      draw(512);
+    }
+  </script>
+</body>
+</html>

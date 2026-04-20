@@ -1,36 +1,24 @@
 import {
-  db, USER_ID, doc, getDoc, setDoc, collection, getDocs, query, orderBy
+  db, USER_ID, doc, getDoc, setDoc, getDocs, collection, query, orderBy, limit
 } from './firebase-config.js';
-import { limit } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 import {
-  getTodayString, getDayOfWeek, formatDateIT,
-  showToast, setWidth, DEFAULT_TARGETS
+  getTodayString, getDayOfWeek, formatDateIT, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER
 } from './app.js';
+import { calcMacrosFromText } from './gemini.js';
 
 const TODAY = getTodayString();
-let logData = {
-  date: TODAY,
-  body_weight: null,
-  steps: null,
-  note: '',
-  day_override: null,
-  workout: { done: false, exercises: [] },
-  nutrition: { meals: [], totals: { kcal:0, protein:0, carbs:0, fats:0 } }
-};
-let program     = null;
-let dietPlan    = null;
-let settings    = null;
-let prevWeekLog = null;
-let autoTimer   = null;
+let logData = {};
+let activeDiet = null;
+let activeProgram = null;
+let appSettings = null;
+let autoSaveTimer = null;
+let isTrainingDay = false;
+let mealStates = [];
 
-// ── Init ───────────────────────────────────────────────────────────────────────
+// ── Init ───────────────────────────────────────────────────
 async function init() {
-  document.getElementById('today-label').textContent = formatDateIT(TODAY);
-  await loadAll();
-  setupAutoSave();
-}
+  document.getElementById('date-label').textContent = formatDateIT(TODAY);
 
-async function loadAll() {
   const [logSnap, progSnap, dietSnap, settSnap] = await Promise.all([
     getDoc(doc(db, 'users', USER_ID, 'daily_logs', TODAY)),
     getDocs(collection(db, 'users', USER_ID, 'programs')),
@@ -38,377 +26,345 @@ async function loadAll() {
     getDoc(doc(db, 'users', USER_ID, 'settings', 'app'))
   ]);
 
-  if (logSnap.exists()) {
-    logData = { ...logData, ...logSnap.data() };
-    if (logData.body_weight) document.getElementById('body-weight').value = logData.body_weight;
-    if (logData.steps)       document.getElementById('steps-input').value  = logData.steps;
-    if (logData.note)        document.getElementById('daily-note').value    = logData.note;
+  logData = logSnap.exists() ? logSnap.data() : {};
+  activeProgram = progSnap.docs.find(d => d.data().active)?.data() || null;
+  activeDiet    = dietSnap.docs.find(d => d.data().active)?.data() || null;
+  appSettings   = settSnap.exists() ? settSnap.data() : {};
+
+  const dow = getDayOfWeek(TODAY);
+  const progDay = activeProgram?.schedule?.[dow];
+  if (logData.day_override != null) {
+    isTrainingDay = logData.day_override;
+  } else {
+    isTrainingDay = !!progDay;
   }
 
-  program  = progSnap.docs.find(d => d.data().active)?.data() || null;
-  dietPlan = dietSnap.docs.find(d => d.data().active)?.data() || null;
-  settings = settSnap.exists() ? settSnap.data() : null;
+  buildStreak();
+  buildDayType();
+  buildNutrition();
+  buildMeals();
+  buildWorkout();
+  buildStats();
 
-  await loadPrevWeekLog();
-  renderWorkoutCard();
-  renderNutritionCard();
-  updateRing();
+  if (appSettings?.auto_save) {
+    setupAutoSave(appSettings.auto_save_minutes || 5);
+  }
 }
 
-async function loadPrevWeekLog() {
-  try {
-    const snap = await getDocs(
-      query(collection(db, 'users', USER_ID, 'daily_logs'), orderBy('date', 'desc'), limit(14))
-    );
-    const dow = getDayOfWeek(TODAY);
-    for (const d of snap.docs) {
-      const ld = d.data();
-      if (ld.date !== TODAY && getDayOfWeek(ld.date) === dow && ld.workout?.exercises?.length) {
-        prevWeekLog = ld;
-        break;
+// ── Streak ─────────────────────────────────────────────────
+function buildStreak() {
+  const streak = logData.streak || 1;
+  const box = document.getElementById('streak-box');
+  box.innerHTML = `<div class="streak">🔥 ${streak} giorni</div>`;
+}
+
+// ── Day type ───────────────────────────────────────────────
+function buildDayType() {
+  const dow = getDayOfWeek(TODAY);
+  const session = activeProgram?.schedule?.[dow];
+  const lbl = document.getElementById('dtype-label');
+  const sub = document.getElementById('dtype-sub');
+  const tgl = document.getElementById('override-tgl');
+
+  if (isTrainingDay) {
+    lbl.textContent = `💪 Giorno ON`;
+    sub.textContent = session?.name || 'Allenamento';
+    tgl.checked = true;
+  } else {
+    lbl.textContent = `😴 Giorno OFF — Riposo`;
+    sub.textContent = 'Nessuna sessione programmata';
+    tgl.checked = false;
+  }
+
+  tgl.onchange = function() {
+    const newVal = this.checked;
+    if (newVal && !isTrainingDay) {
+      const days = DAY_ORDER.filter(d => activeProgram?.schedule?.[d]);
+      if (days.length) {
+        showModal({
+          title: 'Scegli la sessione',
+          text: days.map(d => activeProgram.schedule[d].name).join('<br>'),
+          confirmLabel: 'Allenati',
+          confirmClass: 'btn-o',
+          onConfirm: () => {
+            isTrainingDay = true;
+            logData.day_override = true;
+            buildDayType();
+            buildNutrition();
+            buildWorkout();
+          },
+          onCancel: () => { this.checked = false; }
+        });
+        return;
       }
     }
-  } catch(e) { console.warn('prevWeekLog', e); }
-}
-
-// ── Day type ───────────────────────────────────────────────────────────────────
-function isTrainingDay() {
-  if (logData.day_override === true)  return true;
-  if (logData.day_override === false) return false;
-  return !!(program?.schedule?.[getDayOfWeek(TODAY)]);
-}
-
-function updateDayLabel() {
-  const training = isTrainingDay();
-  const label  = document.getElementById('day-type-label');
-  const toggle = document.getElementById('day-override-toggle');
-  if (label)  label.textContent = training ? '💪 ON' : '😴 OFF';
-  if (toggle) toggle.checked = logData.day_override !== null ? logData.day_override : training;
-}
-
-window._onOverrideChange = function(checked) {
-  logData.day_override = checked;
-  renderWorkoutCard();
-  renderNutritionCard();
-  updateRing();
-};
-window._onBodyWeightChange = function(v) { logData.body_weight = v ? +v : null; };
-window._onStepsChange      = function(v) { logData.steps = v ? +v : null; };
-window._onNoteChange       = function(v) { logData.note = v; };
-
-// ── Workout card ───────────────────────────────────────────────────────────────
-function renderWorkoutCard() {
-  const el = document.getElementById('workout-card');
-  updateDayLabel();
-
-  if (!isTrainingDay()) {
-    el.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-        <span class="clabel" style="margin:0">🏋️ Allenamento</span>
-        <span class="badge badge-o">😴 Riposo</span>
-      </div>
-      <p style="font-size:13px;color:var(--t2);margin-top:8px">Giorno di riposo. Recupera bene!</p>
-      <button class="btn btn-ghost btn-sm" style="margin-top:12px;width:auto"
-        onclick="window._forceTraining()">Voglio allenarmi lo stesso</button>`;
-    return;
-  }
-
-  const dow     = getDayOfWeek(TODAY);
-  const session = program?.schedule?.[dow] || null;
-
-  if (session && logData.workout.exercises.length === 0) {
-    logData.workout.exercises = (session.exercises || []).map(ex => {
-      const setCount = typeof ex.sets === 'number' ? ex.sets : (ex.sets?.length || 3);
-      return {
-        name:         ex.name,
-        done:         false,
-        is_cardio:    false,
-        rest_seconds: ex.rest_seconds || 90,
-        notes:        ex.notes || '',
-        show_notes:   false,
-        sets: Array.from({ length: setCount }, (_, i) => ({
-          reps:   ex.reps || '8',
-          weight: getPrevWeight(ex.name) ?? (ex.weight_per_set?.[i] || 0),
-          done:   false
-        }))
-      };
-    });
-    if (session.cardio?.enabled) {
-      logData.workout.exercises.push({
-        name: `🏃 ${session.cardio.type} (${session.cardio.duration_minutes} min)`,
-        done: false, is_cardio: true, rest_seconds: 0, notes: session.cardio.notes || '',
-        show_notes: false, sets: []
-      });
-    }
-  }
-
-  const sessionName = session?.name || 'Allenamento libero';
-  const timeMins    = session?.time_minutes || '';
-  const doneCount   = logData.workout.exercises.filter(e => e.done).length;
-  const totalEx     = logData.workout.exercises.length;
-
-  el.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-      <div>
-        <span class="clabel" style="margin:0">🏋️ Allenamento</span>
-        <div style="font-size:15px;font-weight:800;margin-top:4px">${sessionName}</div>
-        ${timeMins ? `<div style="font-size:11px;color:var(--t2);margin-top:2px">⏱ ~${timeMins} min</div>` : ''}
-      </div>
-      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
-        <span class="badge badge-v">${doneCount}/${totalEx}</span>
-        <a href="session.html" class="btn btn-g btn-sm" style="text-decoration:none;font-size:12px">▶ Allenati</a>
-      </div>
-    </div>
-    <div id="ex-list">${logData.workout.exercises.map((ex, ei) => renderExRow(ex, ei)).join('')}</div>`;
-}
-
-function getPrevWeight(name) {
-  const prevEx = prevWeekLog?.workout?.exercises?.find(e => e.name === name);
-  if (!prevEx) return null;
-  const weights = prevEx.sets?.map(s => s.weight).filter(w => w > 0);
-  return weights?.length ? weights[0] : null;
-}
-
-function renderExRow(ex, ei) {
-  const prevEx = prevWeekLog?.workout?.exercises?.find(e => e.name === ex.name);
-  const prevInfo = prevEx
-    ? `<span style="font-size:10px;color:var(--t3)">↩ ${prevEx.sets?.map(s=>s.weight||'bw').join('/')}kg</span>`
-    : '';
-  return `
-    <div class="ex-card ${ex.done ? 'card-green' : ''}" id="ex-card-${ei}">
-      <div class="ex-head" onclick="window._toggleExDone(${ei})" style="cursor:pointer">
-        <div style="flex:1">
-          <div class="ex-name">${ex.is_cardio ? '🏃 ' : ''}${ex.name}</div>
-          ${prevInfo}
-        </div>
-        <div style="display:flex;align-items:center;gap:8px">
-          ${ex.notes ? `<button class="btn-icon" style="width:30px;height:30px;font-size:13px"
-            onclick="event.stopPropagation();window._toggleNotes(${ei})">📝</button>` : ''}
-          <div style="width:28px;height:28px;border-radius:50%;
-            border:2px solid ${ex.done ? 'var(--green)' : 'var(--border2)'};
-            background:${ex.done ? 'var(--green)' : 'transparent'};
-            display:flex;align-items:center;justify-content:center;
-            font-size:14px;color:${ex.done ? '#fff' : 'var(--t3)'}">
-            ${ex.done ? '✓' : ''}
-          </div>
-        </div>
-      </div>
-      ${ex.notes && ex.show_notes
-        ? `<div style="font-size:12px;color:var(--t2);background:var(--bg4);border-radius:8px;padding:8px 10px;margin-bottom:10px">📝 ${ex.notes}</div>`
-        : ''}
-      ${ex.is_cardio ? '' : ex.sets.map((s, si) => renderSetRow(ei, si, s)).join('')}
-    </div>`;
-}
-
-function renderSetRow(ei, si, s) {
-  return `
-    <div class="set-row">
-      <span class="set-num">${si+1}</span>
-      <input type="number" class="fi" step="0.5" min="0" placeholder="kg"
-        value="${s.weight || ''}"
-        style="width:72px;padding:8px;text-align:center;font-size:14px;font-weight:700"
-        oninput="window._updSet(${ei},${si},'weight',+this.value)">
-      <span style="font-size:12px;color:var(--t2)">kg</span>
-      <span style="font-size:12px;color:var(--t3);margin:0 4px">×</span>
-      <input type="number" class="fi" step="1" min="0" placeholder="reps"
-        value="${s.reps || ''}"
-        style="width:64px;padding:8px;text-align:center;font-size:14px;font-weight:700"
-        oninput="window._updSet(${ei},${si},'reps',+this.value)">
-    </div>`;
-}
-
-window._toggleExDone = function(ei) {
-  logData.workout.exercises[ei].done = !logData.workout.exercises[ei].done;
-  rerenderExList();
-};
-window._toggleNotes = function(ei) {
-  logData.workout.exercises[ei].show_notes = !logData.workout.exercises[ei].show_notes;
-  rerenderExList();
-};
-window._forceTraining = function() {
-  logData.day_override = true;
-  document.getElementById('day-override-toggle').checked = true;
-  renderWorkoutCard();
-  updateRing();
-};
-window._updSet = function(ei, si, field, val) {
-  const s = logData.workout.exercises[ei]?.sets?.[si];
-  if (s) s[field] = val;
-};
-
-function rerenderExList() {
-  const el = document.getElementById('ex-list');
-  if (el) el.innerHTML = logData.workout.exercises.map((ex, ei) => renderExRow(ex, ei)).join('');
-  updateRing();
-}
-
-// ── Nutrition card ─────────────────────────────────────────────────────────────
-function renderNutritionCard() {
-  const el       = document.getElementById('nutrition-card');
-  const training = isTrainingDay();
-  const dayKey   = training ? 'day_on' : 'day_off';
-  const plan     = dietPlan?.[dayKey];
-  const targets  = {
-    kcal:    plan?.kcal    || DEFAULT_TARGETS[training ? 'kcal_on' : 'kcal_off'],
-    protein: plan?.protein || DEFAULT_TARGETS[training ? 'pro_on' : 'pro_off'],
-    carbs:   plan?.carbs   || DEFAULT_TARGETS[training ? 'carb_on' : 'carb_off'],
-    fats:    plan?.fats    || DEFAULT_TARGETS[training ? 'fat_on' : 'fat_off']
+    isTrainingDay = newVal;
+    logData.day_override = newVal;
+    buildDayType();
+    buildNutrition();
+    buildWorkout();
   };
+}
 
-  if (logData.nutrition.meals.length === 0 && plan?.meals?.length) {
-    logData.nutrition.meals = plan.meals.map(m => ({ ...m, eaten: false, active_variant: null }));
+// ── Nutrition ──────────────────────────────────────────────
+function buildNutrition() {
+  const dayKey = isTrainingDay ? 'day_on' : 'day_off';
+  const plan   = activeDiet?.[dayKey] || {};
+  const tgt    = { kcal: plan.kcal||2700, protein: plan.protein||190, carbs: plan.carbs||300, fats: plan.fats||60 };
+  const tots   = calcTotals();
+
+  setT('kcal-now', Math.round(tots.kcal));
+  setT('kcal-tgt', tgt.kcal);
+  setW('pb-kcal', (tots.kcal / tgt.kcal) * 100);
+  setT('mc-pro',  Math.round(tots.protein) + 'g');
+  setT('mc-carb', Math.round(tots.carbs) + 'g');
+  setT('mc-fat',  Math.round(tots.fats) + 'g');
+
+  const rem = tgt.kcal - tots.kcal;
+  const deltaEl = document.getElementById('kcal-delta');
+  if (rem >= 0) {
+    deltaEl.style.color = 'var(--green)';
+    deltaEl.textContent = `Rimangono ${Math.round(rem)} kcal`;
+  } else {
+    deltaEl.style.color = 'var(--orange)';
+    deltaEl.textContent = `⚠️ +${Math.round(-rem)} kcal in eccesso`;
   }
 
-  const tots = calcTotals();
-  logData.nutrition.totals = tots;
-
-  el.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-      <span class="clabel" style="margin:0">🥗 Nutrizione</span>
-      <span class="badge badge-${training ? 'g' : 'o'}">${training ? '💪 ON' : '😴 OFF'}</span>
-    </div>
-    <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:4px">
-      <span class="kcal-big" id="kcal-now">${Math.round(tots.kcal)}</span>
-      <span style="font-size:16px;color:var(--t2)">/ ${targets.kcal} kcal</span>
-    </div>
-    <div class="pbar-bg"><div class="pbar-fill" id="kcal-bar" style="width:${pct(tots.kcal, targets.kcal)}%"></div></div>
-    <div class="grid3" style="margin:12px 0">
-      ${renderMacroChip('chip-pro',  tots.protein, targets.protein, 'Pro',  'var(--blue)',   'b')}
-      ${renderMacroChip('chip-carb', tots.carbs,   targets.carbs,   'Carb', 'var(--yellow)', 'y')}
-      ${renderMacroChip('chip-fat',  tots.fats,    targets.fats,    'Fat',  'var(--orange)', 'o')}
-    </div>
-    <div class="sdiv" style="margin-top:0">Pasti</div>
-    ${logData.nutrition.meals.map((m, mi) => renderMealCheck(m, mi)).join('')}
-    ${!logData.nutrition.meals.length ? `<p style="color:var(--t2);font-size:13px;text-align:center;padding:16px 0">Nessun piano dieta attivo</p>` : ''}`;
-}
-
-function renderMacroChip(id, val, max, label, color, cls) {
-  return `
-    <div style="text-align:center">
-      <div style="font-size:15px;font-weight:800;color:${color}" id="${id}">${Math.round(val)}g</div>
-      <div style="font-size:10px;color:var(--t2)">${label} /${max}g</div>
-      <div class="pbar-bg"><div class="pbar-fill ${cls}" style="width:${pct(val, max)}%"></div></div>
+  const pct = Math.round((tots.kcal / tgt.kcal) * 100);
+  const cring = document.getElementById('cring-box');
+  const C = 125.7;
+  const off = C - (C * Math.min(pct, 100) / 100);
+  cring.innerHTML = `
+    <div class="cring">
+      <svg viewBox="0 0 50 50">
+        <circle cx="25" cy="25" r="20" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="4"/>
+        <circle cx="25" cy="25" r="20" fill="none" stroke="var(--accent)" stroke-width="4"
+          stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${off}"/>
+      </svg>
+      <div class="cring-n" style="font-size:13px">${pct}%</div>
     </div>`;
 }
-
-function renderMealCheck(m, mi) {
-  const variantsHtml = m.variants?.length ? `
-    <div class="variant-chips">
-      ${m.variants.map((v, vi) => {
-        const label = typeof v === 'object' ? v.label : v.split('(')[0].trim();
-        return `<div class="variant-chip ${m.active_variant === vi ? 'active' : ''}"
-          onclick="window._selectVariant(${mi},${vi})">${label}</div>`;
-      }).join('')}
-    </div>` : '';
-
-  return `
-    <div class="meal-check">
-      <div class="meal-check-box ${m.eaten ? 'done' : ''}" onclick="window._toggleMeal(${mi})">
-        ${m.eaten ? '✓' : ''}
-      </div>
-      <div class="meal-check-info">
-        <div style="display:flex;align-items:center;gap:6px">
-          <span class="meal-check-name" style="${m.eaten ? 'text-decoration:line-through;opacity:.5' : ''}">${m.label || m.type}</span>
-          ${m.time ? `<span style="font-size:10px;color:var(--t3)">${m.time}</span>` : ''}
-        </div>
-        <div class="meal-check-sub">${m.kcal} kcal · P:${m.protein}g C:${m.carbs}g F:${m.fats}g</div>
-        ${m.items ? `<div style="font-size:11px;color:var(--t3);margin-top:2px">${m.items}</div>` : ''}
-        ${variantsHtml}
-      </div>
-    </div>`;
-}
-
-window._toggleMeal = function(mi) {
-  logData.nutrition.meals[mi].eaten = !logData.nutrition.meals[mi].eaten;
-  rerenderMealBoxes();
-  updateNutritionNumbers();
-  updateRing();
-};
-
-window._selectVariant = function(mi, vi) {
-  const m = logData.nutrition.meals[mi];
-  m.active_variant = m.active_variant === vi ? null : vi;
-  renderNutritionCard();
-};
 
 function calcTotals() {
-  return logData.nutrition.meals.filter(m => m.eaten).reduce((acc, m) => {
-    acc.kcal    += m.kcal    || 0;
-    acc.protein += m.protein || 0;
-    acc.carbs   += m.carbs   || 0;
-    acc.fats    += m.fats    || 0;
-    return acc;
+  return mealStates.filter(m => m.eaten).reduce((a, m) => {
+    a.kcal    += m.kcal    || 0;
+    a.protein += m.protein || 0;
+    a.carbs   += m.carbs   || 0;
+    a.fats    += m.fats    || 0;
+    return a;
   }, { kcal:0, protein:0, carbs:0, fats:0 });
 }
 
-function rerenderMealBoxes() {
-  const boxes = document.querySelectorAll('.meal-check-box');
-  const names = document.querySelectorAll('.meal-check-name');
-  logData.nutrition.meals.forEach((m, mi) => {
-    if (boxes[mi]) {
-      boxes[mi].className = 'meal-check-box' + (m.eaten ? ' done' : '');
-      boxes[mi].textContent = m.eaten ? '✓' : '';
+// ── Meals ──────────────────────────────────────────────────
+function buildMeals() {
+  const dayKey = isTrainingDay ? 'day_on' : 'day_off';
+  const meals  = activeDiet?.[dayKey]?.meals || [];
+
+  if (mealStates.length === 0 || mealStates.length !== meals.length) {
+    mealStates = meals.map((m, i) => ({
+      ...m,
+      eaten: logData.meals_eaten?.[i] || false,
+      active_variant: logData.meals_variant?.[i] ?? null,
+      override_kcal: logData.meals_override?.[i]?.kcal ?? null
+    }));
+  }
+
+  const el = document.getElementById('meals-list');
+  if (!meals.length) {
+    el.innerHTML = '<p style="color:var(--t2);font-size:13px;text-align:center;padding:16px">Nessun piano dieta attivo</p>';
+    return;
+  }
+  el.innerHTML = mealStates.map((m, mi) => renderMealRow(m, mi)).join('');
+}
+
+function renderMealRow(m, mi) {
+  const kcalDisplay = m.override_kcal ?? m.kcal;
+  const varsHtml = m.variants?.length ? `
+    <div class="vars">
+      ${m.variants.map((v, vi) => {
+        const lbl = typeof v === 'object' ? v.label : v;
+        const det = typeof v === 'object' ? v.detail : v;
+        return `<div class="var-chip ${m.active_variant === vi ? 'sel' : ''}"
+          onclick="selectVariant(${mi},${vi})">${lbl}</div>`;
+      }).join('')}
+    </div>` : '';
+  const selVariantDetail = m.active_variant != null && m.variants?.[m.active_variant]
+    ? `<div style="font-size:12px;color:var(--accent2);margin-top:6px;padding:6px 8px;background:rgba(124,111,255,.08);border-radius:6px">
+        ${typeof m.variants[m.active_variant] === 'object' ? m.variants[m.active_variant].detail : m.variants[m.active_variant]}
+       </div>` : '';
+
+  return `
+    <div class="meal-item ${m.eaten ? 'eaten' : ''}" id="meal-${mi}">
+      <div class="meal-top" onclick="toggleMeal(${mi})" style="cursor:pointer">
+        <div class="meal-chk">${m.eaten ? '✓' : ''}</div>
+        ${m.time ? `<span class="meal-time">${m.time}</span>` : ''}
+        <div class="meal-info">
+          <div class="meal-name">${m.label || m.type}</div>
+          <div class="meal-meta">${kcalDisplay} kcal · P:${m.protein}g C:${m.carbs}g F:${m.fats}g</div>
+        </div>
+        <div class="meal-kcal">${kcalDisplay}</div>
+      </div>
+      <div class="meal-detail" id="mdtl-${mi}" style="display:none">
+        <p style="font-size:13px;color:var(--t2);line-height:1.6;margin-bottom:8px">${m.items || ''}</p>
+        ${varsHtml}
+        ${selVariantDetail}
+        <div style="margin-top:12px">
+          <label class="fl">✏️ Ingredienti (modifica)</label>
+          <textarea id="meal-txt-${mi}" class="fi" rows="2" style="font-size:13px">${m.items || ''}</textarea>
+          <button class="btn btn-ghost btn-sm" onclick="recalcMeal(${mi})" style="margin-top:8px">✨ Ricalcola con AI</button>
+          <div id="meal-ai-${mi}" style="display:none;margin-top:8px"></div>
+        </div>
+        <div class="meal-delta" id="meal-delta-${mi}"></div>
+      </div>
+    </div>
+    <div onclick="toggleMealDetail(${mi})" style="text-align:right;font-size:11px;color:var(--t3);cursor:pointer;padding:4px 0;margin-bottom:4px">▼ dettagli</div>`;
+}
+
+window.toggleMeal = function(mi) {
+  mealStates[mi].eaten = !mealStates[mi].eaten;
+  buildMeals();
+  buildNutrition();
+};
+
+window.toggleMealDetail = function(mi) {
+  const el = document.getElementById(`mdtl-${mi}`);
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+};
+
+window.selectVariant = function(mi, vi) {
+  mealStates[mi].active_variant = mealStates[mi].active_variant === vi ? null : vi;
+  buildMeals();
+};
+
+window.recalcMeal = async function(mi) {
+  const txt = document.getElementById(`meal-txt-${mi}`)?.value.trim();
+  if (!txt) return;
+  const btn = document.querySelector(`#mdtl-${mi} .btn-ghost`);
+  if (btn) { btn.textContent = '⏳...'; btn.disabled = true; }
+  const r = await calcMacrosFromText(txt);
+  if (btn) { btn.textContent = '✨ Ricalcola con AI'; btn.disabled = false; }
+  if (!r.success) { showToast('Errore AI: ' + r.error, 'err'); return; }
+  const box = document.getElementById(`meal-ai-${mi}`);
+  if (box) {
+    box.style.display = 'block';
+    box.innerHTML = `
+      <div class="fmp">
+        <div class="fmp-item"><div class="fmp-v" style="color:var(--green)">${r.kcal}</div><div class="fmp-l">Kcal</div></div>
+        <div class="fmp-item"><div class="fmp-v" style="color:var(--blue)">${r.protein}g</div><div class="fmp-l">Pro</div></div>
+        <div class="fmp-item"><div class="fmp-v" style="color:var(--yellow)">${r.carbs}g</div><div class="fmp-l">Carbo</div></div>
+        <div class="fmp-item"><div class="fmp-v" style="color:var(--purple)">${r.fats}g</div><div class="fmp-l">Grassi</div></div>
+      </div>
+      <button class="btn btn-v btn-sm" onclick="applyMealAI(${mi},${r.kcal},${r.protein},${r.carbs},${r.fats})" style="margin-top:8px">✅ Applica</button>`;
+    const tgt = mealStates[mi].kcal;
+    const diff = r.kcal - tgt;
+    const deltaEl = document.getElementById(`meal-delta-${mi}`);
+    if (deltaEl) {
+      deltaEl.textContent = `Target: ${tgt}kcal | AI: ${r.kcal}kcal | ${diff >= 0 ? '+' : ''}${diff}kcal`;
+      deltaEl.className = 'meal-delta ' + (Math.abs(diff) < 50 ? 'delta-ok' : diff > 0 ? 'delta-over' : 'delta-warn');
     }
-    if (names[mi]) names[mi].style.cssText = m.eaten ? 'text-decoration:line-through;opacity:.5' : '';
-  });
-}
-
-function updateNutritionNumbers() {
-  const training = isTrainingDay();
-  const dayKey   = training ? 'day_on' : 'day_off';
-  const plan     = dietPlan?.[dayKey];
-  const targets  = {
-    kcal:    plan?.kcal    || DEFAULT_TARGETS[training ? 'kcal_on' : 'kcal_off'],
-    protein: plan?.protein || DEFAULT_TARGETS[training ? 'pro_on' : 'pro_off'],
-    carbs:   plan?.carbs   || DEFAULT_TARGETS[training ? 'carb_on' : 'carb_off'],
-    fats:    plan?.fats    || DEFAULT_TARGETS[training ? 'fat_on' : 'fat_off']
-  };
-  const tots = calcTotals();
-  logData.nutrition.totals = tots;
-
-  setText2('kcal-now', Math.round(tots.kcal));
-  setWidth('kcal-bar',  pct(tots.kcal, targets.kcal));
-  setText2('chip-pro',  Math.round(tots.protein) + 'g');
-  setText2('chip-carb', Math.round(tots.carbs) + 'g');
-  setText2('chip-fat',  Math.round(tots.fats) + 'g');
-}
-
-function setText2(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
-function pct(val, max)    { return max ? Math.min(100, Math.round((val/max)*100)) : 0; }
-
-// ── Ring ───────────────────────────────────────────────────────────────────────
-function updateRing() {
-  const exs   = logData.workout.exercises;
-  const meals  = logData.nutrition.meals;
-  const training = isTrainingDay();
-
-  const exRatio   = training && exs.length ? exs.filter(e => e.done).length / exs.length : (training ? 0 : 1);
-  const mealRatio = meals.length ? meals.filter(m => m.eaten).length / meals.length : 0;
-  const overall   = training ? (exRatio * 0.5 + mealRatio * 0.5) : mealRatio;
-
-  const CIRC = 175.9;
-  const ring  = document.getElementById('ring-fill');
-  const pctEl = document.getElementById('ring-pct');
-  if (ring)  ring.style.strokeDashoffset = CIRC - (CIRC * overall);
-  if (pctEl) pctEl.textContent = Math.round(overall * 100) + '%';
-}
-
-// ── Save ───────────────────────────────────────────────────────────────────────
-window.saveLog = async function(silent = false) {
-  try {
-    await setDoc(doc(db, 'users', USER_ID, 'daily_logs', TODAY), { ...logData, date: TODAY }, { merge: true });
-    if (!silent) showToast('Giornata salvata! ✅');
-  } catch(e) {
-    console.error(e);
-    if (!silent) showToast('Errore nel salvataggio', 'err');
   }
 };
 
-function setupAutoSave() {
-  if (!settings?.auto_save) return;
-  document.getElementById('autosave-info').style.display = 'block';
-  const mins = settings.auto_save_minutes || 5;
-  autoTimer = setInterval(() => window.saveLog(true), mins * 60 * 1000);
+window.applyMealAI = function(mi, kcal, protein, carbs, fats) {
+  mealStates[mi].override_kcal = kcal;
+  mealStates[mi].protein = protein;
+  mealStates[mi].carbs   = carbs;
+  mealStates[mi].fats    = fats;
+  buildMeals();
+  buildNutrition();
+  showToast('Macro aggiornati ✅');
+};
+
+// ── Workout ────────────────────────────────────────────────
+function buildWorkout() {
+  const el = document.getElementById('workout-content');
+  const dow = getDayOfWeek(TODAY);
+  const session = activeProgram?.schedule?.[dow];
+  const workout = logData.workout;
+
+  if (!isTrainingDay) {
+    el.innerHTML = '<p style="color:var(--t2);font-size:14px">Giorno di riposo 🛌</p>';
+    return;
+  }
+  if (workout?.completed) {
+    const dur = Math.round((workout.duration_seconds || 0) / 60);
+    const vol = (workout.exercises || []).reduce((a, ex) =>
+      a + ex.sets.reduce((b, s) => b + (parseFloat(s.weight)||0) * (parseFloat(s.reps)||1), 0), 0);
+    el.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:15px;font-weight:700">${workout.session_name || 'Sessione'}</div>
+          <div style="font-size:12px;color:var(--t2);margin-top:4px">⏱ ${dur} min · 🏋️ ${Math.round(vol)} kg volume</div>
+        </div>
+        <span class="badge badge-g">✅ Completato</span>
+      </div>`;
+  } else {
+    el.innerHTML = `
+      <div style="font-size:15px;font-weight:700;margin-bottom:10px">${session?.name || 'Sessione'}</div>
+      <a href="session.html" class="btn btn-o" style="text-decoration:none">🏋️ Vai ad Allenarti</a>`;
+  }
+}
+
+// ── Stats ──────────────────────────────────────────────────
+function buildStats() {
+  if (logData.steps)       document.getElementById('steps-in').value  = logData.steps;
+  if (logData.burned_kcal) document.getElementById('burned-in').value = logData.burned_kcal;
+  if (logData.daily_note)  document.getElementById('note-in').value   = logData.daily_note;
+}
+
+// ── AI ─────────────────────────────────────────────────────
+window.calcAI = async function() {
+  const text = document.getElementById('ai-input').value.trim();
+  if (!text) { showToast('Scrivi gli alimenti', 'err'); return; }
+  const btn = document.getElementById('ai-btn');
+  btn.textContent = '⏳ Calcolo...'; btn.disabled = true;
+  const r = await calcMacrosFromText(text);
+  btn.textContent = '🤖 Calcola Macro'; btn.disabled = false;
+  if (!r.success) { showToast('Errore AI: ' + r.error, 'err'); return; }
+  const box = document.getElementById('ai-result');
+  box.className = 'ai-result show';
+  box.innerHTML = `
+    <div class="fmp">
+      <div class="fmp-item"><div class="fmp-v" style="color:var(--green)">${r.kcal}</div><div class="fmp-l">Kcal</div></div>
+      <div class="fmp-item"><div class="fmp-v" style="color:var(--blue)">${r.protein}g</div><div class="fmp-l">Pro</div></div>
+      <div class="fmp-item"><div class="fmp-v" style="color:var(--yellow)">${r.carbs}g</div><div class="fmp-l">Carbo</div></div>
+      <div class="fmp-item"><div class="fmp-v" style="color:var(--purple)">${r.fats}g</div><div class="fmp-l">Grassi</div></div>
+    </div>
+    ${r.items.map(i => `<div style="font-size:12px;color:var(--t2);margin-top:4px">• ${i.name} (${i.grams}g) → ${i.kcal}kcal</div>`).join('')}`;
+};
+
+// ── Save ───────────────────────────────────────────────────
+function collectData() {
+  logData.steps       = parseInt(document.getElementById('steps-in').value)  || null;
+  logData.burned_kcal = parseInt(document.getElementById('burned-in').value) || null;
+  logData.daily_note  = document.getElementById('note-in').value;
+
+  const tots = calcTotals();
+  logData.nutrition = { totals: tots };
+  logData.meals_eaten   = Object.fromEntries(mealStates.map((m, i) => [i, m.eaten]));
+  logData.meals_variant = Object.fromEntries(mealStates.map((m, i) => [i, m.active_variant]));
+  logData.meals_override = Object.fromEntries(
+    mealStates.map((m, i) => [i, m.override_kcal != null ? { kcal: m.override_kcal } : null])
+  );
+}
+
+window.saveDay = async function() {
+  collectData();
+  logData.date = TODAY;
+  logData.is_training_day = isTrainingDay;
+  logData.streak = logData.streak || 1;
+  try {
+    await setDoc(doc(db, 'users', USER_ID, 'daily_logs', TODAY), logData, { merge: true });
+    showToast('💾 Giornata salvata!');
+  } catch(e) {
+    showToast('Errore salvataggio', 'err');
+  }
+};
+
+function setupAutoSave(minutes) {
+  clearInterval(autoSaveTimer);
+  autoSaveTimer = setInterval(() => window.saveDay(), minutes * 60 * 1000);
+  document.getElementById('auto-label').textContent = `Auto-salvataggio ogni ${minutes} min`;
 }
 
 init();

@@ -2,37 +2,26 @@
 <html lang="it">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FitTracker – Check-in</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>FitTracker</title>
   <link rel="stylesheet" href="css/style.css">
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#7c6fff">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="FitTracker">
 </head>
 <body>
 <div class="wrap">
-
   <div class="ph">
-    <h1>📏 Check-in</h1>
-    <button class="btn btn-v btn-sm" onclick="window.showCheckForm()">＋ Nuovo</button>
+    <button class="btn-icon" onclick="history.back()">←</button>
+    <h1>📸 Check</h1>
+    <button class="btn btn-v btn-sm" onclick="openNewCheck()">＋ Nuovo</button>
   </div>
-
-  <div id="check-list"><div class="spin-wrap"></div></div>
-  <div id="check-form-wrap" style="display:none"></div>
-
+  <div id="checks-list"><div class="spin"></div></div>
+  <div id="check-form" style="display:none"></div>
 </div>
 
-<nav class="bnav">
-  <a href="index.html"><span class="ni">🏠</span><span>Home</span></a>
-  <a href="programs.html"><span class="ni">💪</span><span>Schede</span></a>
-  <a href="diet.html"><span class="ni">🥗</span><span>Dieta</span></a>
-  <a href="checks.html" class="active"><span class="ni">📸</span><span>Check</span></a>
-  <a href="session.html" class="nav-workout"><span class="ni">🏋️</span><span>Allenati</span></a>
-</nav>
-
 <script type="module" src="js/checks.js"></script>
-<script>if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/fitness-tracker-app/sw.js'); }</script>
+<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/fitness-tracker-app/sw.js')</script>
 </body>
 </html>

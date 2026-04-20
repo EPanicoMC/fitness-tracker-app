@@ -2,105 +2,69 @@
 <html lang="it">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FitTracker – Settings</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>FitTracker</title>
   <link rel="stylesheet" href="css/style.css">
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#7c6fff">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="FitTracker">
 </head>
 <body>
 <div class="wrap">
-
   <div class="ph">
+    <button class="btn-icon" onclick="history.back()">←</button>
     <h1>⚙️ Impostazioni</h1>
   </div>
 
-  <!-- AUTO-SAVE -->
   <div class="card">
-    <span class="clabel">Auto-salvataggio</span>
-    <div class="trow" style="margin-bottom:14px">
-      <div>
-        <div style="font-weight:700;font-size:15px">Abilita auto-salvataggio</div>
-        <div style="font-size:12px;color:var(--t2);margin-top:2px">Salva la giornata automaticamente</div>
-      </div>
-      <label class="tgl">
-        <input type="checkbox" id="auto-save-toggle"
-          onchange="window._toggleAutoSave(this.checked)">
-        <span class="tgl-s"></span>
-      </label>
+    <span class="clabel">👤 Profilo</span>
+    <div class="s-row">
+      <div><div class="s-lbl">Nome</div></div>
+      <input class="fi" id="s-name" style="width:150px;text-align:right;background:transparent;border:none;border-bottom:1px solid var(--border);border-radius:0;padding:4px 8px">
     </div>
-    <div class="fg" id="interval-wrap" style="display:none">
-      <label class="fl">Intervallo salvataggio</label>
-      <select class="fi" id="auto-save-interval">
-        <option value="1">1 minuto</option>
-        <option value="3">3 minuti</option>
-        <option value="5" selected>5 minuti</option>
-        <option value="10">10 minuti</option>
+    <div class="s-row">
+      <div><div class="s-lbl">Altezza</div></div>
+      <div style="display:flex;align-items:center;gap:4px">
+        <input type="number" class="fi-in" id="s-height" style="width:60px"> <span style="color:var(--t2);font-size:13px">cm</span>
+      </div>
+    </div>
+    <div class="s-row">
+      <div><div class="s-lbl">Peso target</div></div>
+      <div style="display:flex;align-items:center;gap:4px">
+        <input type="number" class="fi-in" id="s-wtarget" style="width:60px" step="0.5"> <span style="color:var(--t2);font-size:13px">kg</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <span class="clabel">💾 Auto-salvataggio</span>
+    <div class="s-row">
+      <div><div class="s-lbl">Attivo</div><div class="s-sub">Salva automaticamente la home</div></div>
+      <label class="tgl"><input type="checkbox" id="s-autosave"><span class="tgl-s"></span></label>
+    </div>
+    <div class="s-row">
+      <div class="s-lbl">Intervallo</div>
+      <select class="fi" id="s-interval" style="width:100px">
+        <option value="1">1 min</option>
+        <option value="3">3 min</option>
+        <option value="5" selected>5 min</option>
+        <option value="10">10 min</option>
       </select>
     </div>
   </div>
 
-  <!-- PROFILO -->
   <div class="card">
-    <span class="clabel">Profilo</span>
-    <div class="fg">
-      <label class="fl">Nome</label>
-      <input type="text" class="fi" id="profile-name" placeholder="Il tuo nome…">
-    </div>
-    <div class="grid2">
-      <div class="fg">
-        <label class="fl">Peso target (kg)</label>
-        <input type="number" class="fi" id="profile-weight" placeholder="78" step="0.1">
-      </div>
-      <div class="fg">
-        <label class="fl">Altezza (cm)</label>
-        <input type="number" class="fi" id="profile-height" placeholder="175">
-      </div>
-    </div>
+    <span class="clabel">ℹ️ App</span>
+    <p style="color:var(--t2);font-size:13px">FitTracker v2.0</p>
+    <p style="color:var(--t3);font-size:12px;margin-top:4px">Made with ❤️ by Emanuele</p>
+    <a href="seed.html" style="display:block;font-size:12px;color:var(--accent);margin-top:10px">🌱 Ricarica dati seed</a>
   </div>
 
-  <button class="btn btn-v" onclick="window.saveSettings()" style="margin-bottom:20px">
-    💾 Salva Impostazioni
-  </button>
-
-  <!-- CHECK-IN -->
-  <div class="card">
-    <span class="clabel">Monitoraggio corpo</span>
-    <a href="checks.html" class="btn btn-ghost" style="text-decoration:none;display:flex;align-items:center;justify-content:center;gap:8px">
-      📏 Vai ai Check-in
-    </a>
-  </div>
-
-  <!-- SEED -->
-  <div class="card">
-    <span class="clabel">Database</span>
-    <a href="seed.html" class="btn btn-ghost" style="text-decoration:none;display:flex;align-items:center;justify-content:center;gap:8px;color:var(--t2)">
-      🌱 Seed dati iniziali
-    </a>
-  </div>
-
-  <!-- INFO APP -->
-  <div class="card" style="text-align:center">
-    <p style="font-size:22px;margin-bottom:8px">🏋️</p>
-    <p style="font-weight:800;font-size:18px;margin-bottom:4px">FitTracker v3.0</p>
-    <p style="font-size:13px;color:var(--t2)">Il tuo diario personale fitness</p>
-    <p style="font-size:12px;color:var(--t3);margin-top:12px">Firebase · HTML · CSS · JavaScript</p>
-  </div>
-
+  <button class="btn btn-v" onclick="saveSettings()">💾 Salva</button>
 </div>
 
-<nav class="bnav">
-  <a href="index.html"><span class="ni">🏠</span><span>Home</span></a>
-  <a href="programs.html"><span class="ni">💪</span><span>Schede</span></a>
-  <a href="diet.html"><span class="ni">🥗</span><span>Dieta</span></a>
-  <a href="checks.html"><span class="ni">📸</span><span>Check</span></a>
-  <a href="session.html" class="nav-workout"><span class="ni">🏋️</span><span>Allenati</span></a>
-</nav>
-
 <script type="module" src="js/settings.js"></script>
-<script>if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/fitness-tracker-app/sw.js'); }</script>
+<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/fitness-tracker-app/sw.js')</script>
 </body>
 </html>

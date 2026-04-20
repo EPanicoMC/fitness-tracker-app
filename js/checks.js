@@ -1,241 +1,203 @@
 import {
-  db, USER_ID, collection, doc, getDocs, setDoc, deleteDoc, query, orderBy
+  db, USER_ID, collection, doc, getDocs, setDoc, deleteDoc, query, orderBy, storage
 } from './firebase-config.js';
-import { getApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-import { getStorage, ref, uploadBytes, getDownloadURL } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js';
-import { getTodayString, formatDateShort, showToast, showModal } from './app.js';
+import { showToast, showModal, formatDateIT } from './app.js';
+import {
+  ref, uploadBytes, getDownloadURL
+} from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js';
 
-const storage = getStorage(getApp());
 let checks = [];
-let formData = {};
+let formPhotos = [];
 
 const MEASURES = [
-  { key: 'weight',    label: 'Peso',     unit: 'kg', positive: false },
-  { key: 'shoulders', label: 'Spalle',   unit: 'cm', positive: true  },
-  { key: 'chest',     label: 'Petto',    unit: 'cm', positive: true  },
-  { key: 'waist',     label: 'Vita',     unit: 'cm', positive: false },
-  { key: 'hips',      label: 'Fianchi',  unit: 'cm', positive: false },
-  { key: 'bicep_l',   label: 'Bicipite', unit: 'cm', positive: true  },
-  { key: 'thigh_l',   label: 'Coscia',   unit: 'cm', positive: true  },
-  { key: 'calf_l',    label: 'Polpaccio',unit: 'cm', positive: true  }
+  { key:'weight',   label:'Peso (kg)',        unit:'kg', icon:'⚖️' },
+  { key:'shoulders', label:'Spalle (cm)',      unit:'cm', icon:'🔴' },
+  { key:'waist',    label:'Vita (cm)',          unit:'cm', icon:'🔴' },
+  { key:'chest',    label:'Petto (cm)',          unit:'cm', icon:'🔴' },
+  { key:'bicep_l',  label:'Braccio SX (cm)',  unit:'cm', icon:'💪' },
+  { key:'bicep_r',  label:'Braccio DX (cm)',  unit:'cm', icon:'💪' },
+  { key:'thigh_l',  label:'Coscia SX (cm)',   unit:'cm', icon:'🦵' },
+  { key:'thigh_r',  label:'Coscia DX (cm)',   unit:'cm', icon:'🦵' },
+  { key:'calf_l',   label:'Polpaccio SX (cm)', unit:'cm', icon:'🦵' },
+  { key:'calf_r',   label:'Polpaccio DX (cm)', unit:'cm', icon:'🦵' }
 ];
 
-// ── Load ───────────────────────────────────────────────────────────────────────
+// ── Load & render ──────────────────────────────────────────
 async function loadChecks() {
-  const list = document.getElementById('check-list');
-  list.innerHTML = '<div class="spin-wrap"></div>';
-  try {
-    const snap = await getDocs(query(collection(db, 'users', USER_ID, 'checks'), orderBy('date', 'desc')));
-    checks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    renderList();
-  } catch(e) {
-    console.error(e);
-    list.innerHTML = '<p style="color:var(--t2);text-align:center;padding:32px">Errore caricamento</p>';
-  }
+  const el = document.getElementById('checks-list');
+  el.innerHTML = '<div class="spin"></div>';
+  const snap = await getDocs(
+    query(collection(db, 'users', USER_ID, 'checks'), orderBy('date', 'desc'))
+  );
+  checks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  renderList();
 }
 
 function renderList() {
-  const list = document.getElementById('check-list');
+  const el = document.getElementById('checks-list');
   if (!checks.length) {
-    list.innerHTML = `<div class="empty"><span class="ei">📏</span><p>Nessun check-in ancora<br>Registra le tue misurazioni!</p></div>`;
+    el.innerHTML = '<div class="empty"><span class="ei">📸</span><p>Nessun check ancora.<br>Inizia il tuo primo check-in!</p></div>';
     return;
   }
-
-  list.innerHTML = checks.map((c, idx) => {
-    const prev = checks[idx + 1] || c.prev;
-    const weightDelta = prev ? (c.weight - (prev.weight || 0)).toFixed(1) : null;
-    const deltaClass  = weightDelta === null ? 'delta-neu' : (+weightDelta >= 0 ? 'delta-pos' : 'delta-neg');
-    const deltaSign   = weightDelta !== null && +weightDelta > 0 ? '+' : '';
-
+  el.innerHTML = checks.map((c, ci) => {
+    const prev = checks[ci + 1];
+    const weightDelta = prev ? (c.weight - prev.weight).toFixed(1) : null;
     return `
-      <div class="check-card">
-        <div style="display:flex;align-items:flex-start;justify-content:space-between">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <div>
-            <div class="check-date">${formatDateShort(c.date)}</div>
-            <div>
-              <span class="check-weight">${c.weight}</span>
-              <span class="check-unit"> kg</span>
-              ${weightDelta !== null ? `<span class="measure-delta ${deltaClass}" style="margin-left:8px">${deltaSign}${weightDelta} kg</span>` : ''}
-            </div>
+            <div style="font-size:16px;font-weight:800">${formatDateIT(c.date)}</div>
+            <div style="font-size:13px;color:var(--t2);margin-top:2px">${c.notes||''}</div>
           </div>
-          <button class="btn-del" onclick="window._deleteCheck('${c.id}')">🗑️</button>
+          <div style="text-align:right">
+            <div style="font-size:22px;font-weight:900">${c.weight||'—'} kg</div>
+            ${weightDelta !== null ? `<div style="font-size:13px;font-weight:700;color:${weightDelta>0?'var(--green)':weightDelta<0?'var(--red)':'var(--t2)'}">${weightDelta>0?'+':''}${weightDelta} kg</div>` : ''}
+          </div>
         </div>
-
-        ${renderMeasureGrid(c, prev)}
-
-        ${c.photos?.length ? `
-          <p class="sdiv" style="margin-top:12px">Foto</p>
-          <div class="photo-grid">
-            ${c.photos.map(url => `
-              <div class="photo-item">
-                <img src="${url}" loading="lazy" onclick="window._openPhoto('${url}')">
-              </div>`).join('')}
-          </div>` : ''}
-
-        ${c.notes ? `<p style="font-size:12px;color:var(--t2);margin-top:12px;font-style:italic">"${c.notes}"</p>` : ''}
+        ${renderMeasureDeltas(c, prev)}
+        ${c.photos?.length ? `<div style="display:flex;gap:8px;overflow-x:auto;margin-top:10px">
+          ${c.photos.map(url => `<img src="${url}" style="width:80px;height:80px;object-fit:cover;border-radius:10px;flex-shrink:0">`).join('')}
+        </div>` : ''}
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="btn btn-flat btn-sm" onclick="deleteCheck('${c.id}')">🗑️ Elimina</button>
+        </div>
       </div>`;
   }).join('');
 }
 
-function renderMeasureGrid(c, prev) {
-  const prevM = prev?.measurements || {};
-  const curM  = c.measurements || {};
-
-  const items = MEASURES.filter(m => m.key !== 'weight').map(m => {
-    const val     = curM[m.key];
-    if (val == null) return '';
-    const prevVal = prevM[m.key];
-    const delta   = prevVal != null ? (val - prevVal) : null;
-    const isGood  = delta === null ? null : (m.positive ? delta >= 0 : delta <= 0);
-    const cls     = delta === null ? 'delta-neu' : (isGood ? 'delta-pos' : 'delta-neg');
-    const sign    = delta !== null && delta > 0 ? '+' : '';
-    return `
-      <div class="measure-item">
-        <div class="measure-label">${m.label}</div>
-        <div class="measure-val">${val} ${m.unit}</div>
-        ${delta !== null ? `<div class="measure-delta ${cls}">${sign}${delta.toFixed(1)}</div>` : ''}
+function renderMeasureDeltas(c, prev) {
+  const ms = c.measurements || {};
+  const pm = prev?.measurements || {};
+  const rows = MEASURES.filter(m => m.key !== 'weight' && ms[m.key] != null);
+  if (!rows.length) return '';
+  return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:10px">
+    ${rows.map(m => {
+      const val  = ms[m.key];
+      const pval = pm[m.key];
+      const diff = pval != null ? (val - pval) : null;
+      const col  = diff === null ? 'var(--t2)' : diff > 0 ? 'var(--green)' : diff < 0 ? 'var(--red)' : 'var(--t2)';
+      return `<div style="font-size:12px;color:var(--t2)">${m.icon} ${m.label.split(' ')[0]}:
+        <span style="color:var(--t1);font-weight:700">${val} ${m.unit}</span>
+        ${diff !== null ? `<span style="color:${col}">${diff>0?'+':''}${diff}</span>` : ''}
       </div>`;
-  }).filter(Boolean);
-
-  return items.length ? `<div class="measure-grid">${items.join('')}</div>` : '';
+    }).join('')}
+  </div>`;
 }
 
-window._openPhoto = function(url) {
-  const bg = document.createElement('div');
-  bg.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:400;display:flex;align-items:center;justify-content:center;cursor:pointer';
-  bg.innerHTML = `<img src="${url}" style="max-width:100%;max-height:100%;object-fit:contain;border-radius:8px">`;
-  bg.onclick = () => bg.remove();
-  document.body.appendChild(bg);
-};
-
-window._deleteCheck = function(id) {
+window.deleteCheck = function(id) {
   showModal({
-    title: 'Elimina check-in',
-    text:  'Vuoi eliminare questo check-in?',
+    title: 'Elimina check-in', text: 'Vuoi eliminare questo check-in?',
     confirmLabel: 'Elimina',
     onConfirm: async () => {
-      try {
-        await deleteDoc(doc(db, 'users', USER_ID, 'checks', id));
-        showToast('Check-in eliminato');
-        await loadChecks();
-      } catch { showToast('Errore', 'err'); }
+      await deleteDoc(doc(db,'users',USER_ID,'checks',id));
+      showToast('Check eliminato');
+      await loadChecks();
     }
   });
 };
 
-// ── Form ───────────────────────────────────────────────────────────────────────
-window.showCheckForm = function() {
-  formData = {
-    date: getTodayString(),
-    weight: null,
-    measurements: {},
-    photos: [],
-    notes: ''
-  };
-  document.getElementById('check-list').style.display = 'none';
-  document.querySelector('.ph button')?.setAttribute('style', 'display:none');
-  const fw = document.getElementById('check-form-wrap');
+// ── Form ───────────────────────────────────────────────────
+window.openNewCheck = function() {
+  formPhotos = [];
+  const el = document.getElementById('checks-list');
+  el.style.display = 'none';
+  document.querySelector('.ph').style.display = 'none';
+  const fw = document.getElementById('check-form');
   fw.style.display = 'block';
   fw.innerHTML = `
     <div class="ph" style="padding-top:8px">
-      <button class="btn-icon" onclick="window.hideCheckForm()">←</button>
+      <button class="btn-icon" onclick="closeCheckForm()">←</button>
       <h1>Nuovo Check-in</h1>
     </div>
-
     <div class="card">
-      <div class="fg">
-        <label class="fl">Data</label>
-        <input type="date" class="fi" id="cf-date" value="${getTodayString()}"
-          oninput="formData.date = this.value">
+      <div class="grid2">
+        <div class="fg" style="margin:0"><label class="fl">Data</label>
+          <input type="date" class="fi" id="ck-date" value="${new Date().toISOString().split('T')[0]}"></div>
+        <div class="fg" style="margin:0"><label class="fl">Peso (kg)</label>
+          <input type="number" class="fi" id="ck-weight" step="0.1" placeholder="75.0"></div>
       </div>
-      <div class="fg">
-        <label class="fl">Peso corpo (kg)</label>
-        <input type="number" class="fi" id="cf-weight" step="0.1" placeholder="75.0"
-          oninput="formData.weight = +this.value">
-      </div>
+      <div class="fg" style="margin-top:12px"><label class="fl">Note</label>
+        <textarea class="fi" id="ck-notes" rows="2" placeholder="Come ti senti..."></textarea></div>
     </div>
-
     <div class="card">
-      <span class="clabel">Misurazioni (cm)</span>
-      <div class="measure-grid">
-        ${MEASURES.filter(m => m.key !== 'weight').map(m => `
-          <div class="measure-item" style="padding:0">
-            <label class="fl" style="padding:8px 12px 4px">${m.label}</label>
-            <input type="number" class="fi" step="0.5" placeholder="—"
-              style="border:none;background:transparent;padding:4px 12px 10px;font-size:17px;font-weight:800"
-              oninput="formData.measurements['${m.key}'] = +this.value || null">
-          </div>`).join('')}
-      </div>
+      <span class="clabel">📐 Misure corporee</span>
+      ${MEASURES.filter(m => m.key !== 'weight').map(m => `
+        <div class="s-row">
+          <div><div class="s-lbl">${m.icon} ${m.label}</div></div>
+          <input type="number" class="fi-in" id="ck-${m.key}" step="0.5" placeholder="—"> ${m.unit}
+        </div>`).join('')}
     </div>
-
     <div class="card">
-      <span class="clabel">Foto</span>
-      <div class="photo-grid" id="photo-preview">
-        <div class="photo-item photo-add" onclick="document.getElementById('photo-input').click()">
-          <span class="photo-add-icon">＋</span>
-          <span>Aggiungi</span>
-        </div>
-      </div>
-      <input type="file" id="photo-input" accept="image/*" multiple style="display:none"
-        onchange="window._handlePhotos(this.files)">
-      <p style="font-size:11px;color:var(--t3);margin-top:8px">Carica fino a 3 foto</p>
+      <span class="clabel">📸 Foto</span>
+      <input type="file" id="ck-photos" multiple accept="image/*" capture class="fi" style="padding:8px">
+      <div id="photo-preview" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"></div>
     </div>
-
-    <div class="card">
-      <span class="clabel">Note</span>
-      <textarea class="notes-area" placeholder="Come ti senti? Progressi notati…"
-        oninput="formData.notes = this.value"></textarea>
-    </div>
-
-    <div class="grid2" style="margin-top:8px">
-      <button class="btn btn-ghost" onclick="window.hideCheckForm()">Annulla</button>
-      <button class="btn btn-v" onclick="window.saveCheck()">💾 Salva</button>
+    <div class="grid2" style="margin-bottom:30px">
+      <button class="btn btn-flat" onclick="closeCheckForm()">Annulla</button>
+      <button class="btn btn-v" onclick="saveCheck()">💾 Salva</button>
     </div>`;
+
+  document.getElementById('ck-photos').addEventListener('change', function() {
+    const prev = document.getElementById('photo-preview');
+    prev.innerHTML = '';
+    Array.from(this.files).forEach(f => {
+      const img = document.createElement('img');
+      img.style.cssText = 'width:80px;height:80px;object-fit:cover;border-radius:10px';
+      img.src = URL.createObjectURL(f);
+      prev.appendChild(img);
+    });
+  });
 };
 
-window.hideCheckForm = function() {
-  document.getElementById('check-form-wrap').style.display = 'none';
-  document.getElementById('check-list').style.display = 'block';
-  document.querySelector('.ph button')?.removeAttribute('style');
-};
-
-let pendingFiles = [];
-
-window._handlePhotos = async function(files) {
-  pendingFiles = Array.from(files).slice(0, 3);
-  const grid = document.getElementById('photo-preview');
-  grid.innerHTML = pendingFiles.map((f, i) => `
-    <div class="photo-item">
-      <img src="${URL.createObjectURL(f)}" style="width:100%;height:100%;object-fit:cover">
-    </div>`).join('') + `
-    <div class="photo-item photo-add" onclick="document.getElementById('photo-input').click()">
-      <span class="photo-add-icon">＋</span>
-    </div>`;
+window.closeCheckForm = function() {
+  document.getElementById('check-form').style.display = 'none';
+  document.getElementById('checks-list').style.display = 'block';
+  document.querySelector('.ph').style.display = 'flex';
 };
 
 window.saveCheck = async function() {
-  if (!formData.weight) { showToast('Inserisci il peso', 'err'); return; }
+  const date   = document.getElementById('ck-date').value;
+  const weight = parseFloat(document.getElementById('ck-weight').value) || null;
+  if (!date) { showToast('Inserisci la data', 'err'); return; }
 
-  const id = 'check_' + formData.date.replace(/-/g, '');
-  try {
-    // Upload photos
-    const photoUrls = [];
-    for (const file of pendingFiles) {
-      const storageRef = ref(storage, `users/${USER_ID}/checks/${id}/${file.name}`);
-      await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(storageRef);
-      photoUrls.push(url);
+  const measurements = {};
+  MEASURES.filter(m => m.key !== 'weight').forEach(m => {
+    const v = document.getElementById(`ck-${m.key}`)?.value;
+    measurements[m.key] = v ? parseFloat(v) : null;
+  });
+
+  showToast('💾 Salvataggio...', 'info');
+
+  const photoUrls = [];
+  const files = document.getElementById('ck-photos')?.files;
+  if (files?.length) {
+    for (const file of files) {
+      try {
+        const storRef = ref(storage, `users/${USER_ID}/checks/${date}_${Date.now()}_${file.name}`);
+        await uploadBytes(storRef, file);
+        const url = await getDownloadURL(storRef);
+        photoUrls.push(url);
+      } catch(e) { console.warn('Photo upload failed:', e); }
     }
-    formData.photos = photoUrls;
+  }
 
-    await setDoc(doc(db, 'users', USER_ID, 'checks', id), formData);
-    showToast('Check-in salvato! ✅');
-    window.hideCheckForm();
-    pendingFiles = [];
+  const id = `check_${date.replace(/-/g,'')}`;
+  const prev = checks[0];
+  const data = {
+    date, weight,
+    notes: document.getElementById('ck-notes').value.trim(),
+    measurements,
+    photos: photoUrls,
+    previous: prev ? { weight: prev.weight, measurements: prev.measurements || {} } : null
+  };
+
+  try {
+    await setDoc(doc(db,'users',USER_ID,'checks',id), data);
+    showToast('✅ Check salvato!');
+    closeCheckForm();
     await loadChecks();
   } catch(e) {
-    console.error(e);
-    showToast('Errore nel salvataggio', 'err');
+    showToast('Errore salvataggio', 'err');
   }
 };
 

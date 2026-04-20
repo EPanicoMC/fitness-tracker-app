@@ -3,303 +3,218 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FitTracker – Seed DB</title>
-  <link rel="manifest" href="manifest.json">
-  <meta name="theme-color" content="#7c6fff">
-  <style>
-    body { font-family: 'Segoe UI', sans-serif; background: #07070f; color: #f0f0ff; padding: 24px; max-width: 500px; margin: 0 auto; }
-    h1 { font-size: 22px; margin-bottom: 6px; }
-    #log { background: #0d0d1f; border-radius: 12px; padding: 16px; margin: 16px 0; min-height: 140px; font-size: 13px; line-height: 2; max-height: 320px; overflow-y: auto; }
-    .ok  { color: #05c48a; }
-    .err { color: #ff4560; }
-    .inf { color: #8888aa; }
-    .warn { color: #ffd54f; }
-    button { background: #7c6fff; color: #fff; border: none; border-radius: 10px; padding: 14px 28px; font-size: 15px; font-weight: 700; cursor: pointer; width: 100%; margin-top: 8px; }
-    button.secondary { background: #1a1a35; border: 1px solid #252550; }
-    button:disabled { opacity: .4; cursor: not-allowed; }
-    a { display: block; text-align: center; margin-top: 16px; color: #7c6fff; font-weight: 600; text-decoration: none; font-size: 16px; }
-    .progress-bar { height: 6px; background: #1a1a35; border-radius: 99px; margin: 12px 0; overflow: hidden; }
-    .progress-fill { height: 100%; background: #7c6fff; border-radius: 99px; transition: width .3s ease; width: 0%; }
-  </style>
+  <title>FitTracker – Seed</title>
+  <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <h1>🌱 Seed Database</h1>
-  <p style="color:#8888aa;font-size:13px">Popola Firestore con i dati reali del programma.</p>
-  <div class="progress-bar"><div class="progress-fill" id="prog-fill"></div></div>
-  <div id="log"><span class="inf">Pronto. Premi il pulsante per iniziare.</span></div>
-  <button id="btn" onclick="runSeed()">▶ Avvia Seed</button>
-  <button class="secondary" onclick="location.reload()" style="margin-top:8px">🔄 Reset e Ricarica</button>
-  <a href="index.html" id="go-home" style="display:none">→ Vai alla Home</a>
+<div class="wrap">
+  <div class="ph"><h1>🌱 Seed Database</h1></div>
+  <div class="card">
+    <p style="color:var(--t2);font-size:14px;margin-bottom:20px">Carica i dati iniziali nel database. <strong style="color:var(--red)">Attenzione: sovrascrive i dati esistenti.</strong></p>
+    <button class="btn btn-v" id="seed-btn" onclick="window.doSeed()">🚀 Carica Dati</button>
+  </div>
+  <div id="log" style="font-size:13px;font-family:monospace;color:var(--t2);line-height:2"></div>
+</div>
 
 <script type="module">
-import { initializeApp, getApps } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-import { getFirestore, doc, setDoc, collection } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+import { db, USER_ID, doc, setDoc, collection, addDoc } from './js/firebase-config.js';
 
-const firebaseConfig = {
-  apiKey: "AIzaSyC7bm-wJAScIaQfelZkGP4C7kw_FKI4Gv8",
-  authDomain: "fitness-tracker-app-b6792.firebaseapp.com",
-  projectId: "fitness-tracker-app-b6792",
-  storageBucket: "fitness-tracker-app-b6792.firebasestorage.app",
-  messagingSenderId: "458513477303",
-  appId: "1:458513477303:web:11c284ec5505e12a846732"
-};
-const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
-const db  = getFirestore(app);
-const UID = 'user_default';
-
-const logEl  = document.getElementById('log');
-const progEl = document.getElementById('prog-fill');
-let step = 0, totalSteps = 5;
-
-function log(msg, cls = 'inf') {
-  logEl.innerHTML += `<div class="${cls}">${msg}</div>`;
-  logEl.scrollTop = logEl.scrollHeight;
-}
-function setProgress(n) { progEl.style.width = Math.round((n / totalSteps) * 100) + '%'; }
-
-function makeId(name) {
-  return name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+function log(msg, ok=true) {
+  const el = document.getElementById('log');
+  el.innerHTML += `<div style="color:${ok?'var(--green)':'var(--red)'}">${msg}</div>`;
 }
 
-window.runSeed = async function() {
-  document.getElementById('btn').disabled = true;
-  logEl.innerHTML = '';
-  step = 0;
-  setProgress(0);
+window.doSeed = async function() {
+  document.getElementById('seed-btn').disabled = true;
+  document.getElementById('seed-btn').textContent = '⏳ Caricamento...';
+
   try {
-    await seedProgram();   setProgress(++step);
-    await seedExerciseLibrary(); setProgress(++step);
-    await seedDiet();      setProgress(++step);
-    await seedCheck();     setProgress(++step);
-    await seedSettings();  setProgress(++step);
-    log('─────────────────────────', 'inf');
-    log('✅ Tutti i dati caricati!', 'ok');
-    document.getElementById('go-home').style.display = 'block';
-  } catch(e) {
-    log('❌ Errore: ' + e.message, 'err');
-    console.error(e);
-  }
-  document.getElementById('btn').disabled = false;
-};
-
-async function seedProgram() {
-  log('💪 Creazione programma HIT Forza…', 'inf');
-  const data = {
-    name: "Programma HIT Forza - Primavera 2025",
-    active: true,
-    start_date: "2025-04-20",
-    end_date: "2025-05-18",
-    weeks: 4,
-    schedule: {
-      monday: null,
-      tuesday: {
-        name: "Dorso & Delt Posteriori",
-        time: "06:00",
-        cardio: { enabled: true, type: "Tapis Roulant", duration_minutes: 15, notes: "Pendenza 10-12%, Velocità 4.5-5.0 km/h" },
-        exercises: [
-          { name: "Lat Machine Presa Prona Media", sets: 2, reps: "6-8", weight_per_set: [0,0], rest_seconds: 150, notes: "Busto leggermente inclinato indietro, petto in fuori. Tira la sbarra verso lo sterno guidando il movimento con i gomiti. Frena la salita (fase eccentrica) in 3 secondi." },
-          { name: "Machine Row (Petto in appoggio)", sets: 2, reps: "6-8", weight_per_set: [0,0], rest_seconds: 120, notes: "Incolla il petto al cuscino. Tira indietro i gomiti rasente il busto e, nel punto di massima contrazione, unisci le scapole per 1 secondo netto prima di rilasciare." },
-          { name: "Pulley Basso Triangolo Presa Neutra", sets: 2, reps: "8-10", weight_per_set: [0,0], rest_seconds: 120, notes: "Ginocchia sbloccate. Allungati in avanti lasciando scivolare le scapole, poi tira il triangolo verso l'ombelico mantenendo il busto a 90 gradi, senza dondolare." },
-          { name: "Reverse Pec Deck", sets: 3, reps: "12-15", weight_per_set: [0,0,0], rest_seconds: 60, notes: "Braccia quasi tese. Pensa di dover allontanare i polsi tra loro, usando esclusivamente la parte posteriore della spalla. Nessun coinvolgimento dei tricipiti." },
-          { name: "Hanging Knee Raises alla sbarra", sets: 3, reps: "10-12", weight_per_set: [0,0,0], rest_seconds: 60, notes: "Appeso, spalle depresse. Contrai l'addome per sollevare il bacino e portare le ginocchia verso il petto. Evita l'oscillazione a pendolo." }
-        ]
-      },
-      wednesday: null,
-      thursday: {
-        name: "Petto & Spalle Front/Lat",
-        time: "06:00",
-        cardio: { enabled: true, type: "Tapis Roulant", duration_minutes: 15, notes: "Pendenza 10-12%, Velocità 4.5-5.0 km/h" },
-        exercises: [
-          { name: "Spinte Panca Inclinata Multipower", sets: 2, reps: "5-7", weight_per_set: [0,0], rest_seconds: 150, notes: "Panca a 30 gradi. Scendi lentamente 3 secondi fino a sfiorare la parte alta del petto, pausa 1 secondo al petto, esplodi in salita senza bloccare i gomiti." },
-          { name: "Chest Press Convergente", sets: 2, reps: "6-8", weight_per_set: [0,0], rest_seconds: 120, notes: "Scapole depresse e addotte. Spingi forte immaginando di voler avvicinare i bicipiti al centro del petto." },
-          { name: "Croci Cavi Bassi su Panca Inclinata", sets: 2, reps: "10-12", weight_per_set: [0,0], rest_seconds: 90, notes: "Braccia leggermente flesse. Movimento ampio. Chiudi le mani davanti agli occhi strizzando il petto." },
-          { name: "Lento Avanti Manubri Seduto 75 gradi", sets: 2, reps: "6-8", weight_per_set: [0,0], rest_seconds: 120, notes: "Core contratto. Scendi fino a che i manubri sfiorano le spalle, spingi verso l'alto senza far toccare i manubri tra loro." },
-          { name: "Alzate Laterali Manubri Seduto 80 gradi", sets: 2, reps: "8-10", weight_per_set: [0,0], rest_seconds: 90, notes: "Schiena incollata allo schienale. Mignolo leggermente ruotato verso l'alto. Guida il movimento con il gomito, non con la mano." }
-        ]
-      },
-      friday: null,
-      saturday: {
-        name: "Gambe",
-        time: "09:00",
-        cardio: null,
-        exercises: [
-          { name: "Leg Press 45 gradi", sets: 2, reps: "6-8", weight_per_set: [0,0], rest_seconds: 180, notes: "Piedi bassi e vicini. Scendi il più profondamente possibile senza sollevare i glutei dal sedile. Spingi spietatamente." },
-          { name: "Affondi Bulgari con Manubri", sets: 2, reps: "8-10", weight_per_set: [0,0], rest_seconds: 120, notes: "Per gamba. Busto leggermente inclinato in avanti. Scendi verticalmente, il ginocchio posteriore deve sfiorare il pavimento." },
-          { name: "Leg Extension Bilaterale", sets: 2, reps: "10-12", weight_per_set: [0,0], rest_seconds: 60, notes: "Sedere incollato al pad. Estendi completamente le gambe e tieni la contrazione per 1 secondo in cima a ogni ripetizione." },
-          { name: "Leg Curl Seduto", sets: 2, reps: "8-10", weight_per_set: [0,0], rest_seconds: 90, notes: "Movimento fluido in contrazione, ma la discesa deve durare 3 secondi esatti. Resisti al carico." },
-          { name: "Calf alla Pressa", sets: 3, reps: "12-15", weight_per_set: [0,0,0], rest_seconds: 60, notes: "Estensione totale in punta. Discesa massimale, tieni il massimo allungamento fermo in basso per 2 secondi. Nessun rimbalzo." },
-          { name: "Ab Wheel", sets: 3, reps: "max", weight_per_set: [0,0,0], rest_seconds: 60, notes: "Glutei e addome contratti. Ritorna indietro prima che la zona lombare ceda." }
-        ]
-      },
-      sunday: {
-        name: "Upper Pump & Braccia",
-        time: "09:00",
-        cardio: null,
-        exercises: [
-          { name: "Trazioni Presa Prona Larga", sets: 2, reps: "max", weight_per_set: [0,0], rest_seconds: 150, notes: "Parti a braccia completamente tese. Tira il petto verso la sbarra deprimendo le scapole." },
-          { name: "Spider Curl su Panca Inclinata", sets: 2, reps: "8-10", weight_per_set: [0,0], rest_seconds: 90, notes: "Pancia in giù sulla panca. Braccia perpendicolari al suolo. Piega solo il gomito e contrai il bicipite." },
-          { name: "Skullcrusher Manubri Panca Piana", sets: 2, reps: "8-10", weight_per_set: [0,0], rest_seconds: 90, notes: "Gomiti stretti puntati verso il soffitto. Fai scendere i manubri ai lati della testa, estendi strizzando i tricipiti." },
-          { name: "Curl a Martello Hammer al Cavo", sets: 2, reps: "10-12", weight_per_set: [0,0], rest_seconds: 90, notes: "Usa la fune. Tieni i gomiti incollati ai fianchi. Allarga leggermente le estremità della corda per colpire il brachiale." },
-          { name: "Estensioni Tricipiti Cavo Alto", sets: 2, reps: "8-10", weight_per_set: [0,0], rest_seconds: 90, notes: "Polsi dritti, apri la fune in fondo al movimento contraendo il tricipite." },
-          { name: "Alzate Laterali Manubri in piedi", sets: 3, reps: "12-15", weight_per_set: [0,0,0], rest_seconds: 60, notes: "Movimento esplosivo ma controllato. Cerca il massimo afflusso di sangue nel deltoide laterale." }
-        ]
-      }
-    }
-  };
-  await setDoc(doc(db, 'users', UID, 'programs', 'program_2025'), data);
-  log('✅ Programma creato', 'ok');
-}
-
-async function seedExerciseLibrary() {
-  log('📚 Creazione exercise library…', 'inf');
-  const exercises = [
-    "Lat Machine Presa Prona Media", "Machine Row (Petto in appoggio)",
-    "Pulley Basso Triangolo Presa Neutra", "Reverse Pec Deck",
-    "Hanging Knee Raises alla sbarra", "Spinte Panca Inclinata Multipower",
-    "Chest Press Convergente", "Croci Cavi Bassi su Panca Inclinata",
-    "Lento Avanti Manubri Seduto 75 gradi", "Alzate Laterali Manubri Seduto 80 gradi",
-    "Leg Press 45 gradi", "Affondi Bulgari con Manubri", "Leg Extension Bilaterale",
-    "Leg Curl Seduto", "Calf alla Pressa", "Ab Wheel",
-    "Trazioni Presa Prona Larga", "Spider Curl su Panca Inclinata",
-    "Skullcrusher Manubri Panca Piana", "Curl a Martello Hammer al Cavo",
-    "Estensioni Tricipiti Cavo Alto", "Alzate Laterali Manubri in piedi"
-  ];
-  for (const name of exercises) {
-    const id = makeId(name);
-    await setDoc(doc(db, 'users', UID, 'exercise_library', id), { name, last_used: null });
-  }
-  log(`✅ ${exercises.length} esercizi in libreria`, 'ok');
-
-  log('🍎 Creazione food library…', 'inf');
-  const foods = [
-    { name: "Whey Protein", kcal_per_100g: 380, protein_per_100g: 75, carbs_per_100g: 10, fats_per_100g: 5 },
-    { name: "Riso Basmati crudo", kcal_per_100g: 350, protein_per_100g: 7, carbs_per_100g: 78, fats_per_100g: 1 },
-    { name: "Crema di Riso", kcal_per_100g: 360, protein_per_100g: 7, carbs_per_100g: 80, fats_per_100g: 1 },
-    { name: "Pollo petto", kcal_per_100g: 165, protein_per_100g: 31, carbs_per_100g: 0, fats_per_100g: 4 },
-    { name: "Tacchino petto", kcal_per_100g: 157, protein_per_100g: 30, carbs_per_100g: 0, fats_per_100g: 3 },
-    { name: "Yogurt Greco 0%", kcal_per_100g: 57, protein_per_100g: 10, carbs_per_100g: 4, fats_per_100g: 0 },
-    { name: "Burro di Arachidi", kcal_per_100g: 588, protein_per_100g: 25, carbs_per_100g: 20, fats_per_100g: 50 },
-    { name: "Cornflakes", kcal_per_100g: 378, protein_per_100g: 7, carbs_per_100g: 84, fats_per_100g: 1 },
-    { name: "Banana", kcal_per_100g: 89, protein_per_100g: 1, carbs_per_100g: 23, fats_per_100g: 0 },
-    { name: "Olio EVO", kcal_per_100g: 884, protein_per_100g: 0, carbs_per_100g: 0, fats_per_100g: 100 },
-    { name: "Pane integrale", kcal_per_100g: 247, protein_per_100g: 9, carbs_per_100g: 46, fats_per_100g: 3 },
-    { name: "Patate", kcal_per_100g: 77, protein_per_100g: 2, carbs_per_100g: 17, fats_per_100g: 0 },
-    { name: "Piadina", kcal_per_100g: 290, protein_per_100g: 9, carbs_per_100g: 48, fats_per_100g: 8 },
-    { name: "Couscous crudo", kcal_per_100g: 376, protein_per_100g: 13, carbs_per_100g: 77, fats_per_100g: 1 },
-    { name: "Frutta Secca Noci", kcal_per_100g: 654, protein_per_100g: 15, carbs_per_100g: 14, fats_per_100g: 65 },
-    { name: "Fiocchi di Grano", kcal_per_100g: 340, protein_per_100g: 11, carbs_per_100g: 68, fats_per_100g: 2 },
-    { name: "Cioccolato Fondente", kcal_per_100g: 550, protein_per_100g: 5, carbs_per_100g: 57, fats_per_100g: 33 },
-    { name: "Miele", kcal_per_100g: 304, protein_per_100g: 0, carbs_per_100g: 82, fats_per_100g: 0 },
-    { name: "Gallette di Riso", kcal_per_100g: 387, protein_per_100g: 8, carbs_per_100g: 82, fats_per_100g: 3 },
-    { name: "Uova intere", kcal_per_100g: 155, protein_per_100g: 13, carbs_per_100g: 1, fats_per_100g: 11 },
-    { name: "Salmone", kcal_per_100g: 208, protein_per_100g: 20, carbs_per_100g: 0, fats_per_100g: 13 },
-    { name: "Tonno al naturale", kcal_per_100g: 116, protein_per_100g: 26, carbs_per_100g: 0, fats_per_100g: 1 },
-    { name: "Spinaci", kcal_per_100g: 23, protein_per_100g: 3, carbs_per_100g: 4, fats_per_100g: 0 },
-    { name: "Broccoli", kcal_per_100g: 34, protein_per_100g: 3, carbs_per_100g: 7, fats_per_100g: 0 }
-  ];
-  for (const food of foods) {
-    const id = makeId(food.name);
-    await setDoc(doc(db, 'users', UID, 'food_library', id), { ...food, last_used: null });
-  }
-  log(`✅ ${foods.length} alimenti in libreria`, 'ok');
-}
-
-async function seedDiet() {
-  log('🥗 Creazione piano dieta…', 'inf');
-  const data = {
-    name: "Piano Bulk Primavera 2025",
-    active: true,
-    day_on: {
-      kcal: 2700, protein: 190, carbs: 360, fats: 58,
-      meals: [
-        { type: "pre_workout", label: "Pre-Workout", time: "05:30", kcal: 160, protein: 3, carbs: 37, fats: 0,
-          items: "3 Gallette di Riso • 15g Miele • Caffè + pizzico di Sale", variants: null },
-        { type: "post_workout", label: "Post-Workout", time: "07:30", kcal: 480, protein: 30, carbs: 85, fats: 3,
-          items: "30g Whey • 1 Banana • 70g Crema di Riso", variants: null },
-        { type: "spuntino", label: "Spuntino", time: "10:30", kcal: 380, protein: 25, carbs: 35, fats: 16,
-          items: "150g Yogurt Greco 0% • 60g Pane Cereali/Integrale • 30g Burro d'Arachidi", variants: null },
-        { type: "pranzo", label: "Pranzo", time: "13:30", kcal: 750, protein: 45, carbs: 100, fats: 22,
-          items: "150g Pollo/Tacchino/Pesce magro • 200g Verdure",
-          variants: [
-            { label: "Opzione 1", detail: "130g Riso Basmati crudo + 2 cucchiai Olio EVO (20g)" },
-            { label: "Opzione 2", detail: "130g Couscous + 2 cucchiai Olio EVO (20g)" },
-            { label: "Opzione 3", detail: "320g Riso precotto in busta + 2 cucchiai Olio EVO (20g)" },
-            { label: "Opzione 4", detail: "200g Pancarrè 5 cereali + 1 cucchiaio Olio EVO (10g)" },
-            { label: "Opzione 5", detail: "2 Piadine (130g) + 1 Mela piccola + 1 cucchiaio Olio EVO (10g)" }
+    // ── PROGRAMMA ─────────────────────────────────────────────
+    await setDoc(doc(db,'users',USER_ID,'programs','program_2025'), {
+      name: "HIT Forza - Primavera 2025",
+      active: true,
+      start_date: "2025-04-20",
+      end_date: "2025-05-18",
+      weeks: 4,
+      progression_rule: "Ogni settimana: +0.5kg O +1 rep a parità di peso. 2 settimane stallo = cambiare approccio.",
+      schedule: {
+        monday: null,
+        tuesday: {
+          name: "Dorso & Delt Posteriori", time: "06:00",
+          cardio: { type: "Tapis Roulant LISS", duration_minutes: 15, notes: "Pendenza 10-12%, Vel 4.5-5.0" },
+          exercises: [
+            { name:"Lat Machine Presa Prona Media", sets:2, reps:"6-8", weight_per_set:[0,0], rest_seconds:150, notes:"Busto leggermente inclinato indietro, petto in fuori. Tira la sbarra verso lo sterno guidando con i gomiti. Eccentrica 3 secondi." },
+            { name:"Machine Row Petto in appoggio", sets:2, reps:"6-8", weight_per_set:[0,0], rest_seconds:120, notes:"Petto al cuscino. Gomiti rasente il busto, unisci scapole 1 secondo in contrazione." },
+            { name:"Pulley Basso Triangolo", sets:2, reps:"8-10", weight_per_set:[0,0], rest_seconds:120, notes:"Ginocchia sbloccate. Allungati avanti, tira verso ombelico, busto a 90 gradi fisso." },
+            { name:"Reverse Pec Deck", sets:3, reps:"12-15", weight_per_set:[0,0,0], rest_seconds:60, notes:"Braccia quasi tese. Allontana i polsi usando solo il deltoide posteriore." },
+            { name:"Hanging Knee Raises", sets:3, reps:"10-12", weight_per_set:[0,0,0], rest_seconds:60, notes:"Spalle depresse, contrai addome, solleva bacino. No oscillazione." }
           ]
         },
-        { type: "merenda", label: "Merenda", time: "17:00", kcal: 340, protein: 38, carbs: 45, fats: 2,
-          items: "1 Bevanda Milbona High Protein • 55g Cornflakes", variants: null },
-        { type: "cena", label: "Cena", time: "20:30", kcal: 590, protein: 50, carbs: 60, fats: 15,
-          items: "180g Carne Magra/Pesce • 200g Verdure",
-          variants: [
-            { label: "Opzione 1", detail: "70g Riso Basmati crudo + 1 cucchiaio Olio EVO (15g)" },
-            { label: "Opzione 2", detail: "400g Patate + 1 cucchiaio Olio EVO (15g)" },
-            { label: "Opzione 3", detail: "100g Pane + 1 cucchiaio Olio EVO (15g)" },
-            { label: "Opzione 4", detail: "70g Couscous + 1 cucchiaio Olio EVO (15g)" },
-            { label: "Opzione 5", detail: "180g Riso precotto in busta + 1 cucchiaio Olio EVO (15g)" },
-            { label: "Opzione 6", detail: "1 Piadina grande (80g) + 1 cucchiaio Olio EVO (15g)" }
+        wednesday: null,
+        thursday: {
+          name: "Petto & Spalle", time: "06:00",
+          cardio: { type: "Tapis Roulant LISS", duration_minutes: 15, notes: "Pendenza 10-12%, Vel 4.5-5.0" },
+          exercises: [
+            { name:"Panca Inclinata Multipower", sets:2, reps:"5-7", weight_per_set:[0,0], rest_seconds:150, notes:"Panca 30 gradi. Eccentrica 3 sec, pausa 1 sec al petto, esplodi." },
+            { name:"Chest Press Convergente", sets:2, reps:"6-8", weight_per_set:[0,0], rest_seconds:120, notes:"Scapole depresse e addotte. Spingi avvicinando i bicipiti al centro." },
+            { name:"Croci Cavi Bassi Panca Inclinata", sets:2, reps:"10-12", weight_per_set:[0,0], rest_seconds:90, notes:"Braccia flesse, movimento ampio, chiudi davanti agli occhi." },
+            { name:"Lento Avanti Manubri 75 gradi", sets:2, reps:"6-8", weight_per_set:[0,0], rest_seconds:120, notes:"Core contratto, scendi fino a sfiorare spalle, non toccare manubri in alto." },
+            { name:"Alzate Laterali Seduto 80 gradi", sets:2, reps:"8-10", weight_per_set:[0,0], rest_seconds:90, notes:"Schiena allo schienale, mignolo ruotato su, guida col gomito." }
+          ]
+        },
+        friday: null,
+        saturday: {
+          name: "Gambe", time: "09:00", cardio: null,
+          exercises: [
+            { name:"Leg Press 45", sets:2, reps:"6-8", weight_per_set:[0,0], rest_seconds:180, notes:"Piedi bassi e vicini. Scendi profondo senza sollevare glutei." },
+            { name:"Affondi Bulgari Manubri", sets:2, reps:"8-10", weight_per_set:[0,0], rest_seconds:120, notes:"Per gamba. Busto inclinato avanti, ginocchio posteriore sfiora terra." },
+            { name:"Leg Extension", sets:2, reps:"10-12", weight_per_set:[0,0], rest_seconds:60, notes:"Sedere incollato, estendi completamente, contrai 1 sec in cima." },
+            { name:"Leg Curl Seduto", sets:2, reps:"8-10", weight_per_set:[0,0], rest_seconds:90, notes:"Eccentrica 3 secondi esatti. Resisti al carico." },
+            { name:"Calf alla Pressa", sets:3, reps:"12-15", weight_per_set:[0,0,0], rest_seconds:60, notes:"Estensione totale, allungamento max fermo 2 sec in basso. No rimbalzo." },
+            { name:"Ab Wheel", sets:3, reps:"max", weight_per_set:[0,0,0], rest_seconds:60, notes:"Glutei e addome contratti. Torna prima che la lombare ceda." }
+          ]
+        },
+        sunday: {
+          name: "Upper Pump & Braccia", time: "09:00", cardio: null,
+          exercises: [
+            { name:"Trazioni Presa Prona Larga", sets:2, reps:"max", weight_per_set:[0,0], rest_seconds:150, notes:"Braccia tese in partenza. Tira il petto alla sbarra deprimendo scapole." },
+            { name:"Spider Curl Panca Inclinata", sets:2, reps:"8-10", weight_per_set:[0,0], rest_seconds:90, notes:"Pancia sulla panca, braccia perpendicolari. Solo gomito, contrai bicipite." },
+            { name:"Skullcrusher Manubri", sets:2, reps:"8-10", weight_per_set:[0,0], rest_seconds:90, notes:"Gomiti stretti al soffitto. Scendi ai lati della testa, strizza tricipiti." },
+            { name:"Curl Martello al Cavo", sets:2, reps:"10-12", weight_per_set:[0,0], rest_seconds:90, notes:"Fune, gomiti ai fianchi. Allarga estremità corda per colpire brachiale." },
+            { name:"Estensioni Tricipiti Cavo Alto", sets:2, reps:"8-10", weight_per_set:[0,0], rest_seconds:90, notes:"Polsi dritti, apri la fune in fondo contraendo tricipite." },
+            { name:"Alzate Laterali in piedi", sets:3, reps:"12-15", weight_per_set:[0,0,0], rest_seconds:60, notes:"Esplosivo ma controllato. Pompaggio puro, massimo afflusso sangue." }
           ]
         }
-      ]
-    },
-    day_off: {
-      kcal: 2400, protein: 190, carbs: 220, fats: 75,
-      meals: [
-        { type: "colazione", label: "Colazione", time: "07:30", kcal: 550, protein: 35, carbs: 90, fats: 6,
-          items: "30g Whey • 100g Fiocchi di Grano/Weetabix/Granola • 1 Banana", variants: null },
-        { type: "spuntino", label: "Spuntino", time: "10:30", kcal: 280, protein: 20, carbs: 8, fats: 17,
-          items: "150g Yogurt Greco 0% • 30g Frutta Secca (Noci o Mandorle)", variants: null },
-        { type: "pranzo", label: "Pranzo", time: "13:30", kcal: 720, protein: 45, carbs: 90, fats: 22,
-          items: "150g Pollo/Tacchino/Pesce magro • 200g Verdure",
-          variants: [
-            { label: "Opzione 1", detail: "110g Riso Basmati crudo + 2 cucchiai Olio EVO (20g)" },
-            { label: "Opzione 2", detail: "110g Couscous + 2 cucchiai Olio EVO (20g)" },
-            { label: "Opzione 3", detail: "270g Riso precotto in busta + 2 cucchiai Olio EVO (20g)" },
-            { label: "Opzione 4", detail: "180g Pancarrè 5 cereali + 1 cucchiaio Olio EVO (10g)" },
-            { label: "Opzione 5", detail: "1.5 Piadine grandi (115g) + 1 cucchiaio Olio EVO (10g)" }
-          ]
-        },
-        { type: "merenda", label: "Merenda", time: "17:00", kcal: 240, protein: 28, carbs: 15, fats: 8,
-          items: "Milbona Quark oppure Rice Porridge • 15g Cioccolato Fondente",
-          variants: [
-            { label: "Variante A", detail: "Milbona Quark (25g pro) + 15g Cioccolato Fondente" },
-            { label: "Variante B", detail: "Rice Porridge (18g pro) + 15g Cioccolato Fondente" }
-          ]
-        },
-        { type: "cena", label: "Cena Low Carb", time: "20:30", kcal: 510, protein: 50, carbs: 15, fats: 25,
-          items: "180g Carne Magra/Pesce • 300g+ Verdure verdi • 2.5 cucchiai Olio EVO (25g) — ZERO AMIDI",
-          variants: null }
-      ]
+      }
+    });
+    log('✅ Programma HIT Forza creato');
+
+    // ── EXERCISE LIBRARY ───────────────────────────────────────
+    const exercises = [
+      "Lat Machine Presa Prona Media","Machine Row Petto in appoggio","Pulley Basso Triangolo",
+      "Reverse Pec Deck","Hanging Knee Raises","Panca Inclinata Multipower","Chest Press Convergente",
+      "Croci Cavi Bassi Panca Inclinata","Lento Avanti Manubri 75 gradi","Alzate Laterali Seduto 80 gradi",
+      "Leg Press 45","Affondi Bulgari Manubri","Leg Extension","Leg Curl Seduto","Calf alla Pressa",
+      "Ab Wheel","Trazioni Presa Prona Larga","Spider Curl Panca Inclinata","Skullcrusher Manubri",
+      "Curl Martello al Cavo","Estensioni Tricipiti Cavo Alto","Alzate Laterali in piedi"
+    ];
+    for (const name of exercises) {
+      const id = name.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'');
+      await setDoc(doc(db,'users',USER_ID,'exercise_library',id), { name, last_used: null });
     }
-  };
-  await setDoc(doc(db, 'users', UID, 'diet_plans', 'diet_2025'), data);
-  log('✅ Piano dieta creato', 'ok');
-}
+    log(`✅ Exercise library: ${exercises.length} esercizi`);
 
-async function seedCheck() {
-  log('📏 Creazione check-in misure…', 'inf');
-  const data = {
-    date: "2025-04-20",
-    weight: 75,
-    notes: "Inizio programma Primavera 2025. Rispetto a 4 settimane fa: +1kg peso, +1cm spalle, vita stabile, +1cm braccio, +1cm coscia.",
-    measurements: { shoulders: 122, waist: 84, chest: null, bicep_l: 38, bicep_r: 38, thigh_l: 54, thigh_r: 54, calf_l: null, calf_r: null },
-    photos: [],
-    previous: { weight: 74, measurements: { shoulders: 121, waist: 84, bicep_l: 37, bicep_r: 37, thigh_l: 53, thigh_r: 53 } }
-  };
-  await setDoc(doc(db, 'users', UID, 'checks', 'check_20250420'), data);
-  log('✅ Check-in creato', 'ok');
-}
+    // ── PIANO DIETA ────────────────────────────────────────────
+    await setDoc(doc(db,'users',USER_ID,'diet_plans','diet_2025'), {
+      name: "Bulk Primavera 2025", active: true,
+      day_on: {
+        kcal:2700, protein:190, carbs:360, fats:58,
+        meals: [
+          { type:"pre_workout", label:"Pre-Workout", time:"05:30", kcal:160, protein:3, carbs:37, fats:0, items:"3 Gallette di Riso • 15g Miele • Caffè + Sale", variants:null },
+          { type:"post_workout", label:"Post-Workout", time:"07:30", kcal:480, protein:30, carbs:85, fats:3, items:"30g Whey • 1 Banana • 70g Crema di Riso", variants:null },
+          { type:"spuntino", label:"Spuntino", time:"10:30", kcal:380, protein:25, carbs:35, fats:16, items:"150g Yogurt Greco 0% • 60g Pane Integrale • 30g Burro Arachidi", variants:null },
+          { type:"pranzo", label:"Pranzo", time:"13:30", kcal:750, protein:45, carbs:100, fats:22, items:"150g Pollo/Tacchino/Pesce • 200g Verdure",
+            variants:[
+              {label:"Riso Basmati",detail:"130g Riso Basmati crudo + 20g Olio EVO"},
+              {label:"Couscous",detail:"130g Couscous + 20g Olio EVO"},
+              {label:"Riso precotto",detail:"320g Riso precotto busta + 20g Olio EVO"},
+              {label:"Pancarrè",detail:"200g Pancarrè 5 cereali + 10g Olio EVO"},
+              {label:"Piadine",detail:"2 Piadine (130g) + 1 Mela + 10g Olio EVO"}
+            ]},
+          { type:"merenda", label:"Merenda", time:"17:00", kcal:340, protein:38, carbs:45, fats:2, items:"1 Milbona High Protein • 55g Cornflakes", variants:null },
+          { type:"cena", label:"Cena", time:"20:30", kcal:590, protein:50, carbs:60, fats:15, items:"180g Carne/Pesce • 200g Verdure",
+            variants:[
+              {label:"Riso Basmati",detail:"70g Riso Basmati + 15g Olio EVO"},
+              {label:"Patate",detail:"400g Patate + 15g Olio EVO"},
+              {label:"Pane",detail:"100g Pane + 15g Olio EVO"},
+              {label:"Couscous",detail:"70g Couscous + 15g Olio EVO"},
+              {label:"Riso precotto",detail:"180g Riso precotto + 15g Olio EVO"},
+              {label:"Piadina",detail:"1 Piadina grande (80g) + 15g Olio EVO"}
+            ]}
+        ]
+      },
+      day_off: {
+        kcal:2400, protein:190, carbs:220, fats:75,
+        meals: [
+          { type:"colazione", label:"Colazione", time:"07:30", kcal:550, protein:35, carbs:90, fats:6, items:"30g Whey • 100g Fiocchi di Grano/Granola • 1 Banana", variants:null },
+          { type:"spuntino", label:"Spuntino", time:"10:30", kcal:280, protein:20, carbs:8, fats:17, items:"150g Yogurt Greco 0% • 30g Frutta Secca", variants:null },
+          { type:"pranzo", label:"Pranzo", time:"13:30", kcal:720, protein:45, carbs:90, fats:22, items:"150g Pollo/Tacchino/Pesce • 200g Verdure",
+            variants:[
+              {label:"Riso Basmati",detail:"110g Riso Basmati + 20g Olio EVO"},
+              {label:"Couscous",detail:"110g Couscous + 20g Olio EVO"},
+              {label:"Riso precotto",detail:"270g Riso precotto + 20g Olio EVO"},
+              {label:"Pancarrè",detail:"180g Pancarrè 5 cereali + 10g Olio EVO"},
+              {label:"Piadine",detail:"1.5 Piadine (115g) + 10g Olio EVO"}
+            ]},
+          { type:"merenda", label:"Merenda", time:"17:00", kcal:240, protein:28, carbs:15, fats:8, items:"Milbona Quark/Rice Porridge • 15g Cioccolato Fondente",
+            variants:[
+              {label:"Quark",detail:"Milbona Quark (25g pro) + 15g Cioccolato"},
+              {label:"Rice Porridge",detail:"Rice Porridge (18g pro) + 15g Cioccolato"}
+            ]},
+          { type:"cena", label:"Cena Low Carb", time:"20:30", kcal:510, protein:50, carbs:15, fats:25, items:"180g Carne/Pesce • 300g+ Verdure verdi • 25g Olio EVO — ZERO AMIDI", variants:null }
+        ]
+      }
+    });
+    log('✅ Piano dieta creato');
 
-async function seedSettings() {
-  log('⚙️ Salvataggio impostazioni…', 'inf');
-  await setDoc(doc(db, 'users', UID, 'settings', 'app'), {
-    auto_save: true,
-    auto_save_minutes: 5,
-    profile: { name: "Emanuele", weight_target: 78, height: 178 }
-  });
-  log('✅ Impostazioni salvate', 'ok');
-}
+    // ── FOOD LIBRARY ───────────────────────────────────────────
+    const foods = [
+      { name:"Whey Protein", kcal_per_100g:380, protein_per_100g:75, carbs_per_100g:10, fats_per_100g:5 },
+      { name:"Riso Basmati crudo", kcal_per_100g:350, protein_per_100g:7, carbs_per_100g:78, fats_per_100g:1 },
+      { name:"Crema di Riso", kcal_per_100g:360, protein_per_100g:7, carbs_per_100g:80, fats_per_100g:1 },
+      { name:"Pollo petto", kcal_per_100g:165, protein_per_100g:31, carbs_per_100g:0, fats_per_100g:4 },
+      { name:"Tacchino petto", kcal_per_100g:157, protein_per_100g:30, carbs_per_100g:0, fats_per_100g:3 },
+      { name:"Yogurt Greco 0%", kcal_per_100g:57, protein_per_100g:10, carbs_per_100g:4, fats_per_100g:0 },
+      { name:"Burro Arachidi", kcal_per_100g:588, protein_per_100g:25, carbs_per_100g:20, fats_per_100g:50 },
+      { name:"Cornflakes", kcal_per_100g:378, protein_per_100g:7, carbs_per_100g:84, fats_per_100g:1 },
+      { name:"Banana", kcal_per_100g:89, protein_per_100g:1, carbs_per_100g:23, fats_per_100g:0 },
+      { name:"Olio EVO", kcal_per_100g:884, protein_per_100g:0, carbs_per_100g:0, fats_per_100g:100 },
+      { name:"Pane integrale", kcal_per_100g:247, protein_per_100g:9, carbs_per_100g:46, fats_per_100g:3 },
+      { name:"Patate", kcal_per_100g:77, protein_per_100g:2, carbs_per_100g:17, fats_per_100g:0 },
+      { name:"Piadina", kcal_per_100g:290, protein_per_100g:9, carbs_per_100g:48, fats_per_100g:8 },
+      { name:"Couscous crudo", kcal_per_100g:376, protein_per_100g:13, carbs_per_100g:77, fats_per_100g:1 },
+      { name:"Noci", kcal_per_100g:654, protein_per_100g:15, carbs_per_100g:14, fats_per_100g:65 },
+      { name:"Fiocchi di Grano", kcal_per_100g:340, protein_per_100g:11, carbs_per_100g:68, fats_per_100g:2 },
+      { name:"Cioccolato Fondente", kcal_per_100g:550, protein_per_100g:5, carbs_per_100g:57, fats_per_100g:33 },
+      { name:"Miele", kcal_per_100g:304, protein_per_100g:0, carbs_per_100g:82, fats_per_100g:0 },
+      { name:"Gallette di Riso", kcal_per_100g:387, protein_per_100g:8, carbs_per_100g:82, fats_per_100g:3 },
+      { name:"Salmone", kcal_per_100g:208, protein_per_100g:20, carbs_per_100g:0, fats_per_100g:13 },
+      { name:"Tonno naturale", kcal_per_100g:116, protein_per_100g:26, carbs_per_100g:0, fats_per_100g:1 }
+    ];
+    for (const f of foods) {
+      const id = f.name.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'');
+      await setDoc(doc(db,'users',USER_ID,'food_library',id), { ...f, last_used: null });
+    }
+    log(`✅ Food library: ${foods.length} alimenti`);
+
+    // ── CHECK ──────────────────────────────────────────────────
+    await setDoc(doc(db,'users',USER_ID,'checks','check_20250420'), {
+      date:"2025-04-20", weight:75,
+      notes:"Inizio programma. Rispetto a 4 sett fa: +1kg, +1cm spalle, vita stabile, +1cm braccio, +1cm coscia.",
+      measurements:{shoulders:122,waist:84,chest:null,bicep_l:38,bicep_r:38,thigh_l:54,thigh_r:54,calf_l:null,calf_r:null},
+      photos:[],
+      previous:{weight:74,measurements:{shoulders:121,waist:84,bicep_l:37,bicep_r:37,thigh_l:53,thigh_r:53}}
+    });
+    log('✅ Check-in iniziale creato');
+
+    // ── SETTINGS ───────────────────────────────────────────────
+    await setDoc(doc(db,'users',USER_ID,'settings','app'), {
+      auto_save: true,
+      auto_save_minutes: 5,
+      profile: { name:"Emanuele", weight_target:78, height:178 }
+    });
+    log('✅ Settings salvate');
+
+    document.getElementById('seed-btn').textContent = '✅ Done!';
+    document.getElementById('seed-btn').style.background = 'var(--green)';
+    document.getElementById('log').innerHTML += `<div style="margin-top:20px"><a href="index.html" class="btn btn-v" style="display:inline-flex;width:auto;padding:12px 24px">🏠 Vai alla Home →</a></div>`;
+
+  } catch(e) {
+    log(`❌ Errore: ${e.message}`, false);
+    document.getElementById('seed-btn').disabled = false;
+    document.getElementById('seed-btn').textContent = '🚀 Carica Dati';
+  }
+};
 </script>
 </body>
 </html>

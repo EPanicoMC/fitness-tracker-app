@@ -1,128 +1,113 @@
 import {
-  db, USER_ID, collection, doc, getDoc, getDocs, setDoc, query, orderBy, where
+  db, USER_ID, collection, doc, getDoc, getDocs, setDoc, query, orderBy, limit
 } from './firebase-config.js';
-import { limit } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
-import {
-  getTodayString, getDayOfWeek, formatDateIT, formatTimer,
-  showToast, showModal, DAYS_IT, DAYS_ORDER
-} from './app.js';
+import { getTodayString, getDayOfWeek, showToast, showModal, fmtTimer, DAYS_IT, DAY_ORDER } from './app.js';
+import { AutoComplete, saveToLibrary } from './autocomplete.js';
 
-// ── Global state ───────────────────────────────────────────
 const TODAY = getTodayString();
-let currentSession   = null;
-let programData      = null;
-let sessionSeconds   = 0;
-let sessionInterval  = null;
-let restSeconds      = 0;
-let restInterval     = null;
-let isPaused         = false;
-let exercisesState   = [];
-let wakeLock         = null;
+let programData  = null;
+let sessionData  = null;
+let exState      = [];
+let sessionSec   = 0;
+let sessionInt   = null;
+let restSec      = 0;
+let restInt      = null;
+let isPaused     = false;
+let wakeLock     = null;
+let customExList = [];
 
 // ── Wake Lock ──────────────────────────────────────────────
 async function requestWakeLock() {
-  try {
-    if ('wakeLock' in navigator) {
-      wakeLock = await navigator.wakeLock.request('screen');
-    }
-  } catch(e) { console.log('Wake Lock n/d:', e); }
+  try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch(e) {}
 }
-function releaseWakeLock() {
-  if (wakeLock) { wakeLock.release(); wakeLock = null; }
-}
+function releaseWakeLock() { if (wakeLock) { wakeLock.release(); wakeLock = null; } }
 
-// ── Load session select ────────────────────────────────────
+// ── Load select screen ─────────────────────────────────────
 async function loadSessionSelect() {
-  const [progSnap, todaySnap] = await Promise.all([
+  const [progSnap, logsSnap] = await Promise.all([
     getDocs(collection(db, 'users', USER_ID, 'programs')),
-    getDoc(doc(db, 'users', USER_ID, 'daily_logs', TODAY))
+    getDocs(query(collection(db, 'users', USER_ID, 'daily_logs'), orderBy('date', 'desc'), limit(30)))
   ]);
 
   const activeDoc = progSnap.docs.find(d => d.data().active);
   if (!activeDoc) {
-    document.getElementById('no-program-msg').style.display = 'block';
+    document.getElementById('all-sessions').innerHTML =
+      '<div class="empty"><span class="ei">💪</span><p>Nessun programma attivo.<br><a href="programs.html" style="color:var(--accent)">Crea un programma</a></p></div>';
     return;
   }
-
   programData = { id: activeDoc.id, ...activeDoc.data() };
-  const todayData   = todaySnap.exists() ? todaySnap.data() : {};
-  const dow         = getDayOfWeek(TODAY);
-  const todaySession = programData.schedule?.[dow] || null;
-  const isTraining  = !!(todaySession);
-  const dayOverride = todayData.day_override;
-  const effectiveTraining = dayOverride !== null && dayOverride !== undefined ? dayOverride : isTraining;
 
-  // Auto-session card
-  if (todaySession) {
-    const autoCard = document.getElementById('auto-session-card');
-    autoCard.style.display = 'block';
-    document.getElementById('auto-session-name').textContent = todaySession.name;
-    const exCount = todaySession.exercises?.length || 0;
-    const cardio  = todaySession.cardio?.enabled ? ` + ${todaySession.cardio.type}` : '';
-    document.getElementById('auto-session-meta').textContent =
-      `${DAYS_IT[dow]} · ${exCount} esercizi${cardio}`;
+  const dow       = getDayOfWeek(TODAY);
+  const todayLog  = logsSnap.docs.find(d => d.data().date === TODAY)?.data();
+  const lastDone  = logsSnap.docs.find(d => d.data().date !== TODAY && d.data().workout?.completed)?.data();
+
+  // Suggested session: next after last done
+  const days = DAY_ORDER.filter(d => programData.schedule?.[d]);
+  let suggested = days.find(d => d === dow) || days[0];
+  if (lastDone?.workout?.session_day) {
+    const lastIdx = days.indexOf(lastDone.workout.session_day);
+    suggested = days[(lastIdx + 1) % days.length] || days[0];
+  }
+
+  if (suggested && programData.schedule[suggested]) {
+    const s = programData.schedule[suggested];
+    document.getElementById('sug-name').textContent = s.name;
+    document.getElementById('sug-meta').textContent =
+      `${DAYS_IT[suggested]} · ${s.exercises?.length || 0} esercizi${s.cardio ? ' + ' + s.cardio.type : ''}`;
+    document.getElementById('suggested-card').style.display = 'block';
+    document.getElementById('sug-btn').onclick = () => startWithSession(suggested);
   }
 
   // All sessions list
-  const listEl = document.getElementById('all-sessions-list');
-  const days = DAYS_ORDER.filter(d => programData.schedule?.[d]);
-  if (!days.length) {
-    listEl.innerHTML = '<p style="color:var(--t2);font-size:13px">Nessuna sessione nel programma.</p>';
-  } else {
-    listEl.innerHTML = days.map(d => {
-      const s  = programData.schedule[d];
-      const ex = s.exercises?.length || 0;
-      const cardioLabel = s.cardio?.enabled ? ` · 🏃 ${s.cardio.type}` : '';
-      const isToday = d === dow;
-      return `
-        <div class="session-select-card ${isToday ? 'card-glow' : ''}" onclick="window.startWithSession('${d}')">
-          <div>
-            <div class="session-select-name">${s.name}</div>
-            <div class="session-select-meta">${DAYS_IT[d]}${s.time ? ' · ' + s.time : ''} · ${ex} esercizi${cardioLabel}</div>
-          </div>
-          <button class="btn btn-o btn-sm" style="width:auto;flex-shrink:0">▶️</button>
-        </div>`;
-    }).join('');
-  }
-
-  // OFF override notice
-  if (!effectiveTraining && !todaySession) {
-    document.getElementById('off-override-card').style.display = 'block';
-  }
+  const listEl = document.getElementById('all-sessions');
+  listEl.innerHTML = days.map(d => {
+    const s = programData.schedule[d];
+    const isToday = d === dow;
+    return `
+      <div class="ss-card ${isToday ? 'card-o' : ''}" onclick="startWithSession('${d}')">
+        <div>
+          <div class="ss-name">${s.name}</div>
+          <div class="ss-meta">${DAYS_IT[d]}${s.time ? ' · ' + s.time : ''} · ${s.exercises?.length||0} esercizi${s.cardio ? ' · 🏃 ' + s.cardio.type : ''}</div>
+        </div>
+        <button class="btn btn-o btn-sm" style="flex-shrink:0">▶️</button>
+      </div>`;
+  }).join('');
 }
 
 // ── Start session ──────────────────────────────────────────
 window.startWithSession = async function(dayKey) {
-  const effectiveDay = dayKey === 'auto' ? getDayOfWeek(TODAY) : dayKey;
-  const session = programData?.schedule?.[effectiveDay];
+  const session = programData?.schedule?.[dayKey];
   if (!session) { showToast('Sessione non trovata', 'err'); return; }
 
-  // Load previous same-session log for pre-fill
-  let prevSessionLog = null;
+  // Load prev session log for weight pre-fill
+  let prevLog = null;
   try {
-    const logsSnap = await getDocs(
+    const snap = await getDocs(
       query(collection(db, 'users', USER_ID, 'daily_logs'), orderBy('date', 'desc'), limit(20))
     );
-    for (const d of logsSnap.docs) {
+    for (const d of snap.docs) {
       const ld = d.data();
-      if (ld.date !== TODAY && ld.workout?.session_day === effectiveDay && ld.workout?.exercises?.length) {
-        prevSessionLog = ld;
-        break;
+      if (ld.date !== TODAY && ld.workout?.session_day === dayKey && ld.workout?.exercises?.length) {
+        prevLog = ld; break;
       }
     }
-  } catch(e) { console.warn('prev session load:', e); }
+  } catch(e) {}
 
-  // Build exercisesState
-  exercisesState = (session.exercises || []).map(ex => {
-    const prevEx   = prevSessionLog?.workout?.exercises?.find(e => e.name === ex.name);
+  buildExState(session, dayKey, prevLog);
+  sessionData = { dayKey, name: session.name, cardio: session.cardio || null };
+  launchActive(session.name, `${DAYS_IT[dayKey]} · ${session.exercises?.length||0} esercizi`);
+};
+
+function buildExState(session, dayKey, prevLog) {
+  exState = (session.exercises || []).map(ex => {
+    const prevEx   = prevLog?.workout?.exercises?.find(e => e.name === ex.name);
     const setCount = typeof ex.sets === 'number' ? ex.sets : (ex.sets?.length || 3);
     return {
-      name:         ex.name,
-      rest_seconds: ex.rest_seconds || 60,
-      notes:        ex.notes || '',
-      is_cardio:    false,
+      name: ex.name,
+      rest_seconds: ex.rest_seconds || 90,
+      notes: ex.notes || '',
       sets: Array.from({ length: setCount }, (_, i) => ({
-        reps_target:   ex.reps || (ex.sets?.[i]?.reps ? String(ex.sets[i].reps) : '8'),
+        reps_target:   ex.reps || '8',
         ref_weight:    prevEx?.sets?.[i]?.weight ?? (ex.weight_per_set?.[i] || 0),
         actual_weight: prevEx?.sets?.[i]?.weight ?? (ex.weight_per_set?.[i] || 0),
         actual_reps:   '',
@@ -130,246 +115,242 @@ window.startWithSession = async function(dayKey) {
       }))
     };
   });
+}
 
-  currentSession = { dayKey: effectiveDay, name: session.name, cardio: session.cardio || null };
+function launchActive(title, sub) {
+  document.getElementById('st-sel').style.display = 'none';
+  document.getElementById('st-act').style.display = 'block';
+  document.getElementById('s-title').textContent = title;
+  document.getElementById('s-sub').textContent   = sub;
 
-  // Switch UI
-  document.getElementById('state-select').style.display = 'none';
-  document.getElementById('state-active').style.display = 'block';
-  document.getElementById('session-title').textContent    = session.name;
-  document.getElementById('session-subtitle').textContent = `${DAYS_IT[effectiveDay]} · ${session.exercises?.length || 0} esercizi`;
-
-  // Cardio section
-  if (session.cardio?.enabled) {
-    const cardioSec  = document.getElementById('cardio-section');
-    const cardioCard = document.getElementById('cardio-card');
-    cardioSec.style.display = 'block';
-    cardioCard.innerHTML = `
+  if (sessionData?.cardio?.type) {
+    const c = sessionData.cardio;
+    document.getElementById('s-cardio').style.display = 'block';
+    document.getElementById('s-cardio-card').innerHTML = `
       <div style="display:flex;align-items:center;gap:12px">
         <span style="font-size:24px">🏃</span>
-        <div>
-          <div style="font-weight:700;font-size:15px">${session.cardio.type}</div>
-          <div style="font-size:12px;color:var(--t2);margin-top:3px">${session.cardio.duration_minutes} min · ${session.cardio.notes}</div>
-        </div>
-        <div style="margin-left:auto">
-          <label class="tgl"><input type="checkbox" id="cardio-done"><span class="tgl-s"></span></label>
-        </div>
+        <div><div style="font-weight:700">${c.type}</div>
+        <div style="font-size:12px;color:var(--t2)">${c.duration_minutes} min · ${c.notes||''}</div></div>
+        <label class="tgl" style="margin-left:auto"><input type="checkbox" id="cardio-done"><span class="tgl-s"></span></label>
       </div>`;
   }
 
-  startSessionTimer();
+  sessionSec = 0;
+  sessionInt = setInterval(() => {
+    if (!isPaused) { sessionSec++; setT('s-timer', fmtTimer(sessionSec)); }
+  }, 1000);
+
   renderExercises();
   requestWakeLock();
-};
-
-// ── Session timer ──────────────────────────────────────────
-function startSessionTimer() {
-  const startEpoch = Date.now() - sessionSeconds * 1000;
-  sessionInterval = setInterval(() => {
-    if (!isPaused) {
-      sessionSeconds = Math.floor((Date.now() - startEpoch) / 1000);
-      const el = document.getElementById('session-timer');
-      if (el) el.textContent = formatTimer(sessionSeconds);
-    }
-  }, 500);
 }
 
-window.togglePause = function() {
-  isPaused = !isPaused;
-  const btn = document.getElementById('pause-btn');
-  if (btn) btn.textContent = isPaused ? '▶️ Riprendi' : '⏸ Pausa';
-};
-
-// ── Rest timer ─────────────────────────────────────────────
-function startRestTimer(seconds, nextLabel) {
-  clearInterval(restInterval);
-  restSeconds = seconds;
-  document.getElementById('rest-overlay').style.display = 'block';
-  document.getElementById('next-set-label').textContent = nextLabel;
-  updateRestDisplay();
-
-  restInterval = setInterval(() => {
-    restSeconds--;
-    updateRestDisplay();
-    if (restSeconds <= 0) {
-      clearInterval(restInterval);
-      hideRestOverlay();
-      showToast('⚡ Recupero terminato!');
-    }
-  }, 1000);
-}
-
-function updateRestDisplay() {
-  const el = document.getElementById('rest-timer-display');
-  if (!el) return;
-  el.textContent = restSeconds;
-  el.className = 'timer-rest' + (
-    restSeconds > 30 ? ' rest-green' :
-    restSeconds > 10 ? ' rest-orange' : ' rest-red'
-  );
-}
-
-function hideRestOverlay() {
-  document.getElementById('rest-overlay').style.display = 'none';
-}
-
-window.skipRest = function() {
-  clearInterval(restInterval);
-  hideRestOverlay();
-};
+function setT(id, v) { const e = document.getElementById(id); if (e) e.textContent = v; }
 
 // ── Render exercises ───────────────────────────────────────
 function renderExercises() {
-  const container = document.getElementById('session-exercises');
-  container.innerHTML = exercisesState.map((ex, ei) => renderExCard(ex, ei)).join('');
+  document.getElementById('s-exercises').innerHTML =
+    exState.map((ex, ei) => renderExCard(ex, ei)).join('');
 }
 
 function renderExCard(ex, ei) {
   const allDone = ex.sets.every(s => s.done);
   return `
-    <div class="ex-live-card ${allDone ? 'card-green' : ''}" id="ex-card-${ei}">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:4px">
-        <div class="ex-live-name">${ex.name}</div>
-        <button class="btn-icon" style="width:28px;height:28px;font-size:13px;flex-shrink:0"
-          onclick="window.toggleExNote(${ei})">ℹ️</button>
+    <div class="ex-live ${allDone ? 'completed' : ''}" id="exlive-${ei}">
+      <div class="ex-head">
+        <span class="ex-name">${ex.name}</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          ${ex.notes ? `<button class="btn-icon" style="width:34px;height:34px;font-size:14px" onclick="toggleNote(${ei})">ℹ️</button>` : ''}
+          ${allDone ? '<span class="badge badge-g">✓</span>' : `<span style="font-size:12px;color:var(--t2)">⏱ ${ex.rest_seconds}s</span>`}
+        </div>
       </div>
-      <div class="ex-live-meta">
-        ${ex.rest_seconds ? `⏱ ${ex.rest_seconds}s recupero` : ''}
-        ${allDone ? ' · <span style="color:var(--green)">✓ Completato</span>' : ''}
-      </div>
-      ${ex.notes ? `
-        <div id="ex-note-${ei}" style="display:none;font-size:12px;color:var(--t2);background:var(--bg4);
-          border-left:3px solid var(--accent);border-radius:0 8px 8px 0;
-          padding:10px 12px;margin-bottom:10px;line-height:1.5">${ex.notes}</div>` : ''}
+      ${ex.notes ? `<div class="ex-note" id="enote-${ei}">${ex.notes}</div>` : ''}
       ${ex.sets.map((s, si) => renderSetRow(ex, ei, si, s)).join('')}
     </div>`;
 }
 
 function renderSetRow(ex, ei, si, s) {
-  const hasRef = s.ref_weight > 0;
   return `
-    <div class="set-live-row" id="set-row-${ei}-${si}">
-      <span class="set-live-num">S${si+1}</span>
-      <div style="display:flex;flex-direction:column;align-items:center">
-        <input type="number" step="0.5" min="0"
-          value="${s.actual_weight || ''}" placeholder="kg"
-          id="w-${ei}-${si}"
+    <div class="set-row" id="srow-${ei}-${si}">
+      <span class="set-n">S${si+1}</span>
+      <div>
+        <input type="number" step="0.5" min="0" value="${s.actual_weight||''}" placeholder="kg"
           style="width:70px;padding:8px;text-align:center;font-size:15px;font-weight:700;
-            background:var(--bg3);border:1px solid var(--border2);border-radius:8px;color:var(--t1);outline:none;"
-          oninput="window._onWeightChange(${ei},${si},this.value)">
-        ${hasRef ? `<span style="font-size:10px;color:var(--t3);margin-top:2px">↩${s.ref_weight}kg</span>` : ''}
+            background:var(--bg3);border:1px solid var(--border2);border-radius:8px;color:var(--t1);outline:none"
+          oninput="onWeight(${ei},${si},this.value)">
+        ${s.ref_weight > 0 ? `<div class="set-prev">↩${s.ref_weight}kg</div>` : ''}
       </div>
-      <span style="font-size:11px;color:var(--t2)">kg</span>
-      <input type="text" placeholder="${s.reps_target}"
-        value="${s.actual_reps}"
-        id="r-${ei}-${si}"
+      <input type="text" placeholder="${s.reps_target}" value="${s.actual_reps}"
         style="width:62px;padding:8px;text-align:center;font-size:15px;font-weight:700;
-          background:var(--bg3);border:1px solid var(--border2);border-radius:8px;color:var(--t1);outline:none;"
-        oninput="window._onRepsChange(${ei},${si},this.value)">
-      <span style="font-size:11px;color:var(--t2)">reps</span>
-      <button class="set-done-btn ${s.done ? 'done' : ''}" id="done-${ei}-${si}"
-        onclick="window.markSetDone(${ei},${si})">
+          background:var(--bg3);border:1px solid var(--border2);border-radius:8px;color:var(--t1);outline:none"
+        oninput="onReps(${ei},${si},this.value)">
+      <div class="set-done ${s.done ? 'done' : ''}" id="sd-${ei}-${si}" onclick="markDone(${ei},${si})">
         ${s.done ? '✓' : ''}
-      </button>
+      </div>
     </div>`;
 }
 
-// ── Input handlers ─────────────────────────────────────────
-window._onWeightChange = function(ei, si, val) {
-  const parsed = parseFloat(val) || 0;
-  exercisesState[ei].sets[si].actual_weight = parsed;
-  // Propagate to subsequent empty sets
-  for (let j = si + 1; j < exercisesState[ei].sets.length; j++) {
-    if (!exercisesState[ei].sets[j].actual_weight) {
-      exercisesState[ei].sets[j].actual_weight = parsed;
-      const inp = document.getElementById(`w-${ei}-${j}`);
-      if (inp) inp.value = parsed || '';
+window.toggleNote = function(ei) {
+  const el = document.getElementById(`enote-${ei}`);
+  if (el) el.classList.toggle('open');
+};
+
+window.onWeight = function(ei, si, val) {
+  const v = parseFloat(val) || 0;
+  exState[ei].sets[si].actual_weight = v;
+  for (let j = si + 1; j < exState[ei].sets.length; j++) {
+    if (!exState[ei].sets[j].actual_weight) {
+      exState[ei].sets[j].actual_weight = v;
+      const inp = document.querySelector(`#srow-${ei}-${j} input[type="number"]`);
+      if (inp) inp.value = v || '';
     }
   }
 };
 
-window._onRepsChange = function(ei, si, val) {
-  exercisesState[ei].sets[si].actual_reps = val;
+window.onReps = function(ei, si, val) {
+  exState[ei].sets[si].actual_reps = val;
 };
 
-window.toggleExNote = function(ei) {
-  const el = document.getElementById(`ex-note-${ei}`);
-  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
-};
+window.markDone = function(ei, si) {
+  const s = exState[ei].sets[si];
+  s.done = !s.done;
+  const btn = document.getElementById(`sd-${ei}-${si}`);
+  if (btn) { btn.className = 'set-done' + (s.done ? ' done' : ''); btn.textContent = s.done ? '✓' : ''; }
 
-// ── Mark set done ──────────────────────────────────────────
-window.markSetDone = function(ei, si) {
-  const ex  = exercisesState[ei];
-  const set = ex.sets[si];
-  set.done = !set.done;
-
-  const btn = document.getElementById(`done-${ei}-${si}`);
-  if (btn) {
-    btn.className = 'set-done-btn' + (set.done ? ' done' : '');
-    btn.textContent = set.done ? '✓' : '';
-  }
-
-  if (set.done) {
-    // Find next undone set/exercise label
+  if (s.done) {
     let nextLabel = 'Fine esercizio';
-    const nextSet = ex.sets.find((s, j) => j > si && !s.done);
+    const nextSet = exState[ei].sets.find((x, j) => j > si && !x.done);
     if (nextSet) {
-      nextLabel = `${ex.name} S${ex.sets.indexOf(nextSet) + 1}`;
+      nextLabel = `${exState[ei].name} S${exState[ei].sets.indexOf(nextSet)+1}`;
     } else {
-      const nextEx = exercisesState.find((e, j) => j > ei && e.sets.some(s => !s.done));
+      const nextEx = exState.find((e, j) => j > ei && e.sets.some(x => !x.done));
       if (nextEx) nextLabel = nextEx.name;
     }
-    if (ex.rest_seconds > 0) startRestTimer(ex.rest_seconds, nextLabel);
+    if (exState[ei].rest_seconds > 0) startRest(exState[ei].rest_seconds, nextLabel);
   }
 
-  // Check if all sets done → mark exercise card
-  const allDone = ex.sets.every(s => s.done);
-  const card = document.getElementById(`ex-card-${ei}`);
+  const allDone = exState[ei].sets.every(x => x.done);
+  const card = document.getElementById(`exlive-${ei}`);
   if (card) {
-    if (allDone) card.classList.add('card-green');
-    else         card.classList.remove('card-green');
-    const meta = card.querySelector('.ex-live-meta');
-    if (meta) {
-      meta.innerHTML = `${ex.rest_seconds ? `⏱ ${ex.rest_seconds}s recupero` : ''}${allDone ? ' · <span style="color:var(--green)">✓ Completato</span>' : ''}`;
-    }
+    if (allDone) card.classList.add('completed'); else card.classList.remove('completed');
   }
+  updateVolume();
 };
 
-// ── Exit / Finish ──────────────────────────────────────────
-window.confirmExitSession = function() {
+// ── Rest timer ─────────────────────────────────────────────
+function startRest(sec, label) {
+  clearInterval(restInt);
+  restSec = sec;
+  document.getElementById('rest-box').style.display = 'block';
+  document.getElementById('rest-next').textContent = label;
+  updateRestDisplay();
+  restInt = setInterval(() => {
+    restSec--;
+    updateRestDisplay();
+    if (restSec <= 0) { clearInterval(restInt); hideRest(); showToast('⚡ Recupero terminato!'); }
+  }, 1000);
+}
+function updateRestDisplay() {
+  const el = document.getElementById('rest-num');
+  if (!el) return;
+  el.textContent = restSec;
+  el.className = 'timer-rest ' + (restSec > 30 ? 'rest-g' : restSec > 10 ? 'rest-o' : 'rest-r');
+}
+function hideRest() { document.getElementById('rest-box').style.display = 'none'; }
+
+window.skipRest    = function() { clearInterval(restInt); hideRest(); };
+window.togglePause = function() {
+  isPaused = !isPaused;
+  document.getElementById('pause-btn').textContent = isPaused ? '▶️ Riprendi' : '⏸ Pausa';
+};
+
+function updateVolume() {
+  const vol = exState.reduce((a, ex) =>
+    a + ex.sets.reduce((b, s) => b + (s.done ? (parseFloat(s.actual_weight)||0) * (parseFloat(s.actual_reps)||1) : 0), 0), 0);
+  setT('s-volume', Math.round(vol) + ' kg');
+}
+
+// ── Confirm exit ───────────────────────────────────────────
+window.confirmExit = function() {
   showModal({
     title: 'Esci dalla sessione?',
-    text:  'I progressi non salvati andranno persi.',
-    confirmLabel: 'Esci',
-    confirmClass: 'btn-r',
+    text: 'I progressi non salvati andranno persi.',
+    confirmLabel: 'Esci', confirmClass: 'btn-r',
     onConfirm: () => {
-      clearInterval(sessionInterval);
-      clearInterval(restInterval);
-      releaseWakeLock();
-      sessionSeconds = 0;
-      isPaused = false;
-      document.getElementById('state-active').style.display = 'none';
-      document.getElementById('state-select').style.display = 'block';
-      loadSessionSelect();
+      clearInterval(sessionInt); clearInterval(restInt); releaseWakeLock();
+      document.getElementById('st-act').style.display = 'none';
+      document.getElementById('st-sel').style.display = 'block';
     }
   });
 };
 
+// ── Custom session ─────────────────────────────────────────
+window.startCustom = function() {
+  document.getElementById('custom-form').style.display = 'block';
+  customExList = [];
+  document.getElementById('custom-ex-list').innerHTML = '';
+  addCustomEx();
+};
+
+window.addCustomEx = function() {
+  const idx = customExList.length;
+  customExList.push({ name:'', sets:3, reps:'8', rest_seconds:90 });
+  const wrap = document.createElement('div');
+  wrap.className = 'card card-dark';
+  wrap.style.marginBottom = '10px';
+  wrap.id = `cex-${idx}`;
+  wrap.innerHTML = `
+    <div class="grid2" style="margin-bottom:8px">
+      <div class="fg" style="margin:0"><label class="fl">Esercizio</label>
+        <input class="fi" id="cex-name-${idx}" placeholder="Nome esercizio"></div>
+      <div class="fg" style="margin:0"><label class="fl">Recupero (s)</label>
+        <input type="number" class="fi" value="90" oninput="customExList[${idx}].rest_seconds=+this.value"></div>
+    </div>
+    <div class="grid3">
+      <div class="fg" style="margin:0"><label class="fl">Serie</label>
+        <input type="number" class="fi" value="3" oninput="customExList[${idx}].sets=+this.value"></div>
+      <div class="fg" style="margin:0"><label class="fl">Reps</label>
+        <input class="fi" value="8" oninput="customExList[${idx}].reps=this.value"></div>
+      <div class="fg" style="margin:0"><label class="fl">Peso</label>
+        <input type="number" class="fi" step="0.5" placeholder="kg" oninput="customExList[${idx}].weight=+this.value"></div>
+    </div>`;
+  document.getElementById('custom-ex-list').appendChild(wrap);
+  new AutoComplete(document.getElementById(`cex-name-${idx}`), 'exercise_library', {
+    onSelect: item => { customExList[idx].name = item.name; },
+    onCustom: name  => { customExList[idx].name = name; }
+  });
+};
+
+window.launchCustom = function() {
+  const valid = customExList.filter(e => e.name.trim());
+  if (!valid.length) { showToast('Aggiungi almeno un esercizio', 'err'); return; }
+  exState = valid.map(ex => ({
+    name: ex.name,
+    rest_seconds: ex.rest_seconds || 90,
+    notes: '',
+    sets: Array.from({ length: ex.sets || 3 }, () => ({
+      reps_target: ex.reps || '8',
+      ref_weight: ex.weight || 0,
+      actual_weight: ex.weight || 0,
+      actual_reps: '',
+      done: false
+    }))
+  }));
+  sessionData = { dayKey: 'custom', name: 'Sessione Custom', cardio: null };
+  launchActive('Sessione Custom', `${exState.length} esercizi`);
+};
+
+// ── Finish session ─────────────────────────────────────────
 window.finishSession = async function() {
-  clearInterval(sessionInterval);
-  clearInterval(restInterval);
-  releaseWakeLock();
+  clearInterval(sessionInt); clearInterval(restInt); releaseWakeLock();
 
-  const cardioEl   = document.getElementById('cardio-done');
-  const cardioDone = cardioEl?.checked || false;
-
+  const cardioDone = document.getElementById('cardio-done')?.checked || false;
   const workoutLog = {
-    session_day:  currentSession.dayKey,
-    session_name: currentSession.name,
-    duration_seconds: sessionSeconds,
-    notes:    document.getElementById('session-notes')?.value || '',
-    completed: true,
-    exercises: exercisesState.map(ex => ({
+    session_day:      sessionData.dayKey,
+    session_name:     sessionData.name,
+    duration_seconds: sessionSec,
+    notes:            document.getElementById('s-notes')?.value || '',
+    completed:        true,
+    exercises: exState.map(ex => ({
       name: ex.name,
       sets: ex.sets.map(s => ({
         weight: parseFloat(s.actual_weight) || 0,
@@ -377,30 +358,22 @@ window.finishSession = async function() {
         done:   s.done
       }))
     })),
-    cardio: currentSession.cardio ? { ...currentSession.cardio, done: cardioDone } : null
+    cardio: sessionData.cardio ? { ...sessionData.cardio, done: cardioDone } : null
   };
 
   try {
     await setDoc(doc(db, 'users', USER_ID, 'daily_logs', TODAY),
       { workout: workoutLog, date: TODAY }, { merge: true });
 
-    // Update exercise_library last_used
-    const today = TODAY;
-    for (const ex of exercisesState) {
-      if (!ex.is_cardio) {
-        const id = ex.name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-        await setDoc(doc(db, 'users', USER_ID, 'exercise_library', id),
-          { name: ex.name, last_used: today }, { merge: true });
-      }
+    for (const ex of exState) {
+      await saveToLibrary('exercise_library', { name: ex.name, last_used: TODAY });
     }
 
-    showToast('🏁 Sessione salvata! Ottimo lavoro! 💪');
+    showToast('🏁 Sessione completata! 💪');
     setTimeout(() => { window.location.href = 'index.html'; }, 1500);
   } catch(e) {
-    console.error(e);
     showToast('Errore salvataggio', 'err');
   }
 };
 
-// ── Init ───────────────────────────────────────────────────
 loadSessionSelect();

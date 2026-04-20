@@ -2,37 +2,33 @@
 <html lang="it">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FitTracker – Schede</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>FitTracker</title>
   <link rel="stylesheet" href="css/style.css">
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#7c6fff">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="FitTracker">
 </head>
 <body>
 <div class="wrap">
-
   <div class="ph">
     <h1>💪 Schede</h1>
-    <button class="btn btn-v btn-sm" id="add-prog-btn" onclick="window.showProgramForm()">＋ Nuova</button>
+    <button class="btn btn-v btn-sm" onclick="openNew()">＋ Nuova</button>
   </div>
-
-  <div id="program-list"><div class="spin-wrap"></div></div>
-  <div id="program-form-wrap" style="display:none"></div>
-
+  <div id="prg-list"><div class="spin"></div></div>
+  <div id="prg-form" style="display:none"></div>
 </div>
 
 <nav class="bnav">
   <a href="index.html"><span class="ni">🏠</span><span>Home</span></a>
-  <a href="programs.html" class="active"><span class="ni">💪</span><span>Schede</span></a>
+  <a href="programs.html" class="on"><span class="ni">💪</span><span>Schede</span></a>
   <a href="diet.html"><span class="ni">🥗</span><span>Dieta</span></a>
-  <a href="checks.html"><span class="ni">📸</span><span>Check</span></a>
-  <a href="session.html" class="nav-workout"><span class="ni">🏋️</span><span>Allenati</span></a>
+  <a href="diary.html"><span class="ni">📅</span><span>Diario</span></a>
+  <a href="session.html"><span class="ni">🏋️</span><span>Allenati</span></a>
 </nav>
 
 <script type="module" src="js/programs.js"></script>
-<script>if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/fitness-tracker-app/sw.js'); }</script>
+<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/fitness-tracker-app/sw.js')</script>
 </body>
 </html>

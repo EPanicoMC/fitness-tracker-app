@@ -2,95 +2,113 @@
 <html lang="it">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FitTracker – Home</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>FitTracker</title>
   <link rel="stylesheet" href="css/style.css">
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#7c6fff">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="FitTracker">
 </head>
 <body>
 <div class="wrap">
 
-  <!-- TOP BAR -->
+  <!-- TOP -->
   <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:24px 0 16px">
     <div>
-      <h1 style="font-size:26px;font-weight:900;letter-spacing:-.5px">FitTracker 🏋️</h1>
-      <p id="today-label" style="font-size:13px;color:var(--t2);margin-top:4px"></p>
+      <p style="font-size:11px;color:var(--t2);font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px">Benvenuto, Emanuele</p>
+      <h1 style="font-size:28px;font-weight:900;letter-spacing:-1px">FitTracker 🏋️</h1>
+      <p id="date-label" style="font-size:13px;color:var(--t2);margin-top:4px"></p>
     </div>
-    <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
-      <div style="position:relative;width:72px;height:72px">
-        <svg width="72" height="72" viewBox="0 0 72 72" style="display:block">
-          <circle cx="36" cy="36" r="28" fill="none" stroke="var(--bg4)" stroke-width="5"/>
-          <circle id="ring-fill" cx="36" cy="36" r="28" fill="none"
-            stroke="var(--accent)" stroke-width="5" stroke-linecap="round"
-            stroke-dasharray="175.9" stroke-dashoffset="175.9"
-            transform="rotate(-90 36 36)"/>
-        </svg>
-        <div id="ring-pct" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800">0%</div>
-      </div>
-      <div style="font-size:10px;color:var(--t3);font-weight:600">completato</div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <div id="streak-box"></div>
+      <a href="settings.html" class="btn-icon">⚙️</a>
     </div>
   </div>
 
-  <!-- GIORNATA CARD -->
+  <!-- DAY TYPE + OVERRIDE -->
+  <div class="trow" style="margin-bottom:14px">
+    <div>
+      <div id="dtype-label" style="font-size:15px;font-weight:800"></div>
+      <div id="dtype-sub" style="font-size:12px;color:var(--t2)"></div>
+    </div>
+    <label class="tgl"><input type="checkbox" id="override-tgl"><span class="tgl-s"></span></label>
+  </div>
+
+  <!-- NUTRITION HERO -->
+  <div class="card card-glow">
+    <span class="clabel">🔥 Nutrizione oggi</span>
+    <div style="display:flex;align-items:flex-end;justify-content:space-between">
+      <div>
+        <div class="kcal-big" id="kcal-now">0</div>
+        <div class="kcal-sub">di <span id="kcal-tgt">2700</span> kcal target</div>
+      </div>
+      <div id="cring-box" style="flex-shrink:0"></div>
+    </div>
+    <div class="pbb h8" style="margin-top:14px"><div class="pbf pb-v" id="pb-kcal" style="width:0%"></div></div>
+    <p id="kcal-delta" style="font-size:13px;font-weight:600;margin-top:8px;min-height:18px"></p>
+    <div class="mchips">
+      <div class="mchip mc-pro"><div class="mchip-v" id="mc-pro">0g</div><div class="mchip-l">Proteine</div></div>
+      <div class="mchip mc-carb"><div class="mchip-v" id="mc-carb">0g</div><div class="mchip-l">Carbo</div></div>
+      <div class="mchip mc-fat"><div class="mchip-v" id="mc-fat">0g</div><div class="mchip-l">Grassi</div></div>
+    </div>
+  </div>
+
+  <!-- PASTI -->
   <div class="card">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-      <span class="clabel" style="margin:0">📊 Giornata</span>
-      <!-- day override toggle -->
-      <div style="display:flex;align-items:center;gap:8px">
-        <span id="day-type-label" style="font-size:12px;color:var(--t2);font-weight:600"></span>
-        <label class="tgl">
-          <input type="checkbox" id="day-override-toggle" onchange="window._onOverrideChange(this.checked)">
-          <span class="tgl-s"></span>
-        </label>
-      </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <span class="clabel" style="margin:0">🥗 Pasti del giorno</span>
     </div>
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-      <span style="font-size:13px;color:var(--t2);font-weight:600;white-space:nowrap">Peso</span>
-      <input type="number" class="fi" id="body-weight"
-        step="0.1" min="30" max="300" placeholder="—"
-        style="width:110px;text-align:center;font-size:22px;font-weight:800;padding:10px"
-        oninput="window._onBodyWeightChange(this.value)">
-      <span style="font-size:13px;color:var(--t2)">kg</span>
-      <div style="flex:1"></div>
-      <span style="font-size:13px;color:var(--t2);font-weight:600;white-space:nowrap">Steps</span>
-      <input type="number" class="fi" id="steps-input"
-        step="100" min="0" placeholder="—"
-        style="width:100px;text-align:center;font-size:18px;font-weight:800;padding:10px"
-        oninput="window._onStepsChange(this.value)">
+    <div id="meals-list"><div class="spin"></div></div>
+  </div>
+
+  <!-- AI QUICK INPUT -->
+  <div class="ai-box">
+    <span class="clabel">✨ Calcolo rapido AI</span>
+    <textarea id="ai-input" placeholder="Es: 100g pollo, 200g verdure, 130g riso, 20g olio evo"></textarea>
+    <button class="btn btn-v btn-sm" onclick="calcAI()" id="ai-btn" style="margin-top:10px;width:auto">🤖 Calcola Macro</button>
+    <div class="ai-result" id="ai-result"></div>
+  </div>
+
+  <!-- WORKOUT RECAP -->
+  <div class="card" id="workout-section">
+    <span class="clabel">💪 Allenamento</span>
+    <div id="workout-content"><div class="spin"></div></div>
+  </div>
+
+  <!-- STATS RAPIDE -->
+  <div class="grid2" style="margin-bottom:14px">
+    <div class="card card-dark" style="margin:0">
+      <span class="clabel">👟 Passi</span>
+      <input type="number" class="fi-in" id="steps-in" placeholder="—" style="font-size:24px;width:100%">
     </div>
-    <textarea class="notes-area" id="daily-note" placeholder="Come ti senti oggi…" rows="2"
-      oninput="window._onNoteChange(this.value)"></textarea>
+    <div class="card card-dark" style="margin:0">
+      <span class="clabel">🔥 Kcal bruciate</span>
+      <input type="number" class="fi-in" id="burned-in" placeholder="—" style="font-size:24px;width:100%">
+    </div>
   </div>
 
-  <!-- WORKOUT CARD -->
-  <div id="workout-card" class="card">
-    <div class="spin-wrap"></div>
+  <!-- NOTA -->
+  <div class="card card-dark">
+    <span class="clabel">📝 Nota del giorno</span>
+    <textarea id="note-in" class="fi" rows="2" placeholder="Come ti senti oggi..." style="background:transparent;border:none;padding:0"></textarea>
   </div>
 
-  <!-- NUTRITION CARD -->
-  <div id="nutrition-card" class="card">
-    <div class="spin-wrap"></div>
-  </div>
-
-  <!-- SAVE -->
-  <p id="autosave-info" style="text-align:center;font-size:11px;color:var(--t3);margin-bottom:8px;display:none">⚡ Auto-salvataggio attivo</p>
-  <button class="btn btn-v" onclick="window.saveLog()" style="margin-bottom:8px">💾 Salva Giornata</button>
+  <!-- SALVA -->
+  <button class="btn btn-v" id="save-btn" onclick="saveDay()">💾 Salva Giornata</button>
+  <p id="auto-label" style="text-align:center;font-size:11px;color:var(--t3);margin-top:8px"></p>
 
 </div>
 
 <nav class="bnav">
-  <a href="index.html" class="active"><span class="ni">🏠</span><span>Home</span></a>
+  <a href="index.html" class="on"><span class="ni">🏠</span><span>Home</span></a>
   <a href="programs.html"><span class="ni">💪</span><span>Schede</span></a>
   <a href="diet.html"><span class="ni">🥗</span><span>Dieta</span></a>
-  <a href="checks.html"><span class="ni">📸</span><span>Check</span></a>
-  <a href="session.html" class="nav-workout"><span class="ni">🏋️</span><span>Allenati</span></a>
+  <a href="diary.html"><span class="ni">📅</span><span>Diario</span></a>
+  <a href="session.html"><span class="ni">🏋️</span><span>Allenati</span></a>
 </nav>
 
 <script type="module" src="js/home.js"></script>
-<script>if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/fitness-tracker-app/sw.js'); }</script>
+<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/fitness-tracker-app/sw.js')</script>
 </body>
 </html>

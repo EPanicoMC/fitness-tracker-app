@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>FitTracker</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#7c6fff">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+</head>
+<body>
+<div class="wrap">
+  <div class="ph">
+    <h1>📅 Diario</h1>
+    <a href="checks.html" class="btn btn-ghost btn-sm">📸 Check</a>
+  </div>
+
+  <!-- MONTH NAV -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+    <button class="btn-icon" onclick="changeMonth(-1)">←</button>
+    <span id="month-label" style="font-size:18px;font-weight:800"></span>
+    <button class="btn-icon" onclick="changeMonth(1)">→</button>
+  </div>
+
+  <!-- CALENDAR HEADER -->
+  <div class="cal-grid" style="margin-bottom:4px">
+    <div class="cal-head">Lun</div>
+    <div class="cal-head">Mar</div>
+    <div class="cal-head">Mer</div>
+    <div class="cal-head">Gio</div>
+    <div class="cal-head">Ven</div>
+    <div class="cal-head">Sab</div>
+    <div class="cal-head">Dom</div>
+  </div>
+
+  <!-- CALENDAR DAYS -->
+  <div class="cal-grid" id="cal-grid"></div>
+
+  <!-- DAY DETAIL -->
+  <div id="day-detail" style="margin-top:16px;display:none"></div>
+</div>
+
+<nav class="bnav">
+  <a href="index.html"><span class="ni">🏠</span><span>Home</span></a>
+  <a href="programs.html"><span class="ni">💪</span><span>Schede</span></a>
+  <a href="diet.html"><span class="ni">🥗</span><span>Dieta</span></a>
+  <a href="diary.html" class="on"><span class="ni">📅</span><span>Diario</span></a>
+  <a href="session.html"><span class="ni">🏋️</span><span>Allenati</span></a>
+</nav>
+
+<script type="module" src="js/diary.js"></script>
+<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/fitness-tracker-app/sw.js')</script>
+</body>
+</html>
