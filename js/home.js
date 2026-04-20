@@ -180,14 +180,29 @@ function buildNutrition() {
 }
 
 function calcTotals() {
-  return mealStates.filter(m => m.eaten).reduce((a, m) => {
+  const fromPlan = mealStates.filter(m => m.eaten).reduce((a, m) => {
+    a.kcal    += m.override_kcal ?? m.kcal    ?? 0;
+    a.protein += m.protein ?? 0;
+    a.carbs   += m.carbs   ?? 0;
+    a.fats    += m.fats    ?? 0;
+    return a;
+  }, { kcal:0, protein:0, carbs:0, fats:0 });
+  const fromExtra = (logData.extra_meals || []).reduce((a, m) => {
     a.kcal    += m.kcal    || 0;
     a.protein += m.protein || 0;
     a.carbs   += m.carbs   || 0;
     a.fats    += m.fats    || 0;
     return a;
   }, { kcal:0, protein:0, carbs:0, fats:0 });
+  return {
+    kcal:    fromPlan.kcal    + fromExtra.kcal,
+    protein: fromPlan.protein + fromExtra.protein,
+    carbs:   fromPlan.carbs   + fromExtra.carbs,
+    fats:    fromPlan.fats    + fromExtra.fats
+  };
 }
+
+function updateNutritionTotals() { buildNutrition(); }
 
 // ── Meals ──────────────────────────────────────────────────
 function buildMeals() {
@@ -208,7 +223,19 @@ function buildMeals() {
     el.innerHTML = '<p style="color:var(--t2);font-size:13px;text-align:center;padding:16px">Nessun piano dieta attivo</p>';
     return;
   }
-  el.innerHTML = mealStates.map((m, mi) => renderMealRow(m, mi)).join('');
+  const extraHtml = (logData.extra_meals || []).map((m, xi) => `
+    <div class="meal-item eaten" style="border-left:3px solid var(--orange)">
+      <div class="meal-top">
+        <div class="meal-chk" style="background:var(--orange)">✓</div>
+        ${m.time ? `<span class="meal-time">${m.time}</span>` : ''}
+        <div class="meal-info">
+          <div class="meal-name">${m.name} <span style="font-size:10px;color:var(--orange);font-weight:700;background:rgba(255,152,0,.15);padding:1px 5px;border-radius:4px">EXTRA</span></div>
+          <div class="meal-meta">${m.kcal} kcal · P:${m.protein}g C:${m.carbs}g F:${m.fats}g</div>
+        </div>
+        <div class="meal-kcal">${m.kcal}</div>
+      </div>
+    </div>`).join('');
+  el.innerHTML = mealStates.map((m, mi) => renderMealRow(m, mi)).join('') + extraHtml;
 }
 
 function renderMealRow(m, mi) {
@@ -400,5 +427,112 @@ function setupAutoSave(minutes) {
   autoSaveTimer = setInterval(() => window.saveDay(), minutes * 60 * 1000);
   document.getElementById('auto-label').textContent = `Auto-salvataggio ogni ${minutes} min`;
 }
+
+// ── Aggiungi pasto extra ───────────────────────────────────
+window.openAddMeal = function() {
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg';
+  bg.id = 'add-meal-modal';
+  bg.innerHTML = `
+    <div class="modal" style="max-height:85vh;overflow-y:auto">
+      <div class="modal-handle"></div>
+      <h3>+ Aggiungi Pasto</h3>
+
+      <div class="fg">
+        <label class="fl">Nome pasto</label>
+        <input type="text" class="fi" id="am-name" placeholder="Es. Snack, Extra proteine...">
+      </div>
+
+      <div class="fg">
+        <label class="fl">Ingredienti</label>
+        <textarea class="fi" id="am-ingredients" rows="3"
+          placeholder="Es: 150g pollo, 100g riso, 10g olio&#10;Oppure inserisci macro manualmente sotto"></textarea>
+        <button class="btn btn-ghost btn-sm" onclick="calcAIMeal()"
+                style="margin-top:8px;width:auto">
+          ✨ Calcola con AI
+        </button>
+      </div>
+
+      <div class="fmp" id="am-macro-preview" style="margin-bottom:16px">
+        <div class="fmp-item">
+          <input type="number" class="fi" id="am-kcal" placeholder="Kcal" min="0">
+          <div class="fmp-l">Kcal</div>
+        </div>
+        <div class="fmp-item">
+          <input type="number" class="fi" id="am-protein" placeholder="0" min="0" step="0.1">
+          <div class="fmp-l">Proteine g</div>
+        </div>
+        <div class="fmp-item">
+          <input type="number" class="fi" id="am-carbs" placeholder="0" min="0" step="0.1">
+          <div class="fmp-l">Carbo g</div>
+        </div>
+        <div class="fmp-item">
+          <input type="number" class="fi" id="am-fats" placeholder="0" min="0" step="0.1">
+          <div class="fmp-l">Grassi g</div>
+        </div>
+      </div>
+
+      <div class="fg">
+        <label class="fl">Tipo pasto</label>
+        <select class="fi" id="am-type">
+          <option value="extra">Extra / Fuori piano</option>
+          <option value="colazione">Colazione</option>
+          <option value="spuntino">Spuntino</option>
+          <option value="pranzo">Pranzo</option>
+          <option value="merenda">Merenda</option>
+          <option value="cena">Cena</option>
+        </select>
+      </div>
+
+      <div class="modal-btns">
+        <button class="btn btn-flat" onclick="document.getElementById('add-meal-modal').remove()">
+          Annulla
+        </button>
+        <button class="btn btn-g" onclick="saveExtraMeal()">
+          💾 Salva
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(bg);
+  bg.onclick = e => { if (e.target === bg) bg.remove(); };
+};
+
+window.calcAIMeal = async function() {
+  const text = document.getElementById('am-ingredients')?.value?.trim();
+  if (!text) return showToast('Inserisci gli ingredienti', 'err');
+  showToast('⏳ Calcolo in corso...', 'info');
+  const r = await calcMacrosFromText(text);
+  if (!r.success) return showToast('Errore AI: ' + r.error, 'err');
+  document.getElementById('am-kcal').value    = r.kcal;
+  document.getElementById('am-protein').value = r.protein;
+  document.getElementById('am-carbs').value   = r.carbs;
+  document.getElementById('am-fats').value    = r.fats;
+  showToast('✅ Macro calcolati!');
+};
+
+window.saveExtraMeal = async function() {
+  const name    = document.getElementById('am-name')?.value?.trim();
+  const kcal    = parseFloat(document.getElementById('am-kcal')?.value)    || 0;
+  const protein = parseFloat(document.getElementById('am-protein')?.value) || 0;
+  const carbs   = parseFloat(document.getElementById('am-carbs')?.value)   || 0;
+  const fats    = parseFloat(document.getElementById('am-fats')?.value)    || 0;
+  const type    = document.getElementById('am-type')?.value || 'extra';
+
+  if (!name)                       return showToast('Inserisci il nome del pasto', 'err');
+  if (kcal === 0 && protein === 0) return showToast('Inserisci almeno le kcal', 'err');
+
+  if (!logData.extra_meals) logData.extra_meals = [];
+  logData.extra_meals.push({
+    name, type, kcal, protein, carbs, fats,
+    time:     new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }),
+    added_at: new Date().toISOString()
+  });
+
+  updateNutritionTotals();
+  document.getElementById('add-meal-modal')?.remove();
+  showToast('✅ Pasto aggiunto!');
+  buildMeals();
+};
 
 init();

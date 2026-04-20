@@ -33,13 +33,22 @@ export async function calcMacrosFromText(text) {
     };
   }
 
-  const prompt = `Sei un nutrizionista esperto. Ti vengono dati alimenti con quantità.
-Calcola il totale nutrizionale PRECISO.
-Rispondi SOLO con JSON valido, nessun testo extra, nessun markdown.
-Formato:
-{"kcal":numero,"protein":grammi,"carbs":grammi,"fats":grammi,"items":[{"name":"nome","grams":g,"kcal":n,"protein":g,"carbs":g,"fats":g}]}
+  const prompt = `Sei un nutrizionista sportivo certificato con database
+nutrizionale PRECISO. Calcola i valori nutrizionali ESATTI per 100g
+di ogni alimento usando i valori standard USDA/INRAN.
 
-Alimenti: ${text}`;
+REGOLE:
+- Usa valori nutrizionali standard italiani/europei
+- Per alimenti cotti considera il peso COTTO indicato
+- Per alimenti crudi considera il peso CRUDO indicato
+- Arrotonda kcal all'intero, macro a 1 decimale
+- Le kcal devono corrispondere ESATTAMENTE a (proteine×4 + carboidrati×4 + grassi×9)
+
+Rispondi SOLO con JSON valido, zero testo extra, zero markdown.
+Formato ESATTO:
+{"kcal":numero,"protein":numero,"carbs":numero,"fats":numero,"items":[{"name":"nome alimento","grams":numero,"kcal":numero,"protein":numero,"carbs":numero,"fats":numero}]}
+
+Alimenti da calcolare: ${text}`;
 
   for (const model of MODELS) {
     try {
