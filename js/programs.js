@@ -320,7 +320,7 @@ window.saveProgram = async function() {
 
   try {
     if (editingId) {
-      await setDoc(doc(db,'users',USER_ID,'programs',editingId), data, { merge: true });
+      await setDoc(doc(db,'users',USER_ID,'programs',editingId), data, { merge: false });
     } else {
       await addDoc(collection(db,'users',USER_ID,'programs'), data);
     }

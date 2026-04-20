@@ -1,15 +1,11 @@
 export function getTodayString() {
-  return new Date().toLocaleDateString('it-IT', {
-    timeZone: 'Europe/Rome',
-    year: 'numeric', month: '2-digit', day: '2-digit'
-  }).split('/').reverse().join('-');
+  return new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });
 }
 
 export function getYesterdayString() {
-  const now = new Date();
-  const italyNow = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Rome' }));
-  italyNow.setDate(italyNow.getDate() - 1);
-  return italyNow.toISOString().split('T')[0];
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });
 }
 
 export function getDayOfWeek(dateStr) {
@@ -18,14 +14,11 @@ export function getDayOfWeek(dateStr) {
     const [y,m,d] = dateStr.split('-').map(Number);
     return days[new Date(y, m-1, d).getDay()];
   }
-  const italyDate = new Date().toLocaleDateString('en-US', {
-    timeZone: 'Europe/Rome', weekday: 'long'
-  }).toLowerCase();
-  const map = {
-    monday:'monday', tuesday:'tuesday', wednesday:'wednesday',
-    thursday:'thursday', friday:'friday', saturday:'saturday', sunday:'sunday'
-  };
-  return map[italyDate] || days[new Date().getDay()];
+  const shortDay = new Date().toLocaleDateString('en-US', {
+    timeZone: 'Europe/Rome', weekday: 'short'
+  }).slice(0, 3);
+  const idx = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].indexOf(shortDay);
+  return days[idx >= 0 ? idx : new Date().getDay()];
 }
 export function formatDateIT(str) {
   const [y,m,d] = str.split('-').map(Number);

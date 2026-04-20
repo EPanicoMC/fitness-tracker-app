@@ -277,14 +277,34 @@ window.closeDietForm = function() {
 };
 
 window.saveDiet = async function() {
-  formData.name = document.getElementById('df-name')?.value.trim();
-  if (!formData.name) { showToast('Inserisci il nome', 'err'); return; }
+  const nameVal = document.getElementById('df-name')?.value?.trim();
+  if (!nameVal) { showToast('Inserisci il nome', 'err'); return; }
+  formData.name = nameVal;
   try {
-    const data = { ...formData, active: editingId ? (diets.find(d => d.id === editingId)?.active || false) : false };
+    const dataToSave = {
+      name: formData.name,
+      active: editingId ? (diets.find(d => d.id === editingId)?.active || false) : false,
+      updated_at: new Date().toISOString(),
+      day_on: {
+        kcal:    formData.day_on.kcal    || 0,
+        protein: formData.day_on.protein || 0,
+        carbs:   formData.day_on.carbs   || 0,
+        fats:    formData.day_on.fats    || 0,
+        meals:   formData.day_on.meals   || []
+      },
+      day_off: {
+        kcal:    formData.day_off.kcal    || 0,
+        protein: formData.day_off.protein || 0,
+        carbs:   formData.day_off.carbs   || 0,
+        fats:    formData.day_off.fats    || 0,
+        meals:   formData.day_off.meals   || []
+      }
+    };
     if (editingId) {
-      await setDoc(doc(db,'users',USER_ID,'diet_plans',editingId), data, { merge: true });
+      await setDoc(doc(db,'users',USER_ID,'diet_plans',editingId), dataToSave, { merge: false });
     } else {
-      await addDoc(collection(db,'users',USER_ID,'diet_plans'), data);
+      const ref = await addDoc(collection(db,'users',USER_ID,'diet_plans'), dataToSave);
+      editingId = ref.id;
     }
     showToast('✅ Piano salvato!');
     closeDietForm();
