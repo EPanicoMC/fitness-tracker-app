@@ -7,7 +7,8 @@ const TODAY = getTodayString();
 let currentMonth = new Date(TODAY + 'T12:00:00');
 currentMonth.setDate(1);
 let programData = null;
-let monthLogs   = {};
+let monthLogs    = {};
+let selectedDate = null;
 
 async function init() {
   const [progSnap, logsSnap] = await Promise.all([
@@ -124,6 +125,7 @@ function renderGrid(year, month) {
       if (isOn) cls += ' planned';
     }
 
+    if (dateStr === selectedDate) cls += ' selected';
     html += `<div class="${cls}" onclick="showDay('${dateStr}')">${d}</div>`;
   }
 
@@ -131,10 +133,29 @@ function renderGrid(year, month) {
 }
 
 // ── Day detail ─────────────────────────────────────────────
+window.closeDay = function() {
+  document.getElementById('day-detail').style.display = 'none';
+  selectedDate = null;
+  renderGrid(currentMonth.getFullYear(), currentMonth.getMonth());
+};
+
 window.showDay = async function(dateStr) {
   const det = document.getElementById('day-detail');
+
+  // Toggle: click same day again to close
+  if (selectedDate === dateStr && det.style.display !== 'none') {
+    det.style.display = 'none';
+    selectedDate = null;
+    renderGrid(currentMonth.getFullYear(), currentMonth.getMonth());
+    return;
+  }
+
+  selectedDate = dateStr;
+  renderGrid(currentMonth.getFullYear(), currentMonth.getMonth());
+
   det.style.display = 'block';
   det.innerHTML = '<div class="spin"></div>';
+  setTimeout(() => { det.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, 100);
 
   const log = monthLogs[dateStr];
   const dow = getDayOfWeek(dateStr);
@@ -142,11 +163,13 @@ window.showDay = async function(dateStr) {
   const isFuture = dateStr > TODAY;
   const isPast   = dateStr < TODAY;
   const session  = programData?.schedule?.[dow];
+  const X = `<button onclick="closeDay()" style="float:right;background:none;border:none;color:var(--t2);font-size:20px;cursor:pointer;line-height:1;padding:0">✕</button>`;
 
   // Futuro pianificato
   if (isFuture && !log && isOn && session) {
     det.innerHTML = `
       <div class="diary-card">
+        ${X}
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
           <p style="font-size:15px;font-weight:700">${formatDateIT(dateStr)}</p>
           <span class="badge" style="background:rgba(124,111,255,.2);color:var(--accent)">📅 Pianificato</span>
@@ -167,6 +190,7 @@ window.showDay = async function(dateStr) {
   if (isPast && !log && isOn) {
     det.innerHTML = `
       <div class="diary-card">
+        ${X}
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
           <p style="font-size:15px;font-weight:700">${formatDateIT(dateStr)}</p>
           <span class="badge badge-r">❌ Saltata</span>
@@ -187,6 +211,7 @@ window.showDay = async function(dateStr) {
   if (!log) {
     det.innerHTML = `
       <div class="diary-card">
+        ${X}
         <p style="font-size:15px;font-weight:700;margin-bottom:4px">${formatDateIT(dateStr)}</p>
         <p style="color:var(--t2);font-size:14px">Nessun dato registrato</p>
         ${isPast ? `<button class="btn btn-ghost btn-sm" style="margin-top:10px;width:100%" onclick="openRecoverDay('${dateStr}')">📋 Recupera questa giornata</button>` : ''}
@@ -222,6 +247,7 @@ window.showDay = async function(dateStr) {
 
   det.innerHTML = `
     <div class="diary-card">
+      ${X}
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <p style="font-size:16px;font-weight:800">${formatDateShort(dateStr)}</p>
         <span class="badge ${isOn ? 'badge-g' : 'badge-r'}">${isOn ? '💪 ON' : '😴 OFF'}</span>
@@ -256,6 +282,7 @@ async function getActiveDietPlan() {
 
 window.changeMonth = function(delta) {
   currentMonth.setMonth(currentMonth.getMonth() + delta);
+  selectedDate = null;
   document.getElementById('day-detail').style.display = 'none';
   loadCalendar();
 };

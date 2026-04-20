@@ -175,9 +175,9 @@ textarea.fi{resize:vertical;min-height:70px;line-height:1.5}
 .ss-meta{font-size:12px;color:var(--t2);margin-top:3px}
 
 /* CALENDAR */
-.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;position:relative;z-index:1}
 .cal-head{font-size:10px;color:var(--t3);font-weight:700;padding:8px 0;text-transform:uppercase}
-.cal-day{aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;transition:all .2s;position:relative;gap:2px}
+.cal-day{aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;transition:all .2s;position:relative;z-index:1;gap:2px}
 .cal-day:hover{background:rgba(255,255,255,.05)}
 .cal-day.today{border:2px solid var(--accent)}
 .cal-day.has-on::after{content:'';width:6px;height:6px;border-radius:50%;background:var(--green)}
@@ -185,10 +185,11 @@ textarea.fi{resize:vertical;min-height:70px;line-height:1.5}
 .cal-day.missed::after{content:'';width:6px;height:6px;border-radius:50%;background:var(--red)}
 .cal-day.planned::after{content:'';width:6px;height:6px;border-radius:50%;background:var(--accent)}
 .cal-day.empty{opacity:.2;cursor:default}
-.cal-day.selected{background:var(--accent);color:#fff}
+.cal-day.selected{background:var(--accent);color:#fff;z-index:2}
 
 /* DIARY DAY CARD */
-.diary-card{background:var(--bg3);border-radius:var(--r);padding:18px;border:1px solid var(--border)}
+#day-detail{position:relative;z-index:10;margin-top:16px;background:var(--bg);animation:fup .3s ease both}
+.diary-card{background:var(--bg3);border-radius:var(--r);padding:18px;border:1px solid var(--border);position:relative;z-index:10}
 
 /* AUTOCOMPLETE */
 .ac-wrap{position:relative}

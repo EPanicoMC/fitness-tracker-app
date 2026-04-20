@@ -7,12 +7,48 @@ import {
 import { calcMacrosFromText } from './gemini.js';
 
 const TODAY = getTodayString();
+const LS_KEY = 'fittracker_home_' + TODAY;
 let logData = {};
 let activeDiet = null;
 let activeProgram = null;
 let appSettings = null;
 let isTrainingDay = false;
 let mealStates = [];
+
+function saveToLocal() {
+  try {
+    const meals_state = {};
+    mealStates.forEach((m, i) => {
+      meals_state[i] = { eaten: m.eaten, variant: m.active_variant };
+    });
+    const toSave = {
+      steps:            logData.steps,
+      burned_kcal:      logData.burned_kcal,
+      daily_note:       logData.daily_note,
+      is_training_day:  isTrainingDay,
+      day_override:     logData.day_override,
+      extra_meals:      logData.extra_meals || [],
+      meals_state,
+      nutrition_totals: logData.nutrition?.totals || {}
+    };
+    localStorage.setItem(LS_KEY, JSON.stringify(toSave));
+    Object.keys(localStorage)
+      .filter(k => k.startsWith('fittracker_home_') && k !== LS_KEY)
+      .forEach(k => localStorage.removeItem(k));
+  } catch(e) {
+    console.warn('localStorage save failed:', e);
+  }
+}
+
+function loadFromLocal() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch(e) {
+    return null;
+  }
+}
 
 // ── Init ───────────────────────────────────────────────────
 async function init() {
@@ -30,6 +66,17 @@ async function init() {
   activeDiet    = dietSnap.docs.find(d => d.data().active)?.data() || null;
   appSettings   = settSnap.exists() ? settSnap.data() : {};
 
+  // Merge localStorage (higher priority for today's working state)
+  const local = loadFromLocal();
+  if (local) {
+    if (local.steps != null)        logData.steps = local.steps;
+    if (local.burned_kcal != null)  logData.burned_kcal = local.burned_kcal;
+    if (local.daily_note != null)   logData.daily_note = local.daily_note;
+    if (local.day_override != null) logData.day_override = local.day_override;
+    if (local.extra_meals?.length)  logData.extra_meals = local.extra_meals;
+    if (local.meals_state)          logData.meals_state = local.meals_state;
+  }
+
   const name = appSettings?.profile?.name || appSettings?.name || '';
   const welcomeEl = document.getElementById('welcome-name');
   if (welcomeEl) welcomeEl.textContent = name ? `Benvenuto, ${name}` : 'Benvenuto';
@@ -38,6 +85,8 @@ async function init() {
   const progDay = activeProgram?.schedule?.[dow];
   if (logData.day_override != null) {
     isTrainingDay = logData.day_override;
+  } else if (local?.is_training_day != null) {
+    isTrainingDay = local.is_training_day;
   } else {
     isTrainingDay = !!progDay;
   }
@@ -131,6 +180,7 @@ function buildDayType() {
     }
     isTrainingDay = newVal;
     logData.day_override = newVal;
+    saveToLocal();
     buildDayType();
     buildNutrition();
     buildWorkout();
@@ -209,8 +259,8 @@ function buildMeals() {
   if (mealStates.length === 0 || mealStates.length !== meals.length) {
     mealStates = meals.map((m, i) => ({
       ...m,
-      eaten: logData.meals_eaten?.[i] || false,
-      active_variant: logData.meals_variant?.[i] ?? null,
+      eaten: logData.meals_state?.[i]?.eaten ?? logData.meals_eaten?.[i] ?? false,
+      active_variant: logData.meals_state?.[i]?.variant ?? logData.meals_variant?.[i] ?? null,
       override_kcal: logData.meals_override?.[i]?.kcal ?? null
     }));
   }
@@ -280,6 +330,9 @@ function renderMealRow(m, mi) {
 
 window.toggleMeal = function(mi) {
   mealStates[mi].eaten = !mealStates[mi].eaten;
+  if (!logData.meals_state) logData.meals_state = {};
+  logData.meals_state[mi] = { eaten: mealStates[mi].eaten, variant: mealStates[mi].active_variant };
+  saveToLocal();
   buildMeals();
   buildNutrition();
 };
@@ -291,6 +344,9 @@ window.toggleMealDetail = function(mi) {
 
 window.selectVariant = function(mi, vi) {
   mealStates[mi].active_variant = mealStates[mi].active_variant === vi ? null : vi;
+  if (!logData.meals_state) logData.meals_state = {};
+  logData.meals_state[mi] = { eaten: mealStates[mi].eaten, variant: mealStates[mi].active_variant };
+  saveToLocal();
   buildMeals();
 };
 
@@ -368,6 +424,19 @@ function buildStats() {
   if (logData.steps)       document.getElementById('steps-in').value  = logData.steps;
   if (logData.burned_kcal) document.getElementById('burned-in').value = logData.burned_kcal;
   if (logData.daily_note)  document.getElementById('note-in').value   = logData.daily_note;
+
+  document.getElementById('steps-in').addEventListener('change', () => {
+    logData.steps = parseInt(document.getElementById('steps-in').value) || null;
+    saveToLocal();
+  });
+  document.getElementById('burned-in').addEventListener('change', () => {
+    logData.burned_kcal = parseInt(document.getElementById('burned-in').value) || null;
+    saveToLocal();
+  });
+  document.getElementById('note-in').addEventListener('blur', () => {
+    logData.daily_note = document.getElementById('note-in').value;
+    saveToLocal();
+  });
 }
 
 // ── AI ─────────────────────────────────────────────────────
@@ -396,7 +465,13 @@ window.saveDay = async function() {
   const steps       = parseInt(document.getElementById('steps-in').value)  || null;
   const burned_kcal = parseInt(document.getElementById('burned-in').value) || null;
   const daily_note  = document.getElementById('note-in').value;
+
+  logData.steps       = steps;
+  logData.burned_kcal = burned_kcal;
+  logData.daily_note  = daily_note;
+
   const tots = calcTotals();
+  saveToLocal();
 
   const data = {
     date:            TODAY,
@@ -405,8 +480,7 @@ window.saveDay = async function() {
     burned_kcal,
     daily_note,
     nutrition:    { totals: tots },
-    streak:       logData.streak || 1,
-    extra_meals:  logData.extra_meals || []
+    streak:       logData.streak || 1
   };
   if (logData.day_override != null) data.day_override = logData.day_override;
 
@@ -639,6 +713,7 @@ window.saveExtraMeal = async function() {
   });
 
   updateNutritionTotals();
+  saveToLocal();
   document.getElementById('add-meal-modal')?.remove();
   showToast('✅ Pasto aggiunto!');
   buildMeals();
