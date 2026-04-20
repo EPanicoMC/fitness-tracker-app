@@ -1,4 +1,21 @@
-import { GEMINI_KEY } from './firebase-config.js';
+import { db, USER_ID } from './firebase-config.js';
+import { doc, getDoc } from './firebase-config.js';
+
+let cachedKey = null;
+
+async function getGeminiKey() {
+  if (cachedKey) return cachedKey;
+  try {
+    const snap = await getDoc(doc(db, 'users', USER_ID, 'settings', 'gemini'));
+    if (snap.exists()) {
+      cachedKey = snap.data().api_key;
+      return cachedKey;
+    }
+  } catch(e) {
+    console.error('Errore lettura Gemini key:', e);
+  }
+  return null;
+}
 
 const MODELS = [
   'gemini-2.0-flash-lite',
@@ -7,24 +24,26 @@ const MODELS = [
 ];
 
 export async function calcMacrosFromText(text) {
-  const prompt = `Sei un nutrizionista esperto e preciso. Ti vengono dati degli alimenti con quantità.
-Calcola il totale nutrizionale PRECISO.
+  const key = await getGeminiKey();
 
-Rispondi SOLO con un JSON valido, nessun testo extra, nessun markdown.
-Formato esatto:
-{
-  "kcal": numero,
-  "protein": numero_grammi,
-  "carbs": numero_grammi,
-  "fats": numero_grammi,
-  "items": [{"name": "nome alimento", "grams": grammi, "kcal": numero, "protein": g, "carbs": g, "fats": g}]
-}
+  if (!key) {
+    return {
+      success: false,
+      error: 'API key non configurata. Vai su Impostazioni per aggiungerla.'
+    };
+  }
+
+  const prompt = `Sei un nutrizionista esperto. Ti vengono dati alimenti con quantità.
+Calcola il totale nutrizionale PRECISO.
+Rispondi SOLO con JSON valido, nessun testo extra, nessun markdown.
+Formato:
+{"kcal":numero,"protein":grammi,"carbs":grammi,"fats":grammi,"items":[{"name":"nome","grams":g,"kcal":n,"protein":g,"carbs":g,"fats":g}]}
 
 Alimenti: ${text}`;
 
   for (const model of MODELS) {
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -35,10 +54,13 @@ Alimenti: ${text}`;
       });
 
       if (res.status === 429) {
-        console.warn(`${model} rate limited, trying next model...`);
+        console.warn(`${model} rate limited, trying next...`);
         continue;
       }
-      if (!res.ok) throw new Error(`API error: ${res.status}`);
+      if (!res.ok) {
+        console.warn(`${model} error ${res.status}`);
+        continue;
+      }
 
       const data = await res.json();
       const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
@@ -47,7 +69,7 @@ Alimenti: ${text}`;
 
       return {
         success: true,
-        model,
+        model: model,
         kcal:    Math.round(result.kcal    || 0),
         protein: Math.round(result.protein || 0),
         carbs:   Math.round(result.carbs   || 0),
@@ -56,8 +78,12 @@ Alimenti: ${text}`;
       };
     } catch(e) {
       console.warn(`${model} failed:`, e.message);
+      continue;
     }
   }
 
-  return { success: false, error: 'Tutti i modelli AI non disponibili. Riprova tra poco.' };
+  return {
+    success: false,
+    error: 'Tutti i modelli non disponibili. Riprova tra qualche secondo.'
+  };
 }

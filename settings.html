@@ -64,6 +64,25 @@
   </div>
 
   <button class="btn btn-v" onclick="saveSettings()">💾 Salva</button>
+
+  <div class="card" style="margin-top:14px">
+    <span class="clabel">🤖 Gemini AI</span>
+    <div class="s-row">
+      <div>
+        <div class="s-lbl">API Key</div>
+        <div class="s-sub">Usata per il calcolo macro automatico</div>
+      </div>
+    </div>
+    <div class="fg" style="margin-top:12px">
+      <input type="password" class="fi" id="gemini-key-input"
+             placeholder="AIza...">
+      <p id="gemini-key-status" style="font-size:12px;margin-top:6px;color:var(--t2)"></p>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="saveGeminiKey()"
+            style="margin-top:8px;width:auto">
+      💾 Salva Key
+    </button>
+  </div>
 </div>
 
 <script type="module" src="js/settings.js"></script>

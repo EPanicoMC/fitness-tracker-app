@@ -1,4 +1,3 @@
-import { GEMINI_KEY } from './env.js';
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import {
   getFirestore,
@@ -30,14 +29,11 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const USER_ID = "user_default";
 const storage = getStorage(app);
-const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
 export {
   db,
   USER_ID,
   storage,
-  GEMINI_KEY,
-  GEMINI_URL,
   collection,
   doc,
   getDoc,

@@ -10,6 +10,19 @@ async function loadSettings() {
   if (s.profile?.weight_target) document.getElementById('s-wtarget').value  = s.profile.weight_target;
   if (s.auto_save)              document.getElementById('s-autosave').checked = true;
   if (s.auto_save_minutes)      document.getElementById('s-interval').value  = s.auto_save_minutes;
+  await loadGeminiKey();
+}
+
+async function loadGeminiKey() {
+  try {
+    const snap = await getDoc(doc(db, 'users', USER_ID, 'settings', 'gemini'));
+    if (snap.exists() && snap.data().api_key) {
+      const el = document.getElementById('gemini-key-status');
+      if (el) el.textContent = '✅ Key configurata';
+      const input = document.getElementById('gemini-key-input');
+      if (input) input.placeholder = '••••••••••••••••••••••';
+    }
+  } catch(e) {}
 }
 
 window.saveSettings = async function() {
@@ -27,6 +40,31 @@ window.saveSettings = async function() {
     showToast('✅ Impostazioni salvate!');
   } catch(e) {
     showToast('Errore salvataggio', 'err');
+  }
+};
+
+window.saveGeminiKey = async function() {
+  const input = document.getElementById('gemini-key-input');
+  const status = document.getElementById('gemini-key-status');
+  const key = input?.value?.trim();
+
+  if (!key) {
+    if (status) status.textContent = '⚠️ Inserisci una key valida';
+    return;
+  }
+
+  try {
+    await setDoc(
+      doc(db, 'users', USER_ID, 'settings', 'gemini'),
+      { api_key: key },
+      { merge: true }
+    );
+    if (status) status.textContent = '✅ Key salvata!';
+    if (input) input.value = '';
+    if (input) input.placeholder = '••••••••••••••••••••••';
+    showToast('🤖 Gemini key salvata!');
+  } catch(e) {
+    if (status) status.textContent = '❌ Errore: ' + e.message;
   }
 };
 
