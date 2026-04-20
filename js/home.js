@@ -436,13 +436,40 @@ window.recalcMeal = async function(mi) {
   }
 };
 
+function patchMealRow(mi, kcal, protein, carbs, fats) {
+  if (mealStates[mi]) {
+    mealStates[mi].kcal         = kcal;
+    mealStates[mi].protein      = protein;
+    mealStates[mi].carbs        = carbs;
+    mealStates[mi].fats         = fats;
+    mealStates[mi].override_kcal = kcal;
+    mealStates[mi].eaten        = true;
+  }
+  if (!logData.meals_state) logData.meals_state = {};
+  logData.meals_state[mi] = { eaten: true, variant: mealStates[mi]?.active_variant ?? null };
+
+  const mealEl = document.getElementById(`meal-${mi}`);
+  if (mealEl) {
+    mealEl.classList.add('eaten');
+    const chk = mealEl.querySelector('.meal-chk');
+    if (chk) chk.textContent = '✓';
+    const meta = mealEl.querySelector('.meal-meta');
+    if (meta) meta.textContent = `${kcal} kcal · P:${protein}g C:${carbs}g F:${fats}g`;
+    const kcalEl = mealEl.querySelector('.meal-kcal');
+    if (kcalEl) kcalEl.textContent = kcal;
+  }
+}
+
 window.applyMealAI = function(mi, kcal, protein, carbs, fats) {
   if (!logData.meals_overrides) logData.meals_overrides = {};
-  logData.meals_overrides[mi] = { kcal, protein, carbs, fats };
+  const txt = document.getElementById(`meal-txt-${mi}`)?.value || '';
+  logData.meals_overrides[mi] = { kcal, protein, carbs, fats, items_text: txt };
+  patchMealRow(mi, kcal, protein, carbs, fats);
   saveToLocal();
-  buildMeals();
   buildNutrition();
-  showToast('Macro aggiornati ✅');
+  const box = document.getElementById(`meal-ai-${mi}`);
+  if (box) box.style.display = 'none';
+  showToast('✅ Macro applicati! Pasto segnato ✓');
 };
 
 // ── Workout ────────────────────────────────────────────────
@@ -821,11 +848,11 @@ window.saveManualMacro = function(mealIndex) {
   if (!logData.meals_overrides) logData.meals_overrides = {};
   logData.meals_overrides[mealIndex] = { kcal, protein, carbs, fats, items_text: note };
 
+  patchMealRow(mealIndex, kcal, protein, carbs, fats);
   saveToLocal();
-  buildMeals();
   buildNutrition();
   document.getElementById('manual-macro-modal')?.remove();
-  showToast('✅ Macro aggiornati!');
+  showToast('✅ Macro salvati! Pasto segnato ✓');
 };
 
 
