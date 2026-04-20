@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FitTracker – Impostazioni</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div style="max-width:480px;margin:0 auto;padding:16px;padding-bottom:80px">
+  <div class="page-header"><h1>⚙️ Impostazioni</h1></div>
+
+  <form id="settings-form">
+    <div class="card" style="margin-bottom:16px">
+      <p style="font-weight:700;color:var(--accent-green);margin-bottom:14px">💪 Giorno ON (allenamento)</p>
+      <div class="macro-grid">
+        <div class="form-group">
+          <label class="form-label">Kcal</label>
+          <input type="number" class="form-input" id="kcal-on" placeholder="2500">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Proteine (g)</label>
+          <input type="number" class="form-input" id="protein-on" placeholder="150">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Carbo (g)</label>
+          <input type="number" class="form-input" id="carbs-on" placeholder="250">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Grassi (g)</label>
+          <input type="number" class="form-input" id="fats-on" placeholder="70">
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <p style="font-weight:700;color:var(--text-secondary);margin-bottom:14px">😴 Giorno OFF (riposo)</p>
+      <div class="macro-grid">
+        <div class="form-group">
+          <label class="form-label">Kcal</label>
+          <input type="number" class="form-input" id="kcal-off" placeholder="2200">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Proteine (g)</label>
+          <input type="number" class="form-input" id="protein-off" placeholder="130">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Carbo (g)</label>
+          <input type="number" class="form-input" id="carbs-off" placeholder="200">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Grassi (g)</label>
+          <input type="number" class="form-input" id="fats-off" placeholder="65">
+        </div>
+      </div>
+    </div>
+
+    <button type="submit" class="btn-primary">💾 Salva Impostazioni</button>
+  </form>
+
+  <div style="text-align:center;margin-top:32px;color:var(--text-secondary);font-size:13px">
+    <p>FitTracker v1.0</p>
+    <p style="margin-top:4px">Fatto con ❤️ per il mio fitness</p>
+  </div>
+</div>
+
+<nav class="bottom-nav">
+  <a href="index.html" class="nav-item"><span class="nav-icon">🏠</span><span>Home</span></a>
+  <a href="workout.html" class="nav-item"><span class="nav-icon">💪</span><span>Workout</span></a>
+  <a href="meals.html" class="nav-item"><span class="nav-icon">🥗</span><span>Pasti</span></a>
+  <a href="settings.html" class="nav-item active"><span class="nav-icon">⚙️</span><span>Settings</span></a>
+</nav>
+
+<script type="module">
+  import { db, USER_ID, doc, getDoc, setDoc } from './js/firebase-config.js';
+  import { showToast, DEFAULT_TARGETS } from './js/app.js';
+
+  async function loadSettings() {
+    try {
+      const docRef = doc(db, 'users', USER_ID, 'settings', 'targets');
+      const snap = await getDoc(docRef);
+      const t = snap.exists() ? snap.data() : DEFAULT_TARGETS;
+      document.getElementById('kcal-on').value     = t.kcal_on     || '';
+      document.getElementById('protein-on').value  = t.protein_on  || '';
+      document.getElementById('carbs-on').value    = t.carbs_on    || '';
+      document.getElementById('fats-on').value     = t.fats_on     || '';
+      document.getElementById('kcal-off').value    = t.kcal_off    || '';
+      document.getElementById('protein-off').value = t.protein_off || '';
+      document.getElementById('carbs-off').value   = t.carbs_off   || '';
+      document.getElementById('fats-off').value    = t.fats_off    || '';
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  document.getElementById('settings-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const targets = {
+      kcal_on:     +document.getElementById('kcal-on').value,
+      protein_on:  +document.getElementById('protein-on').value,
+      carbs_on:    +document.getElementById('carbs-on').value,
+      fats_on:     +document.getElementById('fats-on').value,
+      kcal_off:    +document.getElementById('kcal-off').value,
+      protein_off: +document.getElementById('protein-off').value,
+      carbs_off:   +document.getElementById('carbs-off').value,
+      fats_off:    +document.getElementById('fats-off').value,
+    };
+    try {
+      await setDoc(doc(db, 'users', USER_ID, 'settings', 'targets'), targets);
+      showToast('✅ Impostazioni salvate!');
+    } catch (e) {
+      showToast('Errore nel salvataggio', 'error');
+    }
+  });
+
+  loadSettings();
+</script>
+</body>
+</html>

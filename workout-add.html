@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FitTracker – Nuovo Workout</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div style="max-width:480px;margin:0 auto;padding:16px;padding-bottom:80px">
+  <div class="page-header">
+    <button class="back-btn" onclick="history.back()">←</button>
+    <h1>Nuovo Allenamento</h1>
+  </div>
+
+  <form id="workout-form">
+    <div class="form-group">
+      <label class="form-label">Nome allenamento</label>
+      <input type="text" class="form-input" id="workout-name" placeholder="Es. Push Day, Gambe..." required>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group">
+        <label class="form-label">Data</label>
+        <input type="date" class="form-input" id="workout-date" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Durata (min)</label>
+        <input type="number" class="form-input" id="workout-duration" placeholder="60">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Note</label>
+      <textarea class="form-input" id="workout-notes" rows="2" placeholder="Come è andata..."></textarea>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:20px 0 12px">
+      <p style="font-weight:700;font-size:16px">Esercizi</p>
+      <button type="button" class="btn-secondary" style="width:auto;padding:8px 16px;font-size:14px" onclick="window.addExercise()">+ Esercizio</button>
+    </div>
+    <div id="exercises-container"></div>
+
+    <button type="submit" class="btn-primary" style="margin-top:16px" id="submit-btn">💾 Salva Allenamento</button>
+  </form>
+</div>
+
+<nav class="bottom-nav">
+  <a href="index.html" class="nav-item"><span class="nav-icon">🏠</span><span>Home</span></a>
+  <a href="workout.html" class="nav-item active"><span class="nav-icon">💪</span><span>Workout</span></a>
+  <a href="meals.html" class="nav-item"><span class="nav-icon">🥗</span><span>Pasti</span></a>
+  <a href="settings.html" class="nav-item"><span class="nav-icon">⚙️</span><span>Settings</span></a>
+</nav>
+
+<script type="module" src="js/workout.js"></script>
+</body>
+</html>
