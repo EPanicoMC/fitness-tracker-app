@@ -1,3 +1,4 @@
+import { GEMINI_KEY } from './env.js';
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import {
   getFirestore,
@@ -14,6 +15,7 @@ import {
   limit,
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+import { getStorage } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyC7bm-wJAScIaQfelZkGP4C7kw_FKI4Gv8",
@@ -27,10 +29,15 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const USER_ID = "user_default";
+const storage = getStorage(app);
+const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
 export {
   db,
   USER_ID,
+  storage,
+  GEMINI_KEY,
+  GEMINI_URL,
   collection,
   doc,
   getDoc,
@@ -44,9 +51,3 @@ export {
   limit,
   serverTimestamp
 };
-
-import { getStorage } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
-const storage = getStorage(app);
-const GEMINI_KEY = "AIzaSyAJz-FKKbTyAPJtrAbAjsuHS_ecW04g22M";
-const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
-export { storage, GEMINI_KEY, GEMINI_URL };
