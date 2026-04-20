@@ -2,6 +2,8 @@ import { db, USER_ID } from './firebase-config.js';
 import { doc, getDoc } from './firebase-config.js';
 
 let cachedKey = null;
+let lastCallTime = 0;
+const MIN_INTERVAL = 4000;
 
 async function getGeminiKey() {
   if (cachedKey) return cachedKey;
@@ -16,24 +18,6 @@ async function getGeminiKey() {
   return cachedKey;
 }
 
-function extractJSON(text) {
-  if (!text) throw new Error('Risposta vuota');
-
-  // Rimuovi blocchi di codice markdown
-  let cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '');
-
-  // Trova il primo { e l'ultimo }
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error('Nessun JSON trovato');
-  }
-
-  const jsonStr = cleaned.slice(start, end + 1);
-  return JSON.parse(jsonStr);
-}
-
 export async function calcMacrosFromText(text) {
   const key = await getGeminiKey();
   if (!key) {
@@ -43,6 +27,16 @@ export async function calcMacrosFromText(text) {
     };
   }
 
+  // Rate limiter
+  const now = Date.now();
+  const timeSinceLastCall = now - lastCallTime;
+  if (timeSinceLastCall < MIN_INTERVAL) {
+    const waitTime = MIN_INTERVAL - timeSinceLastCall;
+    console.log(`Rate limiter: aspetto ${waitTime}ms`);
+    await new Promise(r => setTimeout(r, waitTime));
+  }
+  lastCallTime = Date.now();
+
   const prompt = `Calcola i valori nutrizionali totali per questi alimenti.
 Usa i valori nutrizionali standard per 100g e calcola in proporzione ai grammi indicati.
 
@@ -51,8 +45,7 @@ Alimenti: ${text}
 IMPORTANTE: Rispondi SOLO con JSON valido. Nessun testo prima o dopo.
 {"kcal":0,"protein":0,"carbs":0,"fats":0,"items":[{"name":"","grams":0,"kcal":0,"protein":0,"carbs":0,"fats":0}]}`;
 
-  // Usa SOLO gemini-2.0-flash (stabile, no thinking, veloce)
-  const models = ['gemini-2.0-flash', 'gemini-2.0-flash-lite'];
+  const models = ['gemini-2.0-flash'];
 
   for (const model of models) {
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -76,35 +69,37 @@ IMPORTANTE: Rispondi SOLO con JSON valido. Nessun testo prima o dopo.
         console.log(`${model} status: ${res.status}`);
 
         if (res.status === 429) {
-          console.warn(`${model} rate limited, aspetto...`);
-          await new Promise(r => setTimeout(r, 3000));
+          console.warn('Rate limited, aspetto 10 secondi...');
+          await new Promise(r => setTimeout(r, 10000));
           continue;
         }
 
         if (!res.ok) {
-          const errText = await res.text();
-          console.warn(`${model} errore ${res.status}:`, errText);
-          break;
+          console.warn(`Errore ${res.status}`);
+          return { success: false, error: `Errore API: ${res.status}` };
         }
 
         const data = await res.json();
         console.log('Risposta Gemini:', JSON.stringify(data).slice(0, 500));
 
-        // Prendi il testo dalla risposta
         const parts = data.candidates?.[0]?.content?.parts || [];
         let rawText = '';
-        for (const part of parts) {
-          if (part.text) rawText += part.text;
-        }
+        for (const p of parts) { if (p.text) rawText += p.text; }
 
         console.log('Testo raw:', rawText.slice(0, 300));
 
         if (!rawText) {
-          console.warn(`${model}: risposta senza testo`);
-          break;
+          return { success: false, error: 'Risposta vuota da AI' };
         }
 
-        const result = extractJSON(rawText);
+        let jsonStr = rawText.replace(/```json\s*/g, '').replace(/```\s*/g, '');
+        const s = jsonStr.indexOf('{');
+        const e = jsonStr.lastIndexOf('}');
+        if (s === -1 || e === -1) {
+          return { success: false, error: 'Formato risposta non valido' };
+        }
+        jsonStr = jsonStr.slice(s, e + 1);
+        const result = JSON.parse(jsonStr);
         console.log('JSON parsed:', result);
 
         return {
@@ -116,9 +111,11 @@ IMPORTANTE: Rispondi SOLO con JSON valido. Nessun testo prima o dopo.
           items: result.items || []
         };
 
-      } catch (e) {
-        console.error(`${model} attempt ${attempt} errore:`, e.message);
-        if (attempt < 1) await new Promise(r => setTimeout(r, 1500));
+      } catch (err) {
+        console.error(`${model} attempt ${attempt} errore:`, err.message);
+        if (attempt === 0) {
+          await new Promise(r => setTimeout(r, 5000));
+        }
       }
     }
   }

@@ -8,6 +8,7 @@ import { calcMacrosFromText } from './gemini.js';
 let diets     = [];
 let editingId = null;
 let formData  = { name:'', day_on: buildEmptyDay(), day_off: buildEmptyDay() };
+window.formData = formData;
 
 function buildEmptyDay() {
   return { kcal:0, protein:0, carbs:0, fats:0, meals:[] };
@@ -113,6 +114,7 @@ window.cloneDiet = async function(id) {
 window.openNewDiet = function() {
   editingId = null;
   formData  = { name:'', day_on: buildEmptyDay(), day_off: buildEmptyDay() };
+  window.formData = formData;
   renderDietForm(null);
 };
 
@@ -121,6 +123,7 @@ window.openEdit = function(id) {
   if (!d) return;
   editingId = id;
   formData  = JSON.parse(JSON.stringify(d));
+  window.formData = formData;
   renderDietForm(d);
 };
 
