@@ -250,26 +250,27 @@ function buildNutrition() {
 }
 
 function calcTotals() {
-  const fromPlan = mealStates.filter(m => m.eaten).reduce((a, m) => {
-    a.kcal    += m.override_kcal ?? m.kcal    ?? 0;
-    a.protein += m.protein ?? 0;
-    a.carbs   += m.carbs   ?? 0;
-    a.fats    += m.fats    ?? 0;
-    return a;
-  }, { kcal:0, protein:0, carbs:0, fats:0 });
-  const fromExtra = (logData.extra_meals || []).reduce((a, m) => {
-    a.kcal    += m.kcal    || 0;
-    a.protein += m.protein || 0;
-    a.carbs   += m.carbs   || 0;
-    a.fats    += m.fats    || 0;
-    return a;
-  }, { kcal:0, protein:0, carbs:0, fats:0 });
-  return {
-    kcal:    fromPlan.kcal    + fromExtra.kcal,
-    protein: fromPlan.protein + fromExtra.protein,
-    carbs:   fromPlan.carbs   + fromExtra.carbs,
-    fats:    fromPlan.fats    + fromExtra.fats
-  };
+  const dayKey   = isTrainingDay ? 'day_on' : 'day_off';
+  const planMeals = activeDiet?.[dayKey]?.meals || [];
+  let kcal = 0, protein = 0, carbs = 0, fats = 0;
+
+  planMeals.forEach((meal, i) => {
+    if (!logData.meals_state?.[i]?.eaten) return;
+    const ov = logData.meals_overrides?.[i];
+    kcal    += ov?.kcal    ?? meal.kcal    ?? 0;
+    protein += ov?.protein ?? meal.protein ?? 0;
+    carbs   += ov?.carbs   ?? meal.carbs   ?? 0;
+    fats    += ov?.fats    ?? meal.fats    ?? 0;
+  });
+
+  (logData.extra_meals || []).forEach(m => {
+    kcal    += m.kcal    || 0;
+    protein += m.protein || 0;
+    carbs   += m.carbs   || 0;
+    fats    += m.fats    || 0;
+  });
+
+  return { kcal, protein, carbs, fats };
 }
 
 function updateNutritionTotals() { buildNutrition(); }
@@ -567,11 +568,13 @@ window.saveDay = async function() {
   };
   if (logData.day_override != null) data.day_override = logData.day_override;
 
+  console.log('Saving to Firestore:', JSON.stringify(data).slice(0, 300));
   try {
     await setDoc(doc(db, 'users', USER_ID, 'daily_logs', TODAY), data, { merge: true });
     showToast('💾 Giornata salvata!');
   } catch(e) {
-    showToast('Errore salvataggio', 'err');
+    console.error('Errore Firestore saveDay:', e);
+    showToast('Errore salvataggio: ' + e.message, 'err');
   }
 };
 
