@@ -319,8 +319,9 @@ window.saveProgram = async function() {
   };
 
   try {
+    delete data.id;
     if (editingId) {
-      await setDoc(doc(db,'users',USER_ID,'programs',editingId), data, { merge: false });
+      await setDoc(doc(db,'users',USER_ID,'programs',editingId), data);
     } else {
       await addDoc(collection(db,'users',USER_ID,'programs'), data);
     }

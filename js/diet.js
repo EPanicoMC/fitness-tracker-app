@@ -279,38 +279,49 @@ window.closeDietForm = function() {
 window.saveDiet = async function() {
   const nameVal = document.getElementById('df-name')?.value?.trim();
   if (!nameVal) { showToast('Inserisci il nome', 'err'); return; }
-  formData.name = nameVal;
   try {
+    const sanitizeMeals = meals => (meals || []).map(m => ({
+      type:    m.type    || 'pranzo',
+      label:   m.label   || '',
+      time:    m.time    || '',
+      items:   m.items   || '',
+      kcal:    Number(m.kcal)    || 0,
+      protein: Number(m.protein) || 0,
+      carbs:   Number(m.carbs)   || 0,
+      fats:    Number(m.fats)    || 0,
+      variants: m.variants || null
+    }));
     const dataToSave = {
-      name: formData.name,
-      active: editingId ? (diets.find(d => d.id === editingId)?.active || false) : false,
+      name:       nameVal,
+      active:     editingId ? (diets.find(d => d.id === editingId)?.active || false) : false,
       updated_at: new Date().toISOString(),
       day_on: {
-        kcal:    formData.day_on.kcal    || 0,
-        protein: formData.day_on.protein || 0,
-        carbs:   formData.day_on.carbs   || 0,
-        fats:    formData.day_on.fats    || 0,
-        meals:   formData.day_on.meals   || []
+        kcal:    Number(formData.day_on?.kcal)    || 0,
+        protein: Number(formData.day_on?.protein) || 0,
+        carbs:   Number(formData.day_on?.carbs)   || 0,
+        fats:    Number(formData.day_on?.fats)    || 0,
+        meals:   sanitizeMeals(formData.day_on?.meals)
       },
       day_off: {
-        kcal:    formData.day_off.kcal    || 0,
-        protein: formData.day_off.protein || 0,
-        carbs:   formData.day_off.carbs   || 0,
-        fats:    formData.day_off.fats    || 0,
-        meals:   formData.day_off.meals   || []
+        kcal:    Number(formData.day_off?.kcal)    || 0,
+        protein: Number(formData.day_off?.protein) || 0,
+        carbs:   Number(formData.day_off?.carbs)   || 0,
+        fats:    Number(formData.day_off?.fats)    || 0,
+        meals:   sanitizeMeals(formData.day_off?.meals)
       }
     };
+    console.log('Salvataggio dieta:', JSON.stringify(dataToSave).slice(0, 500));
     if (editingId) {
-      await setDoc(doc(db,'users',USER_ID,'diet_plans',editingId), dataToSave, { merge: false });
+      await setDoc(doc(db,'users',USER_ID,'diet_plans',editingId), dataToSave);
     } else {
-      const ref = await addDoc(collection(db,'users',USER_ID,'diet_plans'), dataToSave);
-      editingId = ref.id;
+      await addDoc(collection(db,'users',USER_ID,'diet_plans'), dataToSave);
     }
     showToast('✅ Piano salvato!');
     closeDietForm();
     await loadDiets();
   } catch(e) {
-    console.error('Errore salvataggio dieta:', e);
+    console.error('ERRORE salvataggio dieta:', e);
+    console.error('Stack:', e.stack);
     showToast('❌ Errore: ' + e.message, 'err');
   }
 };
