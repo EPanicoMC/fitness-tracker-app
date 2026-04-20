@@ -2,6 +2,7 @@ import {
   db, USER_ID, collection, doc, getDocs, addDoc, setDoc, deleteDoc
 } from './firebase-config.js';
 import { showToast, showModal, DAYS_IT, DAYS_ORDER } from './app.js';
+import { Autocomplete, saveToLibrary } from './autocomplete.js';
 
 let programs  = [];
 let editingId = null;
@@ -28,16 +29,16 @@ function renderList() {
     list.innerHTML = `<div class="empty"><span class="ei">💪</span><p>Nessuna scheda ancora<br>Crea il tuo primo programma!</p></div>`;
     return;
   }
-
   list.innerHTML = programs.map(p => {
-    const days = Object.keys(p.schedule || {});
+    const days = Object.keys(p.schedule || {}).filter(d => p.schedule[d]);
     const dayLabels = DAYS_ORDER.filter(d => days.includes(d)).map(d => DAYS_IT[d]).join(', ');
+    const weeks = p.weeks ? ` · ${p.weeks} settimane` : '';
     return `
       <div class="card" style="cursor:pointer" onclick="window._toggleDetail('${p.id}')">
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <div style="flex:1;min-width:0">
             <div style="font-size:17px;font-weight:700;margin-bottom:4px">${p.name}</div>
-            <div style="font-size:12px;color:var(--t2)">${dayLabels || 'Nessun giorno'}</div>
+            <div style="font-size:12px;color:var(--t2)">${dayLabels || 'Nessun giorno'}${weeks}</div>
           </div>
           <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;margin-left:8px">
             ${p.active ? '<span class="badge badge-g">✓ Attivo</span>' : ''}
@@ -51,15 +52,18 @@ function renderList() {
         <div id="prog-detail-${p.id}" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
           ${DAYS_ORDER.filter(d => p.schedule?.[d]).map(d => {
             const s = p.schedule[d];
+            const cardioLabel = s.cardio?.enabled ? ` · 🏃 ${s.cardio.type} ${s.cardio.duration_minutes}min` : '';
             return `
               <div style="margin-bottom:12px">
-                <div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:6px">${DAYS_IT[d]} — ${s.name || ''}</div>
-                ${(s.exercises || []).map(ex => `
-                  <div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px">
-                    <span>${ex.is_cardio ? '🏃' : '💪'}</span>
+                <div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:6px">${DAYS_IT[d]} — ${s.name || ''}${cardioLabel}</div>
+                ${(s.exercises || []).map(ex => {
+                  const setsN = typeof ex.sets === 'number' ? ex.sets : ex.sets?.length || 0;
+                  return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px">
+                    <span>💪</span>
                     <span style="flex:1">${ex.name}</span>
-                    <span style="color:var(--t2);font-size:11px">${ex.sets.length} serie</span>
-                  </div>`).join('')}
+                    <span style="color:var(--t2);font-size:11px">${setsN}×${ex.reps || ''}</span>
+                  </div>`;
+                }).join('')}
               </div>`;
           }).join('')}
         </div>
@@ -84,8 +88,7 @@ window._activateProgram = async function(id) {
 
 window._deleteProgram = function(id) {
   showModal({
-    title: 'Elimina scheda',
-    text:  'Vuoi eliminare questa scheda?',
+    title: 'Elimina scheda', text: 'Vuoi eliminare questa scheda?',
     confirmLabel: 'Elimina',
     onConfirm: async () => {
       try {
@@ -108,7 +111,25 @@ window._editProgram = function(id) {
   const p = programs.find(x => x.id === id);
   if (!p) return;
   editingId = id;
-  formSched = JSON.parse(JSON.stringify(p.schedule || {}));
+  // Normalize new program format
+  formSched = {};
+  for (const [day, s] of Object.entries(p.schedule || {})) {
+    if (!s) continue;
+    formSched[day] = {
+      name: s.name || '',
+      time: s.time || '',
+      time_minutes: s.time_minutes || 60,
+      cardio: s.cardio || null,
+      exercises: (s.exercises || []).map(ex => ({
+        name:         ex.name,
+        sets:         typeof ex.sets === 'number' ? ex.sets : (ex.sets?.length || 3),
+        reps:         ex.reps || '8',
+        weight_per_set: ex.weight_per_set || Array(typeof ex.sets === 'number' ? ex.sets : 3).fill(0),
+        rest_seconds: ex.rest_seconds || 90,
+        notes:        ex.notes || ''
+      }))
+    };
+  }
   renderForm(p);
 };
 
@@ -131,7 +152,17 @@ function renderForm(prog) {
     <div class="card">
       <div class="fg">
         <label class="fl">Nome scheda</label>
-        <input class="fi" id="pf-name" placeholder="Es. Push Pull Legs…" value="${prog?.name || ''}">
+        <input class="fi" id="pf-name" placeholder="Es. HIT Forza Primavera…" value="${prog?.name || ''}">
+      </div>
+      <div class="grid2">
+        <div class="fg" style="margin:0">
+          <label class="fl">Data inizio</label>
+          <input type="date" class="fi" id="pf-start" value="${prog?.start_date || ''}">
+        </div>
+        <div class="fg" style="margin:0">
+          <label class="fl">Settimane</label>
+          <input type="number" class="fi" id="pf-weeks" placeholder="4" value="${prog?.weeks || ''}">
+        </div>
       </div>
     </div>
     <div class="card">
@@ -151,37 +182,73 @@ function renderForm(prog) {
       <button class="btn btn-ghost" onclick="window.hideProgramForm()">Annulla</button>
       <button class="btn btn-v"     onclick="window.saveProgramForm()">💾 Salva</button>
     </div>`;
+
+  // Attach autocomplete to existing exercise name inputs
+  DAYS_ORDER.filter(d => formSched[d]).forEach(d => initExerciseAutocomplete(d));
 }
 
 window._toggleDay = function(day) {
   if (formSched[day]) {
     delete formSched[day];
   } else {
-    formSched[day] = { name: '', time_minutes: 60, exercises: [] };
+    formSched[day] = { name: '', time: '', time_minutes: 60, cardio: null, exercises: [] };
   }
   const btn = document.getElementById(`day-btn-${day}`);
-  if (btn) {
-    btn.className = `btn btn-sm ${formSched[day] ? 'btn-v' : 'btn-ghost'}`;
-  }
+  if (btn) btn.className = `btn btn-sm ${formSched[day] ? 'btn-v' : 'btn-ghost'}`;
   document.getElementById('days-sections').innerHTML =
     DAYS_ORDER.filter(d => formSched[d]).map(d => renderDaySection(d)).join('');
+  DAYS_ORDER.filter(d => formSched[d]).forEach(d => initExerciseAutocomplete(d));
 };
 
 function renderDaySection(day) {
   const s = formSched[day];
+  const cardioEnabled = s.cardio?.enabled || false;
   return `
     <div class="card card-dark" style="margin-bottom:10px" id="day-sec-${day}">
       <div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:12px">${DAYS_IT[day]}</div>
       <div class="grid2">
         <div class="fg" style="margin:0">
           <label class="fl">Nome sessione</label>
-          <input class="fi" placeholder="Es. Push…" value="${s.name || ''}"
+          <input class="fi" placeholder="Es. Dorso & Spalle…" value="${s.name || ''}"
             oninput="formSched['${day}'].name = this.value">
         </div>
         <div class="fg" style="margin:0">
-          <label class="fl">Durata (min)</label>
-          <input type="number" class="fi" placeholder="60" value="${s.time_minutes || ''}"
-            oninput="formSched['${day}'].time_minutes = +this.value || 0">
+          <label class="fl">Ora</label>
+          <input type="time" class="fi" value="${s.time || ''}"
+            oninput="formSched['${day}'].time = this.value">
+        </div>
+      </div>
+      <!-- Cardio -->
+      <div class="trow" style="margin:12px 0 8px">
+        <div>
+          <div style="font-weight:700;font-size:14px">Cardio</div>
+          <div style="font-size:12px;color:var(--t2)">Aggiungi sessione cardio</div>
+        </div>
+        <label class="tgl">
+          <input type="checkbox" ${cardioEnabled ? 'checked' : ''}
+            onchange="window._toggleCardio('${day}',this.checked)">
+          <span class="tgl-s"></span>
+        </label>
+      </div>
+      <div id="cardio-wrap-${day}" style="display:${cardioEnabled ? 'block' : 'none'}">
+        <div class="grid2">
+          <div class="fg" style="margin:0">
+            <label class="fl">Tipo</label>
+            <input class="fi" placeholder="Es. Tapis Roulant…"
+              value="${s.cardio?.type || ''}"
+              oninput="if(!formSched['${day}'].cardio)formSched['${day}'].cardio={};formSched['${day}'].cardio.type=this.value">
+          </div>
+          <div class="fg" style="margin:0">
+            <label class="fl">Durata (min)</label>
+            <input type="number" class="fi" placeholder="15" value="${s.cardio?.duration_minutes || ''}"
+              oninput="if(!formSched['${day}'].cardio)formSched['${day}'].cardio={};formSched['${day}'].cardio.duration_minutes=+this.value">
+          </div>
+        </div>
+        <div class="fg">
+          <label class="fl">Note cardio</label>
+          <input class="fi" placeholder="Es. Pendenza 10%, velocità 5 km/h…"
+            value="${s.cardio?.notes || ''}"
+            oninput="if(!formSched['${day}'].cardio)formSched['${day}'].cardio={};formSched['${day}'].cardio.notes=this.value">
         </div>
       </div>
       <p class="sdiv" style="margin-top:12px">Esercizi</p>
@@ -192,66 +259,82 @@ function renderDaySection(day) {
     </div>`;
 }
 
+window._toggleCardio = function(day, enabled) {
+  if (!formSched[day]) return;
+  if (!formSched[day].cardio) formSched[day].cardio = {};
+  formSched[day].cardio.enabled = enabled;
+  const wrap = document.getElementById(`cardio-wrap-${day}`);
+  if (wrap) wrap.style.display = enabled ? 'block' : 'none';
+};
+
 function renderExCard(day, ei, ex) {
   return `
     <div class="ex-card" id="ex-${day}-${ei}">
       <div class="ex-head">
-        <input class="fi ex-name" placeholder="Nome esercizio" value="${ex.name || ''}"
-          oninput="formSched['${day}'].exercises[${ei}].name = this.value"
+        <input class="fi ex-name" placeholder="Nome esercizio"
+          value="${ex.name || ''}" data-day="${day}" data-ei="${ei}"
           style="flex:1;padding:8px 12px;font-size:14px;font-weight:700">
         <button class="btn-del" onclick="window._removeEx('${day}',${ei})">🗑️</button>
       </div>
-      <div class="grid2" style="margin-bottom:8px">
+      <div class="grid3" style="margin-bottom:8px">
         <div class="fg" style="margin:0">
-          <label class="fl">Recupero (sec)</label>
-          <input type="number" class="fi" placeholder="90" value="${ex.rest_seconds || ''}"
-            oninput="formSched['${day}'].exercises[${ei}].rest_seconds = +this.value || 60"
-            style="padding:8px;text-align:center">
+          <label class="fl">Serie</label>
+          <input type="number" class="fi" placeholder="3" value="${ex.sets || ''}"
+            style="padding:8px;text-align:center"
+            oninput="formSched['${day}'].exercises[${ei}].sets=+this.value||0">
         </div>
-        <div class="fg" style="margin:0;display:flex;flex-direction:column;justify-content:flex-end">
-          <div class="trow" style="height:42px">
-            <label class="fl" style="margin:0">Cardio</label>
-            <label class="tgl">
-              <input type="checkbox" ${ex.is_cardio ? 'checked' : ''}
-                onchange="formSched['${day}'].exercises[${ei}].is_cardio = this.checked">
-              <span class="tgl-s"></span>
-            </label>
-          </div>
+        <div class="fg" style="margin:0">
+          <label class="fl">Reps / target</label>
+          <input class="fi" placeholder="6-8" value="${ex.reps || ''}"
+            style="padding:8px;text-align:center"
+            oninput="formSched['${day}'].exercises[${ei}].reps=this.value">
+        </div>
+        <div class="fg" style="margin:0">
+          <label class="fl">Recupero (s)</label>
+          <input type="number" class="fi" placeholder="90" value="${ex.rest_seconds || ''}"
+            style="padding:8px;text-align:center"
+            oninput="formSched['${day}'].exercises[${ei}].rest_seconds=+this.value||60">
         </div>
       </div>
       <div class="fg">
-        <label class="fl">Note / indicazioni</label>
-        <input class="fi" placeholder="Es. Schiena dritta…" value="${ex.notes || ''}"
-          oninput="formSched['${day}'].exercises[${ei}].notes = this.value"
+        <label class="fl">Note tecniche</label>
+        <input class="fi" placeholder="Es. Schiena dritta, 3s eccentrica…"
+          value="${ex.notes || ''}"
+          oninput="formSched['${day}'].exercises[${ei}].notes=this.value"
           style="padding:8px 12px;font-size:13px">
       </div>
-      <p class="sdiv" style="margin-top:0">Serie</p>
-      <div id="sets-wrap-${day}-${ei}">
-        ${(ex.sets || []).map((s, si) => renderSetRow(day, ei, si, s)).join('')}
-      </div>
-      <button class="btn btn-ghost btn-sm" onclick="window._addSet('${day}',${ei})" style="margin-top:6px">＋ Serie</button>
     </div>`;
 }
 
-function renderSetRow(day, ei, si, s) {
-  return `
-    <div class="set-row" id="set-${day}-${ei}-${si}">
-      <span class="set-num">${si+1}</span>
-      <input type="number" class="fi" placeholder="kg" value="${s.weight || ''}" step="0.5" min="0"
-        style="width:72px;padding:8px;text-align:center;font-size:14px;font-weight:700"
-        oninput="formSched['${day}'].exercises[${ei}].sets[${si}].weight = +this.value || 0">
-      <span style="font-size:12px;color:var(--t2)">kg</span>
-      <span style="font-size:12px;color:var(--t3);margin:0 4px">×</span>
-      <input type="number" class="fi" placeholder="reps" value="${s.reps || ''}" step="1" min="0"
-        style="width:64px;padding:8px;text-align:center;font-size:14px;font-weight:700"
-        oninput="formSched['${day}'].exercises[${ei}].sets[${si}].reps = +this.value || 0">
-      <button class="btn-del" onclick="window._removeSet('${day}',${ei},${si})" style="margin-left:auto">✕</button>
-    </div>`;
+function initExerciseAutocomplete(day) {
+  const wrap = document.getElementById(`ex-wrap-${day}`);
+  if (!wrap) return;
+  wrap.querySelectorAll('input.ex-name:not([data-ac-ready])').forEach(input => {
+    input.setAttribute('data-ac-ready', '1');
+    const ei = parseInt(input.dataset.ei);
+    new Autocomplete({
+      inputEl: input,
+      collection: 'exercise_library',
+      db, USER_ID,
+      onSelect: (item) => {
+        if (formSched[day]?.exercises?.[ei] != null) {
+          formSched[day].exercises[ei].name = item.name;
+        }
+      },
+      onCustom: async (name) => {
+        if (formSched[day]?.exercises?.[ei] != null) {
+          formSched[day].exercises[ei].name = name;
+        }
+        await saveToLibrary(db, USER_ID, 'exercise_library', { name, last_used: null });
+        showToast(`"${name}" aggiunto alla libreria`);
+      }
+    });
+  });
 }
 
 window._addEx = function(day) {
   if (!formSched[day]) return;
-  formSched[day].exercises.push({ name:'', rest_seconds:90, notes:'', is_cardio:false, sets:[{ reps:8, weight:0 }] });
+  formSched[day].exercises.push({ name: '', sets: 3, reps: '8', weight_per_set: [], rest_seconds: 90, notes: '' });
   reRenderDayExercises(day);
 };
 
@@ -260,27 +343,10 @@ window._removeEx = function(day, ei) {
   reRenderDayExercises(day);
 };
 
-window._addSet = function(day, ei) {
-  const ex = formSched[day]?.exercises?.[ei];
-  if (!ex) return;
-  const last = ex.sets[ex.sets.length - 1] || { reps:8, weight:0 };
-  ex.sets.push({ reps: last.reps, weight: last.weight });
-  reRenderSets(day, ei);
-};
-
-window._removeSet = function(day, ei, si) {
-  formSched[day]?.exercises?.[ei]?.sets?.splice(si, 1);
-  reRenderSets(day, ei);
-};
-
 function reRenderDayExercises(day) {
   const wrap = document.getElementById(`ex-wrap-${day}`);
   if (wrap) wrap.innerHTML = (formSched[day]?.exercises || []).map((ex, ei) => renderExCard(day, ei, ex)).join('');
-}
-
-function reRenderSets(day, ei) {
-  const wrap = document.getElementById(`sets-wrap-${day}-${ei}`);
-  if (wrap) wrap.innerHTML = (formSched[day]?.exercises?.[ei]?.sets || []).map((s, si) => renderSetRow(day, ei, si, s)).join('');
+  initExerciseAutocomplete(day);
 }
 
 // ── Save ───────────────────────────────────────────────────────────────────────
@@ -288,9 +354,19 @@ window.saveProgramForm = async function() {
   const name = document.getElementById('pf-name')?.value.trim();
   if (!name) { showToast('Inserisci il nome della scheda', 'err'); return; }
 
+  const startDate = document.getElementById('pf-start')?.value || null;
+  const weeks     = +(document.getElementById('pf-weeks')?.value || 0) || null;
+
+  // Build schedule (null for non-training days)
+  const schedule = {};
+  for (const day of DAYS_ORDER) {
+    schedule[day] = formSched[day] || null;
+  }
+
   const data = {
-    name,
-    schedule: formSched,
+    name, schedule,
+    start_date: startDate,
+    weeks,
     active: editingId ? (programs.find(p => p.id === editingId)?.active || false) : false
   };
 

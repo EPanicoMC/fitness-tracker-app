@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FitTracker – Allenati</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#7c6fff">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="FitTracker">
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ── STATO: SELEZIONE SESSIONE ──────────────────────── -->
+  <div id="state-select">
+    <div class="ph"><h1>🏋️ Allenati</h1></div>
+
+    <div id="auto-session-card" class="card card-glow" style="display:none">
+      <span class="clabel">📅 Sessione di oggi</span>
+      <div id="auto-session-name" style="font-size:22px;font-weight:800;margin-bottom:6px"></div>
+      <div id="auto-session-meta" style="font-size:13px;color:var(--t2);margin-bottom:16px"></div>
+      <button class="btn btn-o" onclick="window.startWithSession('auto')">▶️ Inizia questa sessione</button>
+    </div>
+
+    <div class="sdiv">Tutte le sessioni del programma</div>
+    <div id="all-sessions-list"></div>
+
+    <div id="off-override-card" class="card" style="display:none;margin-top:12px">
+      <p style="color:var(--t2);font-size:14px;margin-bottom:6px">Oggi è giorno OFF, ma puoi comunque allenarti.</p>
+      <p style="font-size:12px;color:var(--t3)">Seleziona una sessione sopra per iniziare.</p>
+    </div>
+
+    <div id="no-program-msg" style="display:none">
+      <div class="empty">
+        <span class="ei">💪</span>
+        <p>Nessun programma attivo.<br>Vai su <a href="programs.html" style="color:var(--accent)">Schede</a> per crearne uno.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── STATO: SESSIONE ATTIVA ─────────────────────────── -->
+  <div id="state-active" style="display:none">
+
+    <div class="ph">
+      <button class="btn-icon" onclick="window.confirmExitSession()">←</button>
+      <div style="flex:1">
+        <h1 id="session-title" style="font-size:20px">Sessione</h1>
+        <p id="session-subtitle" style="font-size:11px;color:var(--t2);margin-top:2px"></p>
+      </div>
+      <span class="badge badge-live">● LIVE</span>
+    </div>
+
+    <!-- TIMER PRINCIPALE -->
+    <div class="card card-dark" style="text-align:center;padding:20px 16px">
+      <div style="font-size:11px;color:var(--t2);font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">⏱️ Durata sessione</div>
+      <div class="timer-big" id="session-timer">00:00</div>
+      <div style="display:flex;gap:10px;margin-top:14px;justify-content:center">
+        <button class="btn btn-ghost btn-sm" id="pause-btn" onclick="window.togglePause()">⏸ Pausa</button>
+        <button class="btn btn-r btn-sm" onclick="window.confirmExitSession()" style="flex:0">🏁 Termina</button>
+      </div>
+    </div>
+
+    <!-- TIMER RECUPERO -->
+    <div id="rest-overlay" style="display:none">
+      <div class="card card-orange" style="text-align:center;padding:20px;border:2px solid var(--orange);margin-bottom:12px">
+        <div style="font-size:11px;color:var(--orange);font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">😮‍💨 Recupero in corso</div>
+        <div class="timer-rest" id="rest-timer-display">90</div>
+        <p style="color:var(--t2);font-size:13px;margin:8px 0">
+          Prossimo: <strong id="next-set-label">-</strong>
+        </p>
+        <button class="btn btn-ghost btn-sm" onclick="window.skipRest()" style="width:auto;margin:0 auto">Skip ⏭</button>
+      </div>
+    </div>
+
+    <!-- NOTE SESSIONE -->
+    <div class="card card-dark">
+      <span class="clabel">📝 Note sessione</span>
+      <textarea id="session-notes" class="notes-area" rows="2" placeholder="Come ti senti, note generali..."></textarea>
+    </div>
+
+    <!-- ESERCIZI -->
+    <div id="session-exercises"></div>
+
+    <!-- CARDIO -->
+    <div id="cardio-section" style="display:none">
+      <div class="sdiv">🏃 Cardio</div>
+      <div class="card" id="cardio-card"></div>
+    </div>
+
+    <!-- FINE -->
+    <div class="screen-notice">🔆 Schermo mantenuto acceso durante la sessione</div>
+    <button class="btn btn-g" onclick="window.finishSession()" style="margin-bottom:8px">✅ Salva e Concludi Sessione</button>
+
+  </div>
+
+</div>
+
+<nav class="bnav">
+  <a href="index.html"><span class="ni">🏠</span><span>Home</span></a>
+  <a href="programs.html"><span class="ni">💪</span><span>Schede</span></a>
+  <a href="diet.html"><span class="ni">🥗</span><span>Dieta</span></a>
+  <a href="checks.html"><span class="ni">📸</span><span>Check</span></a>
+  <a href="session.html" class="active nav-workout"><span class="ni">🏋️</span><span>Allenati</span></a>
+</nav>
+
+<script type="module" src="js/session.js"></script>
+<script>if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/fitness-tracker-app/sw.js'); }</script>
+</body>
+</html>

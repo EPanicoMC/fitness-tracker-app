@@ -2,13 +2,17 @@ import {
   db, USER_ID, collection, doc, getDocs, addDoc, setDoc, deleteDoc
 } from './firebase-config.js';
 import { showToast, showModal, DEFAULT_TARGETS } from './app.js';
+import { Autocomplete, saveToLibrary } from './autocomplete.js';
+import { searchOpenFoodFacts, calcKcalFromMacro } from './food-search.js';
 
-const MEAL_TYPES  = ['colazione','pranzo','cena','spuntino'];
-const MEAL_ICONS  = { colazione:'🌅', pranzo:'☀️', cena:'🌙', spuntino:'🍎' };
+const MEAL_TYPES = ['colazione','pranzo','cena','spuntino','pre_workout','post_workout','merenda'];
+const MEAL_ICONS = { colazione:'🌅', pranzo:'☀️', cena:'🌙', spuntino:'🍎', pre_workout:'⚡', post_workout:'💪', merenda:'🧃' };
 
 let plans     = [];
 let editingId = null;
 let formPlan  = {};
+// Track food calc state per meal key: `${dk}-${mi}`
+const foodCalcState = {};
 
 function emptyPlan() {
   return {
@@ -65,23 +69,15 @@ function renderList() {
             return `
               <p style="font-size:12px;font-weight:700;color:var(--t2);margin-bottom:8px">${label}</p>
               <div class="grid4" style="margin-bottom:12px">
-                <div class="macro-chip" style="background:rgba(124,111,255,.1)">
-                  <div class="mc-val" style="color:var(--accent)">${dd.kcal||0}</div><div class="mc-lbl">kcal</div>
-                </div>
-                <div class="macro-chip" style="background:rgba(79,195,247,.1)">
-                  <div class="mc-val" style="color:var(--blue)">${dd.protein||0}g</div><div class="mc-lbl">Pro</div>
-                </div>
-                <div class="macro-chip" style="background:rgba(255,213,79,.1)">
-                  <div class="mc-val" style="color:var(--yellow)">${dd.carbs||0}g</div><div class="mc-lbl">Carb</div>
-                </div>
-                <div class="macro-chip" style="background:rgba(255,112,67,.1)">
-                  <div class="mc-val" style="color:var(--orange)">${dd.fats||0}g</div><div class="mc-lbl">Fat</div>
-                </div>
+                <div class="macro-chip" style="background:rgba(124,111,255,.1)"><div class="mc-val" style="color:var(--accent)">${dd.kcal||0}</div><div class="mc-lbl">kcal</div></div>
+                <div class="macro-chip" style="background:rgba(79,195,247,.1)"><div class="mc-val" style="color:var(--blue)">${dd.protein||0}g</div><div class="mc-lbl">Pro</div></div>
+                <div class="macro-chip" style="background:rgba(255,213,79,.1)"><div class="mc-val" style="color:var(--yellow)">${dd.carbs||0}g</div><div class="mc-lbl">Carb</div></div>
+                <div class="macro-chip" style="background:rgba(255,112,67,.1)"><div class="mc-val" style="color:var(--orange)">${dd.fats||0}g</div><div class="mc-lbl">Fat</div></div>
               </div>
               ${(dd.meals||[]).map(m => `
                 <div class="meal-item">
                   <div>
-                    <div class="meal-name">${MEAL_ICONS[m.type]||''} ${m.label||m.name||''}</div>
+                    <div class="meal-name">${MEAL_ICONS[m.type]||''} ${m.label||m.type}</div>
                     ${m.time ? `<div style="font-size:10px;color:var(--t3)">${m.time}</div>` : ''}
                     <div class="meal-macro">P:${m.protein||0}g C:${m.carbs||0}g F:${m.fats||0}g</div>
                   </div>
@@ -110,8 +106,7 @@ window._activateDiet = async function(id) {
 
 window._deleteDiet = function(id) {
   showModal({
-    title: 'Elimina piano',
-    text:  'Vuoi eliminare questo piano alimentare?',
+    title: 'Elimina piano', text: 'Vuoi eliminare questo piano alimentare?',
     confirmLabel: 'Elimina',
     onConfirm: async () => {
       try {
@@ -157,7 +152,7 @@ function renderForm(plan) {
     <div class="card">
       <div class="fg">
         <label class="fl">Nome piano</label>
-        <input class="fi" id="df-name" placeholder="Es. Bulk 2025…" value="${plan?.name || ''}">
+        <input class="fi" id="df-name" placeholder="Es. Bulk Primavera 2025…" value="${plan?.name || ''}">
       </div>
     </div>
     ${renderDaySection('day_on',  '💪 Giorno ON (allenamento)')}
@@ -169,37 +164,23 @@ function renderForm(plan) {
 }
 
 function renderDaySection(dk, label) {
-  const d = formPlan[dk];
+  const d    = formPlan[dk];
   const tots = calcDayTotals(dk);
   const borderCol = dk === 'day_on' ? 'var(--green)' : 'var(--t3)';
   return `
     <div class="card" style="border-color:${borderCol};margin-bottom:14px">
       <p style="font-weight:700;font-size:15px;color:${dk==='day_on'?'var(--green)':'var(--t2)'};margin-bottom:16px">${label}</p>
       <div class="grid4" style="margin-bottom:16px">
-        <div class="fg" style="margin:0">
-          <label class="fl">Kcal</label>
-          <input type="number" class="fi" style="padding:10px;text-align:center"
-            value="${d.kcal||''}" placeholder="${DEFAULT_TARGETS[dk==='day_on'?'kcal_on':'kcal_off']}"
-            oninput="window._updTarget('${dk}','kcal',this.value)">
-        </div>
-        <div class="fg" style="margin:0">
-          <label class="fl">Pro (g)</label>
-          <input type="number" class="fi" style="padding:10px;text-align:center"
-            value="${d.protein||''}" placeholder="${DEFAULT_TARGETS[dk==='day_on'?'pro_on':'pro_off']}"
-            oninput="window._updTarget('${dk}','protein',this.value)">
-        </div>
-        <div class="fg" style="margin:0">
-          <label class="fl">Carb (g)</label>
-          <input type="number" class="fi" style="padding:10px;text-align:center"
-            value="${d.carbs||''}" placeholder="${DEFAULT_TARGETS[dk==='day_on'?'carb_on':'carb_off']}"
-            oninput="window._updTarget('${dk}','carbs',this.value)">
-        </div>
-        <div class="fg" style="margin:0">
-          <label class="fl">Fat (g)</label>
-          <input type="number" class="fi" style="padding:10px;text-align:center"
-            value="${d.fats||''}" placeholder="${DEFAULT_TARGETS[dk==='day_on'?'fat_on':'fat_off']}"
-            oninput="window._updTarget('${dk}','fats',this.value)">
-        </div>
+        ${['kcal','protein','carbs','fats'].map(f => {
+          const p = f === 'protein' ? 'Pro (g)' : f === 'carbs' ? 'Carb (g)' : f === 'fats' ? 'Fat (g)' : 'Kcal';
+          const key = f === 'protein' ? (dk==='day_on'?'pro_on':'pro_off') : f === 'carbs' ? (dk==='day_on'?'carb_on':'carb_off') : f === 'fats' ? (dk==='day_on'?'fat_on':'fat_off') : (dk==='day_on'?'kcal_on':'kcal_off');
+          return `<div class="fg" style="margin:0">
+            <label class="fl">${p}</label>
+            <input type="number" class="fi" style="padding:10px;text-align:center"
+              value="${d[f]||''}" placeholder="${DEFAULT_TARGETS[key]}"
+              oninput="window._updTarget('${dk}','${f}',this.value)">
+          </div>`;
+        }).join('')}
       </div>
       <div id="tots-${dk}" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;font-size:12px;color:var(--t2)">
         ${renderTotLine(tots)}
@@ -228,13 +209,17 @@ function calcDayTotals(dk) {
 }
 
 function renderMealRow(dk, mi, m) {
-  const variantsText = (m.variants || []).join('\n');
+  const key = `${dk}-${mi}`;
+  const variantsText = Array.isArray(m.variants)
+    ? m.variants.map(v => typeof v === 'object' ? `${v.label}: ${v.detail}` : v).join('\n')
+    : '';
+
   return `
     <div class="ex-card" id="meal-row-${dk}-${mi}">
       <div class="ex-head">
         <select class="fi" style="flex:1;margin-right:8px;padding:10px"
           oninput="window._updMeal('${dk}',${mi},'type',this.value)">
-          ${MEAL_TYPES.map(t => `<option value="${t}" ${m.type===t?'selected':''}>${MEAL_ICONS[t]} ${t}</option>`).join('')}
+          ${MEAL_TYPES.map(t => `<option value="${t}" ${m.type===t?'selected':''}>${MEAL_ICONS[t]||''} ${t}</option>`).join('')}
         </select>
         <button class="btn-del" onclick="window._removeMeal('${dk}',${mi})">🗑️</button>
       </div>
@@ -251,29 +236,49 @@ function renderMealRow(dk, mi, m) {
         </div>
       </div>
       <div class="fg">
-        <label class="fl">Alimenti</label>
-        <input class="fi" placeholder="Es. Pollo 150g + riso 100g…" value="${m.items||''}"
+        <label class="fl">Alimenti / Descrizione</label>
+        <input class="fi" placeholder="Es. 150g Pollo + 100g Riso…" value="${m.items||''}"
           oninput="window._updMeal('${dk}',${mi},'items',this.value)">
       </div>
+
+      <!-- Food calculator -->
+      <details style="margin-bottom:10px">
+        <summary style="font-size:12px;color:var(--accent);cursor:pointer;user-select:none;font-weight:700;padding:4px 0">
+          🔍 Calcola macros da alimento
+        </summary>
+        <div style="margin-top:10px;padding:12px;background:var(--bg4);border-radius:10px">
+          <div class="fg" style="margin-bottom:8px">
+            <label class="fl">Cerca alimento</label>
+            <input class="fi food-calc-input" id="food-calc-${key}" placeholder="Es. Pollo petto…"
+              style="margin-bottom:0" autocomplete="off">
+          </div>
+          <div class="food-grams-row" id="food-grams-row-${key}" style="display:none">
+            <label class="fl" style="margin:0;white-space:nowrap">Quantità (g)</label>
+            <input type="number" class="fi" id="food-grams-${key}" placeholder="100" step="5"
+              style="width:90px;padding:8px;text-align:center"
+              oninput="window._calcFoodMacros('${key}')">
+          </div>
+          <div class="food-macro-preview" id="food-preview-${key}" style="display:none">
+            <div class="fmp-item"><div class="fmp-val" id="fp-kcal-${key}" style="color:var(--accent)">0</div><div class="fmp-lbl">kcal</div></div>
+            <div class="fmp-item"><div class="fmp-val" id="fp-pro-${key}" style="color:var(--blue)">0g</div><div class="fmp-lbl">Pro</div></div>
+            <div class="fmp-item"><div class="fmp-val" id="fp-carb-${key}" style="color:var(--yellow)">0g</div><div class="fmp-lbl">Carb</div></div>
+            <div class="fmp-item"><div class="fmp-val" id="fp-fat-${key}" style="color:var(--orange)">0g</div><div class="fmp-lbl">Fat</div></div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <button class="btn btn-ghost btn-sm" onclick="window._applyFoodMacros('${key}','${dk}',${mi},'add')" style="flex:1">+ Somma</button>
+            <button class="btn btn-v btn-sm"     onclick="window._applyFoodMacros('${key}','${dk}',${mi},'set')" style="flex:1">= Sostituisci</button>
+          </div>
+        </div>
+      </details>
+
       <div class="grid4">
-        <div class="fg" style="margin:0">
-          <label class="fl">Pro (g)</label>
-          <input type="number" class="fi" style="padding:10px;text-align:center"
-            placeholder="0" value="${m.protein||''}" min="0" step="0.1"
-            oninput="window._updMacro('${dk}',${mi},'protein',this.value)">
-        </div>
-        <div class="fg" style="margin:0">
-          <label class="fl">Carb (g)</label>
-          <input type="number" class="fi" style="padding:10px;text-align:center"
-            placeholder="0" value="${m.carbs||''}" min="0" step="0.1"
-            oninput="window._updMacro('${dk}',${mi},'carbs',this.value)">
-        </div>
-        <div class="fg" style="margin:0">
-          <label class="fl">Fat (g)</label>
-          <input type="number" class="fi" style="padding:10px;text-align:center"
-            placeholder="0" value="${m.fats||''}" min="0" step="0.1"
-            oninput="window._updMacro('${dk}',${mi},'fats',this.value)">
-        </div>
+        ${['protein','carbs','fats'].map(f => `
+          <div class="fg" style="margin:0">
+            <label class="fl">${f==='protein'?'Pro (g)':f==='carbs'?'Carb (g)':'Fat (g)'}</label>
+            <input type="number" class="fi" style="padding:10px;text-align:center"
+              placeholder="0" value="${m[f]||''}" min="0" step="0.1" id="${f}-${dk}-${mi}"
+              oninput="window._updMacro('${dk}',${mi},'${f}',this.value)">
+          </div>`).join('')}
         <div class="fg" style="margin:0">
           <label class="fl">Kcal</label>
           <input type="number" class="fi" style="padding:10px;text-align:center"
@@ -282,13 +287,101 @@ function renderMealRow(dk, mi, m) {
         </div>
       </div>
       <div class="fg" style="margin-top:4px">
-        <label class="fl">Varianti carboidrati (una per riga)</label>
-        <textarea class="notes-area" placeholder="Es. Riso 100g&#10;Pasta 90g&#10;Patate 200g"
+        <label class="fl">Varianti (una per riga — label: dettaglio)</label>
+        <textarea class="notes-area" placeholder="Opzione 1: 130g Riso Basmati&#10;Opzione 2: 130g Couscous"
           oninput="window._updVariants('${dk}',${mi},this.value)">${variantsText}</textarea>
       </div>
     </div>`;
 }
 
+// ── Food calc ──────────────────────────────────────────────────────────────────
+function initFoodAutocomplete(dk, mi) {
+  const key   = `${dk}-${mi}`;
+  const input = document.getElementById(`food-calc-${key}`);
+  if (!input || input.dataset.acReady) return;
+  input.dataset.acReady = '1';
+
+  new Autocomplete({
+    inputEl: input,
+    collection: 'food_library',
+    db, USER_ID,
+    onSelect: async (item) => {
+      foodCalcState[key] = item;
+      document.getElementById(`food-grams-row-${key}`)?.style && (document.getElementById(`food-grams-row-${key}`).style.display = 'flex');
+      document.getElementById(`food-preview-${key}`)?.style    && (document.getElementById(`food-preview-${key}`).style.display = 'grid');
+      window._calcFoodMacros(key);
+    },
+    onCustom: async (name) => {
+      // Try OpenFoodFacts
+      showToast('Cerco su Open Food Facts…', 'inf');
+      const results = await searchOpenFoodFacts(name);
+      if (results.length) {
+        const r = results[0];
+        foodCalcState[key] = r;
+        input.value = r.name;
+        await saveToLibrary(db, USER_ID, 'food_library', r);
+        document.getElementById(`food-grams-row-${key}`).style.display = 'flex';
+        document.getElementById(`food-preview-${key}`).style.display    = 'grid';
+        window._calcFoodMacros(key);
+        showToast(`"${r.name}" trovato e salvato in libreria`);
+      } else {
+        foodCalcState[key] = { name, kcal_per_100g: 0, protein_per_100g: 0, carbs_per_100g: 0, fats_per_100g: 0 };
+        document.getElementById(`food-grams-row-${key}`).style.display = 'flex';
+        document.getElementById(`food-preview-${key}`).style.display    = 'grid';
+        showToast('Non trovato — inserisci i valori manualmente', 'inf');
+      }
+    }
+  });
+}
+
+window._calcFoodMacros = function(key) {
+  const food  = foodCalcState[key];
+  const grams = parseFloat(document.getElementById(`food-grams-${key}`)?.value) || 0;
+  if (!food || !grams) return;
+
+  const factor = grams / 100;
+  const kcal   = Math.round(food.kcal_per_100g   * factor);
+  const pro    = Math.round(food.protein_per_100g * factor * 10) / 10;
+  const carb   = Math.round(food.carbs_per_100g   * factor * 10) / 10;
+  const fat    = Math.round(food.fats_per_100g    * factor * 10) / 10;
+
+  const set2 = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set2(`fp-kcal-${key}`, kcal);
+  set2(`fp-pro-${key}`,  pro + 'g');
+  set2(`fp-carb-${key}`, carb + 'g');
+  set2(`fp-fat-${key}`,  fat + 'g');
+
+  foodCalcState[key + '_calc'] = { kcal, protein: pro, carbs: carb, fats: fat };
+};
+
+window._applyFoodMacros = function(key, dk, mi, mode) {
+  const calc = foodCalcState[key + '_calc'];
+  if (!calc) { showToast('Calcola prima le macro', 'err'); return; }
+  const m = formPlan[dk]?.meals?.[mi];
+  if (!m) return;
+
+  if (mode === 'add') {
+    m.kcal    = (m.kcal    || 0) + calc.kcal;
+    m.protein = Math.round(((m.protein || 0) + calc.protein) * 10) / 10;
+    m.carbs   = Math.round(((m.carbs   || 0) + calc.carbs)   * 10) / 10;
+    m.fats    = Math.round(((m.fats    || 0) + calc.fats)    * 10) / 10;
+  } else {
+    m.kcal    = calc.kcal;
+    m.protein = calc.protein;
+    m.carbs   = calc.carbs;
+    m.fats    = calc.fats;
+  }
+
+  const upd = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
+  upd(`kcal-${dk}-${mi}`,    m.kcal);
+  upd(`protein-${dk}-${mi}`, m.protein);
+  upd(`carbs-${dk}-${mi}`,   m.carbs);
+  upd(`fats-${dk}-${mi}`,    m.fats);
+  updateDayTots(dk);
+  showToast('Macro applicate ✅');
+};
+
+// ── Field update handlers ──────────────────────────────────────────────────────
 window._updTarget = function(dk, field, val) {
   if (formPlan[dk]) formPlan[dk][field] = +val || 0;
 };
@@ -300,14 +393,20 @@ window._updMeal = function(dk, mi, field, val) {
 
 window._updVariants = function(dk, mi, text) {
   const m = formPlan[dk]?.meals?.[mi];
-  if (m) m.variants = text.split('\n').map(l => l.trim()).filter(Boolean);
+  if (!m) return;
+  m.variants = text.split('\n').map(l => {
+    l = l.trim(); if (!l) return null;
+    const colonIdx = l.indexOf(':');
+    if (colonIdx > 0) return { label: l.slice(0, colonIdx).trim(), detail: l.slice(colonIdx+1).trim() };
+    return l;
+  }).filter(Boolean);
 };
 
 window._updMacro = function(dk, mi, field, val) {
   const m = formPlan[dk]?.meals?.[mi];
   if (!m) return;
   m[field] = parseFloat(val) || 0;
-  const kcal = Math.round((m.protein||0)*4 + (m.carbs||0)*4 + (m.fats||0)*9);
+  const kcal = calcKcalFromMacro(m.protein||0, m.carbs||0, m.fats||0);
   m.kcal = kcal;
   const el = document.getElementById(`kcal-${dk}-${mi}`);
   if (el) el.value = kcal || '';
@@ -325,7 +424,9 @@ window._addMeal = function(dk) {
   const m = { type:'colazione', label:'', time:'', items:'', kcal:0, protein:0, carbs:0, fats:0, variants:[] };
   formPlan[dk].meals.push(m);
   const wrap = document.getElementById(`meals-wrap-${dk}`);
-  if (wrap) wrap.insertAdjacentHTML('beforeend', renderMealRow(dk, formPlan[dk].meals.length-1, m));
+  const mi = formPlan[dk].meals.length - 1;
+  if (wrap) wrap.insertAdjacentHTML('beforeend', renderMealRow(dk, mi, m));
+  initFoodAutocomplete(dk, mi);
 };
 
 window._removeMeal = function(dk, mi) {
@@ -336,9 +437,11 @@ window._removeMeal = function(dk, mi) {
 function reRenderMeals(dk) {
   const wrap = document.getElementById(`meals-wrap-${dk}`);
   if (wrap) wrap.innerHTML = (formPlan[dk].meals||[]).map((m,i) => renderMealRow(dk,i,m)).join('');
+  (formPlan[dk].meals||[]).forEach((_, mi) => initFoodAutocomplete(dk, mi));
   updateDayTots(dk);
 }
 
+// ── Save ───────────────────────────────────────────────────────────────────────
 window.saveDietForm = async function() {
   const name = document.getElementById('df-name')?.value.trim();
   if (!name) { showToast('Inserisci il nome del piano', 'err'); return; }

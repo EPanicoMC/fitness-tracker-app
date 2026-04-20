@@ -459,3 +459,61 @@ select.fi {
 .divider { height: 1px; background: var(--border); margin: 12px 0; }
 .text-muted { color: var(--t2); font-size: 13px; }
 hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+
+/* ── Autocomplete ────────────────────────────────────────── */
+.ac-dropdown {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 200;
+  background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--r2);
+  box-shadow: 0 8px 24px rgba(0,0,0,.5); overflow: hidden;
+}
+.ac-dropdown > div {
+  padding: 10px 14px; font-size: 14px; cursor: pointer; transition: background .1s;
+  border-bottom: 1px solid var(--border);
+}
+.ac-dropdown > div:last-child { border-bottom: none; }
+.ac-dropdown > div:hover, .ac-dropdown > div:active { background: rgba(124,111,255,.12); }
+.ac-dropdown > div[data-custom] { color: var(--accent); font-style: italic; }
+
+/* ── Food calculator ─────────────────────────────────────── */
+.food-grams-row {
+  display: flex; align-items: center; gap: 8px; margin-top: 8px;
+}
+.food-macro-preview {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+  margin-top: 10px; padding: 10px; background: rgba(255,255,255,.03); border-radius: 10px;
+}
+.fmp-item { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.fmp-val { font-size: 15px; font-weight: 800; color: var(--t1); }
+.fmp-lbl { font-size: 10px; color: var(--t3); text-transform: uppercase; letter-spacing: .05em; }
+
+/* ── Rest timer colors ───────────────────────────────────── */
+.rest-green  { color: var(--green)  !important; }
+.rest-orange { color: var(--orange) !important; }
+.rest-red    { color: var(--red)    !important; animation: pulse-live .5s ease infinite !important; }
+
+/* ── Session select cards ────────────────────────────────── */
+.session-select-card {
+  background: var(--bg3); border-radius: var(--r); padding: 16px 20px;
+  margin-bottom: 10px; border: 1px solid var(--border);
+  display: flex; justify-content: space-between; align-items: center;
+  cursor: pointer; transition: border-color .15s, background .15s;
+}
+.session-select-card:hover, .session-select-card:active {
+  border-color: var(--accent); background: var(--bg4);
+}
+.session-select-name { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+.session-select-meta { font-size: 12px; color: var(--t2); }
+
+/* ── Screen notice ───────────────────────────────────────── */
+.screen-notice {
+  font-size: 11px; color: var(--t3); text-align: center; padding: 8px; margin-bottom: 8px;
+}
+
+/* ── PWA install banner ──────────────────────────────────── */
+.pwa-banner {
+  display: flex; align-items: center; gap: 12px; background: var(--bg3);
+  border: 1px solid var(--accent); border-radius: var(--r); padding: 14px 16px; margin-bottom: 14px;
+}
+
+/* ── Nav workout active color ────────────────────────────── */
+.bnav a.nav-workout.active { color: var(--orange); }

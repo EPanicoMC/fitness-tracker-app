@@ -117,19 +117,29 @@ function renderWorkoutCard() {
   const session = program?.schedule?.[dow] || null;
 
   if (session && logData.workout.exercises.length === 0) {
-    logData.workout.exercises = (session.exercises || []).map((ex, ei) => ({
-      name:        ex.name,
-      done:        false,
-      is_cardio:   ex.is_cardio || false,
-      rest_seconds: ex.rest_seconds || 60,
-      notes:       ex.notes || '',
-      show_notes:  false,
-      sets:        ex.sets.map(s => ({
-        reps:   s.reps,
-        weight: getPrevWeight(ex.name) ?? s.weight,
-        done:   false
-      }))
-    }));
+    logData.workout.exercises = (session.exercises || []).map(ex => {
+      const setCount = typeof ex.sets === 'number' ? ex.sets : (ex.sets?.length || 3);
+      return {
+        name:         ex.name,
+        done:         false,
+        is_cardio:    false,
+        rest_seconds: ex.rest_seconds || 90,
+        notes:        ex.notes || '',
+        show_notes:   false,
+        sets: Array.from({ length: setCount }, (_, i) => ({
+          reps:   ex.reps || '8',
+          weight: getPrevWeight(ex.name) ?? (ex.weight_per_set?.[i] || 0),
+          done:   false
+        }))
+      };
+    });
+    if (session.cardio?.enabled) {
+      logData.workout.exercises.push({
+        name: `🏃 ${session.cardio.type} (${session.cardio.duration_minutes} min)`,
+        done: false, is_cardio: true, rest_seconds: 0, notes: session.cardio.notes || '',
+        show_notes: false, sets: []
+      });
+    }
   }
 
   const sessionName = session?.name || 'Allenamento libero';
@@ -146,7 +156,7 @@ function renderWorkoutCard() {
       </div>
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
         <span class="badge badge-v">${doneCount}/${totalEx}</span>
-        <a href="live.html" class="btn btn-g btn-sm" style="text-decoration:none;font-size:12px">▶ Live</a>
+        <a href="session.html" class="btn btn-g btn-sm" style="text-decoration:none;font-size:12px">▶ Allenati</a>
       </div>
     </div>
     <div id="ex-list">${logData.workout.exercises.map((ex, ei) => renderExRow(ex, ei)).join('')}</div>`;
@@ -284,10 +294,11 @@ function renderMacroChip(id, val, max, label, color, cls) {
 function renderMealCheck(m, mi) {
   const variantsHtml = m.variants?.length ? `
     <div class="variant-chips">
-      ${m.variants.map((v, vi) => `
-        <div class="variant-chip ${m.active_variant === vi ? 'active' : ''}"
-          onclick="window._selectVariant(${mi},${vi})">${v.split('(')[0].trim()}</div>
-      `).join('')}
+      ${m.variants.map((v, vi) => {
+        const label = typeof v === 'object' ? v.label : v.split('(')[0].trim();
+        return `<div class="variant-chip ${m.active_variant === vi ? 'active' : ''}"
+          onclick="window._selectVariant(${mi},${vi})">${label}</div>`;
+      }).join('')}
     </div>` : '';
 
   return `
