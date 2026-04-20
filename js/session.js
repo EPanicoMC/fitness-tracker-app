@@ -12,9 +12,10 @@ let sessionSec   = 0;
 let sessionInt   = null;
 let restSec      = 0;
 let restInt      = null;
-let isPaused     = false;
-let wakeLock     = null;
-let customExList = [];
+let isPaused      = false;
+let sessionStarted = false;
+let wakeLock      = null;
+let customExList  = [];
 
 // ── Wake Lock ──────────────────────────────────────────────
 async function requestWakeLock() {
@@ -135,14 +136,42 @@ function launchActive(title, sub) {
       </div>`;
   }
 
-  sessionSec = 0;
+  sessionSec     = 0;
+  sessionStarted = false;
+  setT('s-timer', '00:00');
+
+  const startBtn = document.getElementById('start-btn');
+  const pauseBtn = document.getElementById('pause-btn');
+  const liveEl   = document.getElementById('live-badge');
+  const hintEl   = document.getElementById('s-hint');
+  if (startBtn) startBtn.style.display = 'inline-flex';
+  if (pauseBtn) pauseBtn.style.display = 'none';
+  if (liveEl)   liveEl.style.display   = 'none';
+  if (hintEl)   hintEl.style.display   = 'block';
+
+  renderExercises();
+}
+
+window.startSession = function() {
+  if (sessionStarted) return;
+  sessionStarted = true;
+
+  const startBtn = document.getElementById('start-btn');
+  const pauseBtn = document.getElementById('pause-btn');
+  const liveEl   = document.getElementById('live-badge');
+  const hintEl   = document.getElementById('s-hint');
+  if (startBtn) startBtn.style.display = 'none';
+  if (pauseBtn) pauseBtn.style.display = 'inline-flex';
+  if (liveEl)   liveEl.style.display   = 'inline-flex';
+  if (hintEl)   hintEl.style.display   = 'none';
+
   sessionInt = setInterval(() => {
     if (!isPaused) { sessionSec++; setT('s-timer', fmtTimer(sessionSec)); }
   }, 1000);
 
   renderExercises();
   requestWakeLock();
-}
+};
 
 function setT(id, v) { const e = document.getElementById(id); if (e) e.textContent = v; }
 
@@ -186,7 +215,9 @@ function renderSetRow(ex, ei, si, s) {
         style="width:62px;padding:8px;text-align:center;font-size:15px;font-weight:700;
           background:var(--bg3);border:1px solid var(--border2);border-radius:8px;color:var(--t1);outline:none"
         oninput="onReps(${ei},${si},this.value)">
-      <div class="set-done ${s.done ? 'done' : ''}" id="sd-${ei}-${si}" onclick="markDone(${ei},${si})">
+      <div class="set-done ${s.done ? 'done' : ''}" id="sd-${ei}-${si}"
+           onclick="markDone(${ei},${si})"
+           style="${!sessionStarted ? 'opacity:0.4;pointer-events:none;cursor:not-allowed' : ''}">
         ${s.done ? '✓' : ''}
       </div>
     </div>`;
@@ -298,6 +329,7 @@ window.confirmExit = function() {
     confirmLabel: 'Esci', confirmClass: 'btn-r',
     onConfirm: () => {
       clearInterval(sessionInt); clearInterval(restInt); releaseWakeLock();
+      sessionStarted = false;
       document.getElementById('st-act').style.display = 'none';
       document.getElementById('st-sel').style.display = 'block';
     }

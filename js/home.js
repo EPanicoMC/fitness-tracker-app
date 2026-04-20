@@ -2,7 +2,7 @@ import {
   db, USER_ID, doc, getDoc, setDoc, getDocs, collection, query, orderBy, limit
 } from './firebase-config.js';
 import {
-  getTodayString, getDayOfWeek, formatDateIT, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER, cleanOldLogs
+  getTodayString, getDayOfWeek, formatDateIT, formatDateShort, addDays, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER, cleanOldLogs
 } from './app.js';
 import { calcMacrosFromText } from './gemini.js';
 
@@ -11,7 +11,6 @@ let logData = {};
 let activeDiet = null;
 let activeProgram = null;
 let appSettings = null;
-let autoSaveTimer = null;
 let isTrainingDay = false;
 let mealStates = [];
 
@@ -50,13 +49,11 @@ async function init() {
   buildWorkout();
   buildStats();
 
-  if (appSettings?.auto_save) {
-    setupAutoSave(appSettings.auto_save_minutes || 5);
-  }
-
   if (new Date().getDate() === 1) {
     cleanOldLogs(db, USER_ID);
   }
+
+  checkYesterdayLog();
 }
 
 // ── Streak ─────────────────────────────────────────────────
@@ -395,38 +392,150 @@ window.calcAI = async function() {
 };
 
 // ── Save ───────────────────────────────────────────────────
-function collectData() {
-  logData.steps       = parseInt(document.getElementById('steps-in').value)  || null;
-  logData.burned_kcal = parseInt(document.getElementById('burned-in').value) || null;
-  logData.daily_note  = document.getElementById('note-in').value;
-
-  const tots = calcTotals();
-  logData.nutrition = { totals: tots };
-  logData.meals_eaten   = Object.fromEntries(mealStates.map((m, i) => [i, m.eaten]));
-  logData.meals_variant = Object.fromEntries(mealStates.map((m, i) => [i, m.active_variant]));
-  logData.meals_override = Object.fromEntries(
-    mealStates.map((m, i) => [i, m.override_kcal != null ? { kcal: m.override_kcal } : null])
-  );
-}
-
 window.saveDay = async function() {
-  collectData();
-  logData.date = TODAY;
-  logData.is_training_day = isTrainingDay;
-  logData.streak = logData.streak || 1;
+  const steps       = parseInt(document.getElementById('steps-in').value)  || null;
+  const burned_kcal = parseInt(document.getElementById('burned-in').value) || null;
+  const daily_note  = document.getElementById('note-in').value;
+  const tots = calcTotals();
+
+  const data = {
+    date:            TODAY,
+    is_training_day: isTrainingDay,
+    steps,
+    burned_kcal,
+    daily_note,
+    nutrition:    { totals: tots },
+    streak:       logData.streak || 1,
+    extra_meals:  logData.extra_meals || []
+  };
+  if (logData.day_override != null) data.day_override = logData.day_override;
+
   try {
-    await setDoc(doc(db, 'users', USER_ID, 'daily_logs', TODAY), logData, { merge: true });
+    await setDoc(doc(db, 'users', USER_ID, 'daily_logs', TODAY), data, { merge: true });
     showToast('💾 Giornata salvata!');
   } catch(e) {
     showToast('Errore salvataggio', 'err');
   }
 };
 
-function setupAutoSave(minutes) {
-  clearInterval(autoSaveTimer);
-  autoSaveTimer = setInterval(() => window.saveDay(), minutes * 60 * 1000);
-  document.getElementById('auto-label').textContent = `Auto-salvataggio ogni ${minutes} min`;
+// ── Recupero giorni passati ────────────────────────────────
+async function checkYesterdayLog() {
+  const yesterday = addDays(TODAY, -1);
+  const snap = await getDoc(doc(db, 'users', USER_ID, 'daily_logs', yesterday));
+  if (snap.exists()) return;
+
+  const banner = document.createElement('div');
+  banner.setAttribute('data-yesterday-banner', '1');
+  banner.style.cssText = `
+    background:linear-gradient(135deg,rgba(255,107,53,0.15),rgba(255,61,90,0.1));
+    border:1px solid rgba(255,107,53,0.3);border-radius:var(--rs);
+    padding:12px 16px;margin-bottom:14px;
+    display:flex;align-items:center;justify-content:space-between;gap:12px;
+    animation:fup .3s ease both;
+  `;
+  banner.innerHTML = `
+    <div>
+      <div style="font-size:13px;font-weight:700;color:var(--orange)">📋 Ieri non hai registrato la giornata</div>
+      <div style="font-size:12px;color:var(--t2);margin-top:2px">Vuoi recuperare i dati di ${formatDateShort(yesterday)}?</div>
+    </div>
+    <button class="btn btn-o btn-xs" onclick="openRecoverDay('${yesterday}')">Recupera</button>
+  `;
+  const wrap = document.querySelector('.wrap');
+  if (wrap?.firstChild) wrap.insertBefore(banner, wrap.firstChild);
 }
+
+window.openRecoverDay = function(dateStr) {
+  const sessionOpts = Object.entries(activeProgram?.schedule || {})
+    .filter(([, v]) => v !== null)
+    .map(([k, v]) => `<option value="${k}">${v.name} (${DAYS_IT[k]})</option>`)
+    .join('');
+
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg';
+  bg.id = 'recover-modal';
+  bg.innerHTML = `
+    <div class="modal" style="max-height:80vh;overflow-y:auto">
+      <div class="modal-handle"></div>
+      <h3>📋 Recupera Giornata</h3>
+      <p style="color:var(--t2);font-size:13px;margin-bottom:14px">${formatDateIT(dateStr)}</p>
+      <div class="fg">
+        <label class="fl">Kcal totali consumate</label>
+        <input type="number" class="fi" id="rec-kcal" placeholder="Es. 2650">
+      </div>
+      <div class="grid2">
+        <div class="fg"><label class="fl">Proteine (g)</label>
+          <input type="number" class="fi" id="rec-pro" placeholder="0" step="0.1"></div>
+        <div class="fg"><label class="fl">Carboidrati (g)</label>
+          <input type="number" class="fi" id="rec-carb" placeholder="0" step="0.1"></div>
+      </div>
+      <div class="grid2">
+        <div class="fg"><label class="fl">Grassi (g)</label>
+          <input type="number" class="fi" id="rec-fat" placeholder="0" step="0.1"></div>
+        <div class="fg"><label class="fl">Passi</label>
+          <input type="number" class="fi" id="rec-steps" placeholder="0"></div>
+      </div>
+      <div class="fg">
+        <label class="fl">Ti sei allenato?</label>
+        <select class="fi" id="rec-workout">
+          <option value="no">No, giorno di riposo</option>
+          <option value="yes">Sì, mi sono allenato</option>
+        </select>
+      </div>
+      <div id="rec-session-select" style="display:none" class="fg">
+        <label class="fl">Quale sessione?</label>
+        <select class="fi" id="rec-session">${sessionOpts}</select>
+      </div>
+      <div class="fg">
+        <label class="fl">Note</label>
+        <textarea class="fi" id="rec-note" rows="2" placeholder="Come è andata..."></textarea>
+      </div>
+      <div class="modal-btns">
+        <button class="btn btn-flat" onclick="document.getElementById('recover-modal').remove()">Annulla</button>
+        <button class="btn btn-v" onclick="saveRecoveredDay('${dateStr}')">💾 Salva</button>
+      </div>
+    </div>`;
+  document.body.appendChild(bg);
+
+  document.getElementById('rec-workout').onchange = function() {
+    document.getElementById('rec-session-select').style.display =
+      this.value === 'yes' ? 'block' : 'none';
+  };
+  bg.onclick = e => { if (e.target === bg) bg.remove(); };
+};
+
+window.saveRecoveredDay = async function(dateStr) {
+  const kcal       = parseFloat(document.getElementById('rec-kcal')?.value)   || 0;
+  const protein    = parseFloat(document.getElementById('rec-pro')?.value)     || 0;
+  const carbs      = parseFloat(document.getElementById('rec-carb')?.value)    || 0;
+  const fats       = parseFloat(document.getElementById('rec-fat')?.value)     || 0;
+  const steps      = parseInt(document.getElementById('rec-steps')?.value)     || null;
+  const note       = document.getElementById('rec-note')?.value                || '';
+  const didWorkout = document.getElementById('rec-workout')?.value             === 'yes';
+  const sessionDay = document.getElementById('rec-session')?.value             || null;
+
+  const data = {
+    date: dateStr,
+    is_training_day: didWorkout,
+    steps, daily_note: note, recovered: true,
+    nutrition: { totals: { kcal, protein, carbs, fats } }
+  };
+  if (didWorkout && sessionDay && activeProgram?.schedule?.[sessionDay]) {
+    data.workout = {
+      completed: true, recovered: true,
+      session_day: sessionDay,
+      session_name: activeProgram.schedule[sessionDay].name
+    };
+  }
+
+  try {
+    await setDoc(doc(db, 'users', USER_ID, 'daily_logs', dateStr), data, { merge: false });
+    document.getElementById('recover-modal')?.remove();
+    document.querySelector('[data-yesterday-banner]')?.remove();
+    showToast('✅ Giornata recuperata!');
+  } catch(e) {
+    showToast('Errore salvataggio', 'err');
+  }
+};
 
 // ── Aggiungi pasto extra ───────────────────────────────────
 window.openAddMeal = function() {

@@ -8,8 +8,6 @@ async function loadSettings() {
   if (s.profile?.name)          document.getElementById('s-name').value     = s.profile.name;
   if (s.profile?.height)        document.getElementById('s-height').value   = s.profile.height;
   if (s.profile?.weight_target) document.getElementById('s-wtarget').value  = s.profile.weight_target;
-  if (s.auto_save)              document.getElementById('s-autosave').checked = true;
-  if (s.auto_save_minutes)      document.getElementById('s-interval').value  = s.auto_save_minutes;
   await loadGeminiKey();
 }
 
@@ -32,8 +30,6 @@ window.saveSettings = async function() {
       height:        parseInt(document.getElementById('s-height').value)  || null,
       weight_target: parseFloat(document.getElementById('s-wtarget').value) || null
     },
-    auto_save:         document.getElementById('s-autosave').checked,
-    auto_save_minutes: parseInt(document.getElementById('s-interval').value) || 5
   };
   try {
     await setDoc(doc(db, 'users', USER_ID, 'settings', 'app'), data, { merge: true });

@@ -1,7 +1,7 @@
 import {
-  db, USER_ID, collection, doc, getDocs, query, where, orderBy, limit
+  db, USER_ID, collection, doc, getDocs, setDoc, query, where, orderBy, limit
 } from './firebase-config.js';
-import { getTodayString, getDayOfWeek, formatDateIT, formatDateShort, DAYS_IT, DAY_ORDER } from './app.js';
+import { getTodayString, getDayOfWeek, formatDateIT, formatDateShort, showToast, DAYS_IT, DAY_ORDER } from './app.js';
 
 const TODAY = getTodayString();
 let currentMonth = new Date(TODAY + 'T12:00:00');
@@ -178,6 +178,7 @@ window.showDay = async function(dateStr) {
               `<div style="font-size:13px;color:var(--t3);padding:2px 0">💪 ${ex.name} · ${ex.sets}×${ex.reps}</div>`
             ).join('')}
           </div>` : ''}
+        <button class="btn btn-ghost btn-sm" style="margin-top:12px;width:100%" onclick="openRecoverDay('${dateStr}')">📋 Recupera questa giornata</button>
       </div>`;
     return;
   }
@@ -188,6 +189,7 @@ window.showDay = async function(dateStr) {
       <div class="diary-card">
         <p style="font-size:15px;font-weight:700;margin-bottom:4px">${formatDateIT(dateStr)}</p>
         <p style="color:var(--t2);font-size:14px">Nessun dato registrato</p>
+        ${isPast ? `<button class="btn btn-ghost btn-sm" style="margin-top:10px;width:100%" onclick="openRecoverDay('${dateStr}')">📋 Recupera questa giornata</button>` : ''}
       </div>`;
     return;
   }
@@ -256,6 +258,102 @@ window.changeMonth = function(delta) {
   currentMonth.setMonth(currentMonth.getMonth() + delta);
   document.getElementById('day-detail').style.display = 'none';
   loadCalendar();
+};
+
+// ── Recupero giornata passata ──────────────────────────────
+window.openRecoverDay = function(dateStr) {
+  const sessionOpts = Object.entries(programData?.schedule || {})
+    .filter(([, v]) => v !== null)
+    .map(([k, v]) => `<option value="${k}">${v.name} (${DAYS_IT[k]})</option>`)
+    .join('');
+
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg';
+  bg.id = 'recover-modal';
+  bg.innerHTML = `
+    <div class="modal" style="max-height:80vh;overflow-y:auto">
+      <div class="modal-handle"></div>
+      <h3>📋 Recupera Giornata</h3>
+      <p style="color:var(--t2);font-size:13px;margin-bottom:14px">${formatDateIT(dateStr)}</p>
+      <div class="fg">
+        <label class="fl">Kcal totali consumate</label>
+        <input type="number" class="fi" id="rec-kcal" placeholder="Es. 2650">
+      </div>
+      <div class="grid2">
+        <div class="fg"><label class="fl">Proteine (g)</label>
+          <input type="number" class="fi" id="rec-pro" placeholder="0" step="0.1"></div>
+        <div class="fg"><label class="fl">Carboidrati (g)</label>
+          <input type="number" class="fi" id="rec-carb" placeholder="0" step="0.1"></div>
+      </div>
+      <div class="grid2">
+        <div class="fg"><label class="fl">Grassi (g)</label>
+          <input type="number" class="fi" id="rec-fat" placeholder="0" step="0.1"></div>
+        <div class="fg"><label class="fl">Passi</label>
+          <input type="number" class="fi" id="rec-steps" placeholder="0"></div>
+      </div>
+      <div class="fg">
+        <label class="fl">Ti sei allenato?</label>
+        <select class="fi" id="rec-workout">
+          <option value="no">No, giorno di riposo</option>
+          <option value="yes">Sì, mi sono allenato</option>
+        </select>
+      </div>
+      <div id="rec-session-select" style="display:none" class="fg">
+        <label class="fl">Quale sessione?</label>
+        <select class="fi" id="rec-session">${sessionOpts}</select>
+      </div>
+      <div class="fg">
+        <label class="fl">Note</label>
+        <textarea class="fi" id="rec-note" rows="2" placeholder="Come è andata..."></textarea>
+      </div>
+      <div class="modal-btns">
+        <button class="btn btn-flat" onclick="document.getElementById('recover-modal').remove()">Annulla</button>
+        <button class="btn btn-v" onclick="saveRecoveredDay('${dateStr}')">💾 Salva</button>
+      </div>
+    </div>`;
+  document.body.appendChild(bg);
+
+  document.getElementById('rec-workout').onchange = function() {
+    document.getElementById('rec-session-select').style.display =
+      this.value === 'yes' ? 'block' : 'none';
+  };
+  bg.onclick = e => { if (e.target === bg) bg.remove(); };
+};
+
+window.saveRecoveredDay = async function(dateStr) {
+  const kcal       = parseFloat(document.getElementById('rec-kcal')?.value)   || 0;
+  const protein    = parseFloat(document.getElementById('rec-pro')?.value)     || 0;
+  const carbs      = parseFloat(document.getElementById('rec-carb')?.value)    || 0;
+  const fats       = parseFloat(document.getElementById('rec-fat')?.value)     || 0;
+  const steps      = parseInt(document.getElementById('rec-steps')?.value)     || null;
+  const note       = document.getElementById('rec-note')?.value                || '';
+  const didWorkout = document.getElementById('rec-workout')?.value             === 'yes';
+  const sessionDay = document.getElementById('rec-session')?.value             || null;
+
+  const data = {
+    date: dateStr,
+    is_training_day: didWorkout,
+    steps, daily_note: note, recovered: true,
+    nutrition: { totals: { kcal, protein, carbs, fats } }
+  };
+  if (didWorkout && sessionDay && programData?.schedule?.[sessionDay]) {
+    data.workout = {
+      completed: true, recovered: true,
+      session_day: sessionDay,
+      session_name: programData.schedule[sessionDay].name
+    };
+  }
+
+  try {
+    await setDoc(doc(db, 'users', USER_ID, 'daily_logs', dateStr), data, { merge: false });
+    document.getElementById('recover-modal')?.remove();
+    monthLogs[dateStr] = data;
+    renderGrid(currentMonth.getFullYear(), currentMonth.getMonth());
+    document.getElementById('day-detail').style.display = 'none';
+    showToast('✅ Giornata recuperata!');
+  } catch(e) {
+    showToast('Errore salvataggio', 'err');
+  }
 };
 
 init();

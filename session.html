@@ -52,14 +52,16 @@
         <h1 id="s-title" style="font-size:20px"></h1>
         <p class="ph-sub" id="s-sub"></p>
       </div>
-      <span class="badge badge-live">● LIVE</span>
+      <span class="badge badge-live" id="live-badge" style="display:none">● LIVE</span>
     </div>
 
     <div class="card card-dark" style="text-align:center;padding:20px">
       <div class="clabel" style="justify-content:center">⏱️ Durata</div>
       <div class="timer-big" id="s-timer">00:00</div>
+      <p id="s-hint" style="font-size:12px;color:var(--t2);margin-top:8px">Premi Inizia per avviare la sessione e il timer</p>
       <div style="display:flex;gap:10px;margin-top:12px;justify-content:center">
-        <button class="btn btn-flat btn-sm" id="pause-btn" onclick="togglePause()">⏸ Pausa</button>
+        <button class="btn btn-o btn-sm" id="start-btn" onclick="startSession()">▶️ Inizia Sessione</button>
+        <button class="btn btn-flat btn-sm" id="pause-btn" onclick="togglePause()" style="display:none">⏸ Pausa</button>
       </div>
     </div>
 
