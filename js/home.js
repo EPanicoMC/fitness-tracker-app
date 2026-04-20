@@ -7,7 +7,6 @@ import {
 import { calcMacrosFromText } from './gemini.js';
 
 const TODAY = getTodayString();
-const LS_KEY = 'fittracker_home_' + TODAY;
 let logData = {};
 let activeDiet = null;
 let activeProgram = null;
@@ -17,44 +16,33 @@ let mealStates = [];
 
 function saveToLocal() {
   try {
+    const key = 'fittracker_today_' + getTodayString();
     const meals_state = {};
     mealStates.forEach((m, i) => {
       meals_state[i] = { eaten: m.eaten, variant: m.active_variant };
     });
-    const toSave = {
-      steps:            logData.steps,
-      burned_kcal:      logData.burned_kcal,
-      daily_note:       logData.daily_note,
-      is_training_day:  isTrainingDay,
-      day_override:     logData.day_override,
-      extra_meals:      logData.extra_meals || [],
+    localStorage.setItem(key, JSON.stringify({
       meals_state,
-      meals_overrides:  logData.meals_overrides || {},
-      nutrition_totals: logData.nutrition?.totals || {}
-    };
-    localStorage.setItem(LS_KEY, JSON.stringify(toSave));
+      meals_overrides: logData.meals_overrides || {},
+      extra_meals:     logData.extra_meals     || [],
+      steps:           logData.steps           || null,
+      burned_kcal:     logData.burned_kcal     || null,
+      daily_note:      logData.daily_note      || '',
+      is_training_day: isTrainingDay,
+      day_override:    logData.day_override
+    }));
     Object.keys(localStorage)
-      .filter(k => k.startsWith('fittracker_home_') && k !== LS_KEY)
+      .filter(k => k.startsWith('fittracker_today_') && k !== key)
       .forEach(k => localStorage.removeItem(k));
   } catch(e) {
-    console.warn('localStorage save failed:', e);
-  }
-}
-
-function loadFromLocal() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch(e) {
-    return null;
+    console.warn('saveToLocal error:', e);
   }
 }
 
 // ── Day rollover auto-save ─────────────────────────────────
 async function checkDayRollover() {
   const yesterday = getYesterdayString();
-  const yesterdayLS = localStorage.getItem('fittracker_home_' + yesterday);
+  const yesterdayLS = localStorage.getItem('fittracker_today_' + yesterday);
   if (!yesterdayLS) return;
   try {
     const data = JSON.parse(yesterdayLS);
@@ -71,7 +59,7 @@ async function checkDayRollover() {
       }, { merge: false });
       console.log('Auto-salvato giorno precedente:', yesterday);
     }
-    localStorage.removeItem('fittracker_home_' + yesterday);
+    localStorage.removeItem('fittracker_today_' + yesterday);
   } catch(e) {
     console.warn('Errore auto-save yesterday:', e);
   }
@@ -96,15 +84,20 @@ async function init() {
   appSettings   = settSnap.exists() ? settSnap.data() : {};
 
   // Merge localStorage (higher priority for today's working state)
-  const local = loadFromLocal();
-  if (local) {
-    if (local.steps != null)        logData.steps = local.steps;
-    if (local.burned_kcal != null)  logData.burned_kcal = local.burned_kcal;
-    if (local.daily_note != null)   logData.daily_note = local.daily_note;
-    if (local.day_override != null) logData.day_override = local.day_override;
-    if (local.extra_meals?.length)  logData.extra_meals = local.extra_meals;
-    if (local.meals_state)          logData.meals_state = local.meals_state;
-    if (local.meals_overrides)      logData.meals_overrides = local.meals_overrides;
+  const lsKey = 'fittracker_today_' + getTodayString();
+  const cached = localStorage.getItem(lsKey);
+  let local = null;
+  if (cached) {
+    try {
+      local = JSON.parse(cached);
+      logData.meals_overrides = local.meals_overrides || {};
+      logData.meals_state     = local.meals_state     || {};
+      logData.extra_meals     = local.extra_meals     || [];
+      if (local.steps != null)        logData.steps        = local.steps;
+      if (local.burned_kcal != null)  logData.burned_kcal  = local.burned_kcal;
+      if (local.daily_note != null)   logData.daily_note   = local.daily_note;
+      if (local.day_override != null) logData.day_override = local.day_override;
+    } catch(e) {}
   }
 
   const name = appSettings?.profile?.name || appSettings?.name || '';
@@ -382,9 +375,8 @@ function renderMealRow(m, mi) {
           <textarea id="meal-txt-${mi}" class="fi" rows="2" style="font-size:13px">${m.items || ''}</textarea>
           <button class="btn btn-ghost btn-sm" onclick="recalcMeal(${mi})" style="margin-top:8px">✨ Ricalcola con AI</button>
           <div id="meal-ai-${mi}" style="display:none;margin-top:8px"></div>
-          <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+          <div style="margin-top:8px">
             <button class="btn btn-ghost btn-sm" onclick="openManualMacro(${mi})">✏️ Inserisci manuale</button>
-            <button class="btn btn-ghost btn-sm" onclick="recalcMealAI(${mi})">✨ Ricalcola AI</button>
           </div>
         </div>
         <div class="meal-delta" id="meal-delta-${mi}"></div>
@@ -836,24 +828,5 @@ window.saveManualMacro = function(mealIndex) {
   showToast('✅ Macro aggiornati!');
 };
 
-window.recalcMealAI = async function(mealIndex) {
-  const plan = isTrainingDay ? activeDiet?.day_on?.meals : activeDiet?.day_off?.meals;
-  const meal = plan?.[mealIndex];
-  const text = meal?.items;
-
-  if (!text?.trim()) { showToast('Nessun ingrediente da calcolare', 'err'); return; }
-
-  showToast('⏳ Calcolo AI...', 'info');
-  const r = await calcMacrosFromText(text);
-  if (!r.success) { showToast('AI: ' + r.error, 'err'); return; }
-
-  if (!logData.meals_overrides) logData.meals_overrides = {};
-  logData.meals_overrides[mealIndex] = { kcal: r.kcal, protein: r.protein, carbs: r.carbs, fats: r.fats, items_text: text };
-
-  saveToLocal();
-  buildMeals();
-  buildNutrition();
-  showToast('✅ Macro aggiornati con AI!');
-};
 
 init();
