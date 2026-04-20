@@ -63,6 +63,8 @@ function renderGrid(year, month) {
       cls += log.workout?.completed ? ' has-on' : ' has-off';
     } else if (isOn && dateStr < TODAY) {
       cls += ' missed';
+    } else if (isOn && dateStr > TODAY) {
+      cls += ' planned';
     }
 
     html += `<div class="${cls}" onclick="showDay('${dateStr}')">${d}</div>`;
@@ -78,11 +80,32 @@ window.showDay = async function(dateStr) {
 
   const log = monthLogs[dateStr];
   if (!log) {
-    det.innerHTML = `
-      <div class="diary-card">
-        <p style="font-size:15px;font-weight:700;margin-bottom:4px">${formatDateIT(dateStr)}</p>
-        <p style="color:var(--t2);font-size:14px">Nessun dato registrato</p>
-      </div>`;
+    const dow = getDayOfWeek(dateStr);
+    const plannedSession = programData?.schedule?.[dow];
+    const isFuture = dateStr > TODAY;
+    if (isFuture && plannedSession) {
+      det.innerHTML = `
+        <div class="diary-card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <p style="font-size:15px;font-weight:700">${formatDateIT(dateStr)}</p>
+            <span class="badge" style="background:rgba(124,111,255,.2);color:var(--accent)">📅 Pianificato</span>
+          </div>
+          <div style="font-size:14px;font-weight:700;color:var(--accent)">${plannedSession.name}</div>
+          ${plannedSession.time ? `<div style="font-size:12px;color:var(--t2);margin-top:4px">🕐 ${plannedSession.time}</div>` : ''}
+          <div style="margin-top:10px">
+            ${(plannedSession.exercises||[]).map(ex =>
+              `<div style="font-size:13px;color:var(--t2);padding:3px 0">💪 ${ex.name} · ${ex.sets}×${ex.reps}</div>`
+            ).join('')}
+            ${plannedSession.cardio ? `<div style="font-size:12px;color:var(--blue);margin-top:4px">🏃 ${plannedSession.cardio.type} ${plannedSession.cardio.duration_minutes}min</div>` : ''}
+          </div>
+        </div>`;
+    } else {
+      det.innerHTML = `
+        <div class="diary-card">
+          <p style="font-size:15px;font-weight:700;margin-bottom:4px">${formatDateIT(dateStr)}</p>
+          <p style="color:var(--t2);font-size:14px">Nessun dato registrato</p>
+        </div>`;
+    }
     return;
   }
 

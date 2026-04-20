@@ -47,6 +47,7 @@ function renderList() {
         ${!d.active ? `<button class="btn btn-ghost btn-sm" onclick="activateDiet('${d.id}')">⚡ Attiva</button>` : ''}
         <button class="btn btn-flat btn-sm" onclick="openEdit('${d.id}')">✏️ Modifica</button>
         <button class="btn btn-flat btn-sm" onclick="toggleDietDetail('${d.id}')">📋 Pasti</button>
+        <button class="btn btn-flat btn-sm" onclick="cloneDiet('${d.id}')">📋 Clona</button>
       </div>
       <div id="ddet-${d.id}" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
         ${renderDietPreview(d)}
@@ -92,6 +93,20 @@ window.deleteDiet = function(id) {
       await loadDiets();
     }
   });
+};
+
+window.cloneDiet = async function(id) {
+  const d = diets.find(x => x.id === id);
+  if (!d) return;
+  try {
+    const clone = JSON.parse(JSON.stringify(d));
+    delete clone.id;
+    clone.name = `${clone.name} (copia)`;
+    clone.active = false;
+    await addDoc(collection(db, 'users', USER_ID, 'diet_plans'), clone);
+    showToast('✅ Piano clonato!');
+    await loadDiets();
+  } catch(e) { showToast('Errore clonazione', 'err'); }
 };
 
 // ── Form ───────────────────────────────────────────────────

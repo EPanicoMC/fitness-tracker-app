@@ -1,4 +1,10 @@
-import { GEMINI_KEY, GEMINI_URL } from './firebase-config.js';
+import { GEMINI_KEY } from './firebase-config.js';
+
+const MODELS = [
+  'gemini-2.0-flash-lite',
+  'gemini-1.5-flash',
+  'gemini-1.5-flash-8b'
+];
 
 export async function calcMacrosFromText(text) {
   const prompt = `Sei un nutrizionista esperto e preciso. Ti vengono dati degli alimenti con quantità.
@@ -16,33 +22,42 @@ Formato esatto:
 
 Alimenti: ${text}`;
 
-  try {
-    const res = await fetch(`${GEMINI_URL}?key=${GEMINI_KEY}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 1024 }
-      })
-    });
+  for (const model of MODELS) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.1, maxOutputTokens: 1024 }
+        })
+      });
 
-    if (!res.ok) throw new Error(`API error: ${res.status}`);
+      if (res.status === 429) {
+        console.warn(`${model} rate limited, trying next model...`);
+        continue;
+      }
+      if (!res.ok) throw new Error(`API error: ${res.status}`);
 
-    const data = await res.json();
-    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    const jsonStr = raw.replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
-    const result = JSON.parse(jsonStr);
+      const data = await res.json();
+      const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      const jsonStr = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      const result = JSON.parse(jsonStr);
 
-    return {
-      success: true,
-      kcal: Math.round(result.kcal || 0),
-      protein: Math.round(result.protein || 0),
-      carbs: Math.round(result.carbs || 0),
-      fats: Math.round(result.fats || 0),
-      items: result.items || []
-    };
-  } catch(e) {
-    console.error('Gemini error:', e);
-    return { success: false, error: e.message };
+      return {
+        success: true,
+        model,
+        kcal:    Math.round(result.kcal    || 0),
+        protein: Math.round(result.protein || 0),
+        carbs:   Math.round(result.carbs   || 0),
+        fats:    Math.round(result.fats    || 0),
+        items:   result.items || []
+      };
+    } catch(e) {
+      console.warn(`${model} failed:`, e.message);
+    }
   }
+
+  return { success: false, error: 'Tutti i modelli AI non disponibili. Riprova tra poco.' };
 }

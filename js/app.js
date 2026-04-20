@@ -37,3 +37,18 @@ export function setT(id,v){const e=document.getElementById(id);if(e)e.textConten
 export function fmtTimer(s){return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')}
 export const DAYS_IT={monday:'Lunedì',tuesday:'Martedì',wednesday:'Mercoledì',thursday:'Giovedì',friday:'Venerdì',saturday:'Sabato',sunday:'Domenica'};
 export const DAY_ORDER=['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+
+export async function cleanOldLogs(db, USER_ID, monthsToKeep=12) {
+  try {
+    const { collection, getDocs, deleteDoc, doc } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+    const cutoff = new Date();
+    cutoff.setMonth(cutoff.getMonth() - monthsToKeep);
+    const cutoffStr = cutoff.toISOString().split('T')[0];
+    const snap = await getDocs(collection(db, 'users', USER_ID, 'daily_logs'));
+    const toDelete = snap.docs.filter(d => d.id < cutoffStr);
+    await Promise.all(toDelete.map(d => deleteDoc(doc(db, 'users', USER_ID, 'daily_logs', d.id))));
+    if (toDelete.length) console.log(`cleanOldLogs: deleted ${toDelete.length} logs older than ${cutoffStr}`);
+  } catch(e) {
+    console.warn('cleanOldLogs error:', e);
+  }
+}

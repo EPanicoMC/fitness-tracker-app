@@ -182,6 +182,7 @@ textarea.fi{resize:vertical;min-height:70px;line-height:1.5}
 .cal-day.has-on::after{content:'';width:6px;height:6px;border-radius:50%;background:var(--green)}
 .cal-day.has-off::after{content:'';width:6px;height:6px;border-radius:50%;background:var(--t3)}
 .cal-day.missed::after{content:'';width:6px;height:6px;border-radius:50%;background:var(--red)}
+.cal-day.planned::after{content:'';width:6px;height:6px;border-radius:50%;background:var(--accent)}
 .cal-day.empty{opacity:.2;cursor:default}
 .cal-day.selected{background:var(--accent);color:#fff}
 

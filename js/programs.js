@@ -45,6 +45,7 @@ function renderList() {
           ${!p.active ? `<button class="btn btn-ghost btn-sm" onclick="activateProgram('${p.id}')">⚡ Attiva</button>` : ''}
           <button class="btn btn-flat btn-sm" onclick="openEdit('${p.id}')">✏️ Modifica</button>
           <button class="btn btn-flat btn-sm" onclick="toggleDetail('${p.id}')">📋 Dettaglio</button>
+          <button class="btn btn-flat btn-sm" onclick="cloneProgram('${p.id}')">📋 Clona</button>
         </div>
         <div id="pdet-${p.id}" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
           ${days.map(d => {
@@ -88,6 +89,20 @@ window.deleteProgram = function(id) {
       await loadPrograms();
     }
   });
+};
+
+window.cloneProgram = async function(id) {
+  const p = programs.find(x => x.id === id);
+  if (!p) return;
+  try {
+    const clone = JSON.parse(JSON.stringify(p));
+    delete clone.id;
+    clone.name = `${clone.name} (copia)`;
+    clone.active = false;
+    await addDoc(collection(db, 'users', USER_ID, 'programs'), clone);
+    showToast('✅ Scheda clonata!');
+    await loadPrograms();
+  } catch(e) { showToast('Errore clonazione', 'err'); }
 };
 
 // ── Form ───────────────────────────────────────────────────

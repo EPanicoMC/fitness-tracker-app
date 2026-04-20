@@ -2,7 +2,7 @@ import {
   db, USER_ID, doc, getDoc, setDoc, getDocs, collection, query, orderBy, limit
 } from './firebase-config.js';
 import {
-  getTodayString, getDayOfWeek, formatDateIT, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER
+  getTodayString, getDayOfWeek, formatDateIT, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER, cleanOldLogs
 } from './app.js';
 import { calcMacrosFromText } from './gemini.js';
 
@@ -31,6 +31,10 @@ async function init() {
   activeDiet    = dietSnap.docs.find(d => d.data().active)?.data() || null;
   appSettings   = settSnap.exists() ? settSnap.data() : {};
 
+  const name = appSettings?.profile?.name || appSettings?.name || '';
+  const welcomeEl = document.getElementById('welcome-name');
+  if (welcomeEl) welcomeEl.textContent = name ? `Benvenuto, ${name}` : 'Benvenuto';
+
   const dow = getDayOfWeek(TODAY);
   const progDay = activeProgram?.schedule?.[dow];
   if (logData.day_override != null) {
@@ -49,6 +53,10 @@ async function init() {
   if (appSettings?.auto_save) {
     setupAutoSave(appSettings.auto_save_minutes || 5);
   }
+
+  if (new Date().getDate() === 1) {
+    cleanOldLogs(db, USER_ID);
+  }
 }
 
 // ── Streak ─────────────────────────────────────────────────
@@ -56,6 +64,47 @@ function buildStreak() {
   const streak = logData.streak || 1;
   const box = document.getElementById('streak-box');
   box.innerHTML = `<div class="streak">🔥 ${streak} giorni</div>`;
+}
+
+// ── Session picker modal ───────────────────────────────────
+function showSessionPicker() {
+  const days = DAY_ORDER.filter(d => activeProgram?.schedule?.[d]);
+  if (!days.length) {
+    isTrainingDay = true;
+    logData.day_override = true;
+    document.getElementById('override-tgl').checked = true;
+    buildDayType(); buildNutrition(); buildWorkout();
+    return;
+  }
+
+  const bg = document.createElement('div'); bg.className = 'modal-bg';
+  bg.innerHTML = `
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <h3>🏋️ Scegli la sessione</h3>
+      <div id="sp-list" style="margin:14px 0;display:flex;flex-direction:column;gap:8px">
+        ${days.map(d => {
+          const s = activeProgram.schedule[d];
+          return `<button class="btn btn-ghost" style="text-align:left;padding:12px"
+            onclick="window._pickSession('${d}')">
+            <div style="font-weight:700">${s.name}</div>
+            <div style="font-size:12px;color:var(--t2)">${DAYS_IT[d]}${s.time ? ' · ' + s.time : ''} · ${s.exercises?.length||0} esercizi</div>
+          </button>`;
+        }).join('')}
+      </div>
+      <button class="btn btn-flat" onclick="this.closest('.modal-bg').remove()">Annulla</button>
+    </div>`;
+  document.body.appendChild(bg);
+  bg.onclick = e => { if (e.target === bg) bg.remove(); };
+
+  window._pickSession = function(dayKey) {
+    bg.remove();
+    isTrainingDay = true;
+    logData.day_override = true;
+    logData.selected_session_day = dayKey;
+    document.getElementById('override-tgl').checked = true;
+    buildDayType(); buildNutrition(); buildWorkout();
+  };
 }
 
 // ── Day type ───────────────────────────────────────────────
@@ -79,24 +128,9 @@ function buildDayType() {
   tgl.onchange = function() {
     const newVal = this.checked;
     if (newVal && !isTrainingDay) {
-      const days = DAY_ORDER.filter(d => activeProgram?.schedule?.[d]);
-      if (days.length) {
-        showModal({
-          title: 'Scegli la sessione',
-          text: days.map(d => activeProgram.schedule[d].name).join('<br>'),
-          confirmLabel: 'Allenati',
-          confirmClass: 'btn-o',
-          onConfirm: () => {
-            isTrainingDay = true;
-            logData.day_override = true;
-            buildDayType();
-            buildNutrition();
-            buildWorkout();
-          },
-          onCancel: () => { this.checked = false; }
-        });
-        return;
-      }
+      this.checked = false;
+      showSessionPicker();
+      return;
     }
     isTrainingDay = newVal;
     logData.day_override = newVal;

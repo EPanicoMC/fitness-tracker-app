@@ -164,7 +164,10 @@ function renderExCard(ex, ei) {
         </div>
       </div>
       ${ex.notes ? `<div class="ex-note" id="enote-${ei}">${ex.notes}</div>` : ''}
-      ${ex.sets.map((s, si) => renderSetRow(ex, ei, si, s)).join('')}
+      <div id="sets-wrap-${ei}">
+        ${ex.sets.map((s, si) => renderSetRow(ex, ei, si, s)).join('')}
+      </div>
+      <button class="btn btn-ghost btn-xs" style="margin-top:6px;width:100%" onclick="addSetToExercise(${ei})">＋ Serie</button>
     </div>`;
 }
 
@@ -192,6 +195,21 @@ function renderSetRow(ex, ei, si, s) {
 window.toggleNote = function(ei) {
   const el = document.getElementById(`enote-${ei}`);
   if (el) el.classList.toggle('open');
+};
+
+window.addSetToExercise = function(ei) {
+  const ex = exState[ei];
+  if (!ex) return;
+  const lastSet = ex.sets[ex.sets.length - 1];
+  ex.sets.push({
+    reps_target:   lastSet?.reps_target || '8',
+    ref_weight:    lastSet?.actual_weight || 0,
+    actual_weight: lastSet?.actual_weight || 0,
+    actual_reps:   '',
+    done:          false
+  });
+  const wrap = document.getElementById(`sets-wrap-${ei}`);
+  if (wrap) wrap.innerHTML = ex.sets.map((s, si) => renderSetRow(ex, ei, si, s)).join('');
 };
 
 window.onWeight = function(ei, si, val) {
@@ -246,7 +264,10 @@ function startRest(sec, label) {
   restInt = setInterval(() => {
     restSec--;
     updateRestDisplay();
-    if (restSec <= 0) { clearInterval(restInt); hideRest(); showToast('⚡ Recupero terminato!'); }
+    if (restSec <= 0) {
+      clearInterval(restInt); hideRest(); showToast('⚡ Recupero terminato!');
+      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    }
   }, 1000);
 }
 function updateRestDisplay() {
