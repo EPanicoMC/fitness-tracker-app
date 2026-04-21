@@ -220,9 +220,21 @@ function buildNutrition() {
   setT('kcal-now', Math.round(tots.kcal));
   setT('kcal-tgt', tgt.kcal);
   setW('pb-kcal', (tots.kcal / tgt.kcal) * 100);
-  setT('mc-pro',  Math.round(tots.protein) + 'g');
-  setT('mc-carb', Math.round(tots.carbs) + 'g');
-  setT('mc-fat',  Math.round(tots.fats) + 'g');
+  [
+    { id: 'mc-pro',  val: tots.protein, t: tgt.protein, name: 'Proteine' },
+    { id: 'mc-carb', val: tots.carbs,   t: tgt.carbs,   name: 'Carbo' },
+    { id: 'mc-fat',  val: tots.fats,    t: tgt.fats,    name: 'Grassi' }
+  ].forEach(({ id, val, t, name }) => {
+    setT(id, Math.round(val) + 'g');
+    const chip = document.getElementById(id)?.closest('.mchip');
+    if (!chip) return;
+    const lbl = chip.querySelector('.mchip-l');
+    if (!lbl) return;
+    const delta = Math.round(val - t);
+    const sign  = delta >= 0 ? '+' : '';
+    const col   = Math.abs(delta) <= 5 ? 'var(--green)' : delta > 0 ? 'var(--orange)' : 'var(--t2)';
+    lbl.innerHTML = `${name} <span style="color:${col};font-size:10px">(${sign}${delta}g)</span>`;
+  });
 
   const rem = tgt.kcal - tots.kcal;
   const deltaEl = document.getElementById('kcal-delta');
@@ -488,6 +500,9 @@ function buildWorkout() {
     const dur = Math.round((workout.duration_seconds || 0) / 60);
     const vol = (workout.exercises || []).reduce((a, ex) =>
       a + ex.sets.reduce((b, s) => b + (parseFloat(s.weight)||0) * (parseFloat(s.reps)||1), 0), 0);
+    const notesHtml = workout.notes
+      ? `<div style="font-size:12px;color:var(--t2);margin-top:6px;padding-top:6px;border-top:1px solid var(--border)">📝 ${workout.notes}</div>`
+      : '';
     el.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between">
         <div>
@@ -495,12 +510,25 @@ function buildWorkout() {
           <div style="font-size:12px;color:var(--t2);margin-top:4px">⏱ ${dur} min · 🏋️ ${Math.round(vol)} kg volume</div>
         </div>
         <span class="badge badge-g">✅ Completato</span>
-      </div>`;
+      </div>
+      ${notesHtml}`;
   } else {
     el.innerHTML = `
       <div style="font-size:15px;font-weight:700;margin-bottom:10px">${session?.name || 'Sessione'}</div>
       <a href="session.html" class="btn btn-o" style="text-decoration:none">🏋️ Vai ad Allenarti</a>`;
   }
+}
+
+function refreshStepsGoal() {
+  const stepsGoal = appSettings?.steps_goal;
+  const row = document.getElementById('steps-goal-row');
+  if (!row || !stepsGoal) return;
+  row.style.display = 'block';
+  const steps = logData.steps || 0;
+  const pct = Math.min(100, Math.round((steps / stepsGoal) * 100));
+  setW('pb-steps', pct);
+  const lbl = document.getElementById('steps-goal-lbl');
+  if (lbl) lbl.textContent = `${steps.toLocaleString('it-IT')} / ${stepsGoal.toLocaleString('it-IT')} (${pct}%)`;
 }
 
 // ── Stats ──────────────────────────────────────────────────
@@ -509,9 +537,12 @@ function buildStats() {
   if (logData.burned_kcal) document.getElementById('burned-in').value = logData.burned_kcal;
   if (logData.daily_note)  document.getElementById('note-in').value   = logData.daily_note;
 
+  refreshStepsGoal();
+
   document.getElementById('steps-in').addEventListener('change', () => {
     logData.steps = parseInt(document.getElementById('steps-in').value) || null;
     saveToLocal();
+    refreshStepsGoal();
   });
   document.getElementById('burned-in').addEventListener('change', () => {
     logData.burned_kcal = parseInt(document.getElementById('burned-in').value) || null;

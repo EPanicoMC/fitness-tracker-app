@@ -5,9 +5,10 @@ async function loadSettings() {
   const snap = await getDoc(doc(db, 'users', USER_ID, 'settings', 'app'));
   if (!snap.exists()) return;
   const s = snap.data();
-  if (s.profile?.name)          document.getElementById('s-name').value     = s.profile.name;
-  if (s.profile?.height)        document.getElementById('s-height').value   = s.profile.height;
-  if (s.profile?.weight_target) document.getElementById('s-wtarget').value  = s.profile.weight_target;
+  if (s.profile?.name)          document.getElementById('s-name').value       = s.profile.name;
+  if (s.profile?.height)        document.getElementById('s-height').value     = s.profile.height;
+  if (s.profile?.weight_target) document.getElementById('s-wtarget').value    = s.profile.weight_target;
+  if (s.steps_goal)             document.getElementById('s-steps-goal').value = s.steps_goal;
   await loadGeminiKey();
 }
 
@@ -30,6 +31,7 @@ window.saveSettings = async function() {
       height:        parseInt(document.getElementById('s-height').value)  || null,
       weight_target: parseFloat(document.getElementById('s-wtarget').value) || null
     },
+    steps_goal: parseInt(document.getElementById('s-steps-goal').value) || null
   };
   try {
     await setDoc(doc(db, 'users', USER_ID, 'settings', 'app'), data, { merge: true });

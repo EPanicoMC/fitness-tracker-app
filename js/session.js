@@ -15,17 +15,21 @@ function calcTotalVolume() {
 import { AutoComplete, saveToLibrary } from './autocomplete.js';
 
 const TODAY = getTodayString();
-let programData  = null;
-let sessionData  = null;
-let exState      = [];
-let sessionSec   = 0;
-let sessionInt   = null;
-let restSec      = 0;
-let restInt      = null;
-let isPaused      = false;
-let sessionStarted = false;
-let wakeLock      = null;
-let customExList  = [];
+let programData      = null;
+let sessionData      = null;
+let exState          = [];
+let sessionSec       = 0;
+let sessionStartTime = 0;
+let sessionPausedMs  = 0;
+let sessionPausedAt  = 0;
+let sessionInt       = null;
+let restSec          = 0;
+let restEndTime      = 0;
+let restInt          = null;
+let isPaused         = false;
+let sessionStarted   = false;
+let wakeLock         = null;
+let customExList     = [];
 
 // ── Wake Lock ──────────────────────────────────────────────
 async function requestWakeLock() {
@@ -50,7 +54,9 @@ async function loadSessionSelect() {
 
   const dow       = getDayOfWeek(TODAY);
   const todayLog  = logsSnap.docs.find(d => d.data().date === TODAY)?.data();
-  const lastDone  = logsSnap.docs.find(d => d.data().date !== TODAY && d.data().workout?.completed)?.data();
+  const lastDone  = todayLog?.workout?.completed
+    ? todayLog
+    : logsSnap.docs.find(d => d.data().date !== TODAY && d.data().workout?.completed)?.data();
 
   // Suggested session: next after last done
   const days = DAY_ORDER.filter(d => programData.schedule?.[d]);
@@ -157,8 +163,11 @@ function launchActive(title, sub) {
       </div>`;
   }
 
-  sessionSec     = 0;
-  sessionStarted = false;
+  sessionSec       = 0;
+  sessionStartTime = 0;
+  sessionPausedMs  = 0;
+  sessionPausedAt  = 0;
+  sessionStarted   = false;
   setT('s-timer', '00:00');
 
   const startBtn = document.getElementById('start-btn');
@@ -186,15 +195,34 @@ window.startSession = function() {
   if (liveEl)   liveEl.style.display   = 'inline-flex';
   if (hintEl)   hintEl.style.display   = 'none';
 
+  sessionStartTime = Date.now();
+  sessionPausedMs  = 0;
   sessionInt = setInterval(() => {
-    if (!isPaused) { sessionSec++; setT('s-timer', fmtTimer(sessionSec)); }
-  }, 1000);
+    if (!isPaused) {
+      sessionSec = Math.floor((Date.now() - sessionStartTime - sessionPausedMs) / 1000);
+      setT('s-timer', fmtTimer(sessionSec));
+    }
+  }, 500);
 
   renderExercises();
   requestWakeLock();
 };
 
 function setT(id, v) { const e = document.getElementById(id); if (e) e.textContent = v; }
+
+function onVisibilityChange() {
+  if (document.visibilityState !== 'visible' || !sessionStarted) return;
+  if (!isPaused) {
+    sessionSec = Math.floor((Date.now() - sessionStartTime - sessionPausedMs) / 1000);
+    setT('s-timer', fmtTimer(sessionSec));
+  }
+  if (restEndTime > 0) {
+    restSec = Math.max(0, Math.ceil((restEndTime - Date.now()) / 1000));
+    updateRestDisplay();
+    if (restSec <= 0) { clearInterval(restInt); hideRest(); }
+  }
+}
+document.addEventListener('visibilitychange', onVisibilityChange);
 
 // ── Render exercises ───────────────────────────────────────
 function renderExercises() {
@@ -309,18 +337,19 @@ window.markDone = function(ei, si) {
 // ── Rest timer ─────────────────────────────────────────────
 function startRest(sec, label) {
   clearInterval(restInt);
+  restEndTime = Date.now() + sec * 1000;
   restSec = sec;
   document.getElementById('rest-box').style.display = 'block';
   document.getElementById('rest-next').textContent = label;
   updateRestDisplay();
   restInt = setInterval(() => {
-    restSec--;
+    restSec = Math.max(0, Math.ceil((restEndTime - Date.now()) / 1000));
     updateRestDisplay();
     if (restSec <= 0) {
       clearInterval(restInt); hideRest(); showToast('⚡ Recupero terminato!');
       if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
     }
-  }, 1000);
+  }, 500);
 }
 function updateRestDisplay() {
   const el = document.getElementById('rest-num');
@@ -333,6 +362,11 @@ function hideRest() { document.getElementById('rest-box').style.display = 'none'
 window.skipRest    = function() { clearInterval(restInt); hideRest(); };
 window.togglePause = function() {
   isPaused = !isPaused;
+  if (isPaused) {
+    sessionPausedAt = Date.now();
+  } else {
+    sessionPausedMs += Date.now() - sessionPausedAt;
+  }
   document.getElementById('pause-btn').textContent = isPaused ? '▶️ Riprendi' : '⏸ Pausa';
 };
 
@@ -349,7 +383,9 @@ window.confirmExit = function() {
     text: 'I progressi non salvati andranno persi.',
     confirmLabel: 'Esci', confirmClass: 'btn-r',
     onConfirm: () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       clearInterval(sessionInt); clearInterval(restInt); releaseWakeLock();
+      restEndTime = 0;
       sessionStarted = false;
       document.getElementById('st-act').style.display = 'none';
       document.getElementById('st-sel').style.display = 'block';
@@ -415,7 +451,9 @@ window.launchCustom = function() {
 
 // ── Finish session ─────────────────────────────────────────
 window.finishSession = async function() {
+  document.removeEventListener('visibilitychange', onVisibilityChange);
   clearInterval(sessionInt); clearInterval(restInt); releaseWakeLock();
+  restEndTime = 0;
 
   const cardioDone = document.getElementById('cardio-done')?.checked || false;
   const workoutLog = {
