@@ -172,7 +172,8 @@ function showSessionPicker() {
     logData.day_override = true;
     logData.selected_session_day = dayKey;
     document.getElementById('override-tgl').checked = true;
-    buildDayType(); buildNutrition(); buildWorkout();
+    saveToLocal();
+    buildDayType(); buildNutrition(); buildMeals(); buildWorkout();
   };
 }
 
@@ -206,6 +207,7 @@ function buildDayType() {
     saveToLocal();
     buildDayType();
     buildNutrition();
+    buildMeals();
     buildWorkout();
   };
 }
@@ -522,13 +524,21 @@ function buildWorkout() {
 function refreshStepsGoal() {
   const stepsGoal = appSettings?.steps_goal;
   const row = document.getElementById('steps-goal-row');
-  if (!row || !stepsGoal) return;
+  if (!row) return;
   row.style.display = 'block';
+  if (!stepsGoal) {
+    row.innerHTML = `<div style="font-size:11px;color:var(--t3);margin-top:4px">
+      <a href="settings.html" style="color:var(--accent)">⚙️ Imposta obiettivo</a> per la barra progresso</div>`;
+    return;
+  }
   const steps = logData.steps || 0;
   const pct = Math.min(100, Math.round((steps / stepsGoal) * 100));
-  setW('pb-steps', pct);
-  const lbl = document.getElementById('steps-goal-lbl');
-  if (lbl) lbl.textContent = `${steps.toLocaleString('it-IT')} / ${stepsGoal.toLocaleString('it-IT')} (${pct}%)`;
+  const col = pct >= 100 ? 'var(--green)' : pct >= 70 ? 'var(--yellow)' : 'var(--t2)';
+  row.innerHTML = `
+    <div class="pbb h4" style="margin-top:6px"><div class="pbf pb-g" id="pb-steps" style="width:${pct}%"></div></div>
+    <div style="font-size:11px;color:${col};margin-top:3px;font-weight:600">
+      ${steps.toLocaleString('it-IT')} / ${stepsGoal.toLocaleString('it-IT')} passi (${pct}%)
+    </div>`;
 }
 
 // ── Stats ──────────────────────────────────────────────────
@@ -594,8 +604,11 @@ window.saveDay = async function() {
     steps,
     burned_kcal,
     daily_note,
-    nutrition:    { totals: tots },
-    streak:       logData.streak || 1
+    nutrition:       { totals: tots },
+    streak:          logData.streak || 1,
+    meals_state:     logData.meals_state     || {},
+    meals_overrides: logData.meals_overrides || {},
+    extra_meals:     logData.extra_meals     || []
   };
   if (logData.day_override != null) data.day_override = logData.day_override;
 

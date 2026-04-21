@@ -1,27 +1,30 @@
 import {
-  db, USER_ID, collection, doc, getDocs, setDoc, query, where, orderBy, limit
+  db, USER_ID, collection, doc, getDoc, getDocs, setDoc, deleteField, query, where, orderBy, limit
 } from './firebase-config.js';
 import { getTodayString, getDayOfWeek, formatDateIT, formatDateShort, showToast, DAYS_IT, DAY_ORDER } from './app.js';
 
 const TODAY = getTodayString();
 let currentMonth = new Date(TODAY + 'T12:00:00');
 currentMonth.setDate(1);
-let programData = null;
+let programData  = null;
 let monthLogs    = {};
 let selectedDate = null;
+let settingsData = null;
 
 async function init() {
-  const [progSnap, logsSnap] = await Promise.all([
+  const [progSnap, logsSnap, settSnap] = await Promise.all([
     getDocs(collection(db, 'users', USER_ID, 'programs')),
     getDocs(query(
       collection(db, 'users', USER_ID, 'daily_logs'),
       orderBy('date', 'desc'),
       limit(60)
-    ))
+    )),
+    getDoc(doc(db, 'users', USER_ID, 'settings', 'app'))
   ]);
 
   const activeDoc = progSnap.docs.find(d => d.data().active);
   if (activeDoc) programData = activeDoc.data();
+  settingsData = settSnap.exists() ? settSnap.data() : {};
 
   const lastCompleted = logsSnap.docs
     .map(d => d.data())
@@ -221,9 +224,8 @@ window.showDay = async function(dateStr) {
 
   // Log esistente — riepilogo completo
   const tots = log.nutrition?.totals || {};
-  const plan = isOn
-    ? (await getActiveDietPlan())?.day_on
-    : (await getActiveDietPlan())?.day_off;
+  const dietPlan = await getActiveDietPlan();
+  const plan = isOn ? dietPlan?.day_on : dietPlan?.day_off;
 
   let workoutHtml = '';
   if (log.workout?.completed) {
@@ -231,27 +233,38 @@ window.showDay = async function(dateStr) {
     const dur = Math.round((w.duration_seconds || 0) / 60);
     const vol = (w.exercises || []).reduce((a, ex) =>
       a + ex.sets.reduce((b, s) => b + (parseFloat(s.weight) || 0) * (parseFloat(s.reps) || 1), 0), 0);
+    const notesHtml = w.notes ? `<div style="font-size:12px;color:var(--t3);margin-top:4px;font-style:italic">"${w.notes}"</div>` : '';
     workoutHtml = `
       <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div style="flex:1">
             <div style="font-weight:700;font-size:14px">💪 ${w.session_name || 'Allenamento'}</div>
             <div style="font-size:12px;color:var(--t2);margin-top:3px">⏱ ${dur} min · 🏋️ ${Math.round(vol)} kg vol.</div>
+            ${notesHtml}
           </div>
-          <span class="badge badge-g">✅</span>
+          <div style="display:flex;gap:6px;align-items:center">
+            <span class="badge badge-g">✅</span>
+            <button class="btn-del" style="padding:5px 10px;font-size:11px" onclick="confirmDeleteWorkout('${dateStr}')">🗑️</button>
+          </div>
         </div>
       </div>`;
   } else if (isOn) {
     workoutHtml = `<div style="margin-top:12px;font-size:13px;color:var(--orange)">⚠️ Sessione non completata</div>`;
   }
 
+  const badgeHtml = computeDayBadge(log, plan, isOn);
+
   det.innerHTML = `
     <div class="diary-card">
-      ${X}
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <p style="font-size:16px;font-weight:800">${formatDateShort(dateStr)}</p>
-        <span class="badge ${isOn ? 'badge-g' : 'badge-r'}">${isOn ? '💪 ON' : '😴 OFF'}</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="badge ${isOn ? 'badge-g' : ''}" style="${!isOn ? 'background:rgba(120,120,160,.15);color:var(--t2)' : ''}">${isOn ? '💪 ON' : '😴 OFF'}</span>
+          <button class="btn btn-ghost btn-xs" onclick="openEditDay('${dateStr}')">✏️</button>
+          ${X}
+        </div>
       </div>
+      ${badgeHtml}
       ${tots.kcal ? `
         <div class="mrow">
           <span class="mlabel">🔥 Kcal</span>
@@ -265,7 +278,7 @@ window.showDay = async function(dateStr) {
           <span>🌾 ${Math.round(tots.carbs || 0)}g</span>
           <span>🧈 ${Math.round(tots.fats || 0)}g</span>
         </div>` : '<p style="color:var(--t3);font-size:13px">Nessun dato nutrizionale</p>'}
-      ${log.steps       ? `<div style="margin-top:8px;font-size:13px;color:var(--t2)">👟 ${log.steps} passi</div>` : ''}
+      ${log.steps       ? `<div style="margin-top:8px;font-size:13px;color:var(--t2)">👟 ${log.steps.toLocaleString('it-IT')} passi</div>` : ''}
       ${log.burned_kcal ? `<div style="font-size:13px;color:var(--t2)">🔥 ${log.burned_kcal} kcal bruciate</div>` : ''}
       ${log.daily_note  ? `<div style="margin-top:10px;font-size:13px;color:var(--t2);font-style:italic">"${log.daily_note}"</div>` : ''}
       ${workoutHtml}
@@ -278,6 +291,51 @@ async function getActiveDietPlan() {
   const snap = await getDocs(collection(db, 'users', USER_ID, 'diet_plans'));
   _dietPlanCache = snap.docs.find(d => d.data().active)?.data() || null;
   return _dietPlanCache;
+}
+
+function computeDayBadge(log, plan, isOn) {
+  const checks = [];
+  const stepsGoal = settingsData?.steps_goal;
+
+  // Workout check
+  if (isOn) {
+    checks.push({ ok: !!log.workout?.completed, label: log.workout?.completed ? '💪 Allenamento ✓' : '💪 Allenamento ✗' });
+  } else {
+    checks.push({ ok: true, label: '😴 Riposo rispettato' });
+  }
+
+  // Nutrition check
+  if (log.nutrition?.totals?.kcal && plan?.kcal) {
+    const r = log.nutrition.totals.kcal / plan.kcal;
+    checks.push({ ok: r >= 0.85 && r <= 1.15, label: r >= 0.85 && r <= 1.15 ? '🥗 Macro in target' : '🥗 Macro fuori target' });
+  }
+
+  // Steps check
+  if (stepsGoal && log.steps) {
+    checks.push({ ok: log.steps >= stepsGoal, label: log.steps >= stepsGoal ? '👟 Obiettivo passi ✓' : '👟 Passi incompleti' });
+  }
+
+  if (!checks.length) return '';
+
+  const achieved = checks.filter(c => c.ok).length;
+  const total    = checks.length;
+  let emoji, label, color;
+  if (achieved === total)     { emoji = '🌟'; label = 'Giornata perfetta';  color = 'var(--green)'; }
+  else if (achieved >= total * 0.67) { emoji = '💪'; label = 'Buona giornata';    color = 'var(--blue)'; }
+  else if (achieved >= total * 0.33) { emoji = '📊'; label = 'Nella media';       color = 'var(--yellow)'; }
+  else                               { emoji = '😤'; label = 'Da migliorare';     color = 'var(--orange)'; }
+
+  const dots = checks.map(c =>
+    `<span style="color:${c.ok ? 'var(--green)' : 'var(--t3)'};font-size:11px">${c.label}</span>`
+  ).join(' · ');
+
+  return `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;margin-bottom:12px">
+    <span style="font-size:22px;line-height:1">${emoji}</span>
+    <div>
+      <div style="font-size:13px;font-weight:800;color:${color}">${label}</div>
+      <div style="margin-top:4px;line-height:1.8">${dots}</div>
+    </div>
+  </div>`;
 }
 
 window.changeMonth = function(delta) {
@@ -380,6 +438,113 @@ window.saveRecoveredDay = async function(dateStr) {
     showToast('✅ Giornata recuperata!');
   } catch(e) {
     showToast('Errore salvataggio', 'err');
+  }
+};
+
+// ── Edit day modal ─────────────────────────────────────────
+window.openEditDay = function(dateStr) {
+  const log = monthLogs[dateStr];
+  if (!log) return;
+  const tots = log.nutrition?.totals || {};
+
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg';
+  bg.id = 'edit-day-modal';
+  bg.innerHTML = `
+    <div class="modal" style="max-height:85vh;overflow-y:auto">
+      <div class="modal-handle"></div>
+      <h3>✏️ Modifica giornata</h3>
+      <p style="font-size:13px;color:var(--t2);margin-bottom:14px">${formatDateIT(dateStr)}</p>
+      <div class="grid2">
+        <div class="fg"><label class="fl">Passi</label>
+          <input type="number" class="fi" id="ed-steps" value="${log.steps || ''}" placeholder="0"></div>
+        <div class="fg"><label class="fl">Kcal bruciate</label>
+          <input type="number" class="fi" id="ed-burned" value="${log.burned_kcal || ''}" placeholder="0"></div>
+      </div>
+      <div class="fg"><label class="fl">Note</label>
+        <textarea class="fi" id="ed-note" rows="2">${log.daily_note || ''}</textarea>
+      </div>
+      <span class="clabel">🔥 Nutrizione</span>
+      <div class="grid2">
+        <div class="fg"><label class="fl">Kcal totali</label>
+          <input type="number" class="fi" id="ed-kcal" value="${Math.round(tots.kcal || 0)}" placeholder="0"></div>
+        <div class="fg"><label class="fl">Proteine (g)</label>
+          <input type="number" class="fi" id="ed-pro" value="${Math.round(tots.protein || 0)}" placeholder="0" step="0.1"></div>
+        <div class="fg"><label class="fl">Carboidrati (g)</label>
+          <input type="number" class="fi" id="ed-carb" value="${Math.round(tots.carbs || 0)}" placeholder="0" step="0.1"></div>
+        <div class="fg"><label class="fl">Grassi (g)</label>
+          <input type="number" class="fi" id="ed-fat" value="${Math.round(tots.fats || 0)}" placeholder="0" step="0.1"></div>
+      </div>
+      <div class="modal-btns">
+        <button class="btn btn-flat" onclick="document.getElementById('edit-day-modal').remove()">Annulla</button>
+        <button class="btn btn-v" onclick="saveEditDay('${dateStr}')">💾 Salva</button>
+      </div>
+    </div>`;
+  document.body.appendChild(bg);
+  bg.onclick = e => { if (e.target === bg) bg.remove(); };
+};
+
+window.saveEditDay = async function(dateStr) {
+  const steps      = parseInt(document.getElementById('ed-steps')?.value)  || null;
+  const burned     = parseInt(document.getElementById('ed-burned')?.value) || null;
+  const note       = document.getElementById('ed-note')?.value || '';
+  const kcal       = parseFloat(document.getElementById('ed-kcal')?.value)  || 0;
+  const protein    = parseFloat(document.getElementById('ed-pro')?.value)   || 0;
+  const carbs      = parseFloat(document.getElementById('ed-carb')?.value)  || 0;
+  const fats       = parseFloat(document.getElementById('ed-fat')?.value)   || 0;
+
+  try {
+    await setDoc(doc(db, 'users', USER_ID, 'daily_logs', dateStr), {
+      steps,
+      burned_kcal: burned,
+      daily_note: note,
+      nutrition: { totals: { kcal, protein, carbs, fats } }
+    }, { merge: true });
+
+    // Update local cache
+    if (monthLogs[dateStr]) {
+      monthLogs[dateStr].steps       = steps;
+      monthLogs[dateStr].burned_kcal = burned;
+      monthLogs[dateStr].daily_note  = note;
+      monthLogs[dateStr].nutrition   = { totals: { kcal, protein, carbs, fats } };
+    }
+
+    document.getElementById('edit-day-modal')?.remove();
+    showToast('✅ Giornata aggiornata!');
+    showDay(dateStr); // Refresh the day detail
+  } catch(e) {
+    showToast('Errore salvataggio', 'err');
+  }
+};
+
+window.confirmDeleteWorkout = function(dateStr) {
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg';
+  bg.innerHTML = `
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <h3>🗑️ Elimina allenamento</h3>
+      <p style="color:var(--t2);font-size:13px;margin-bottom:16px">Vuoi rimuovere i dati di allenamento da questa giornata? I dati di nutrizione e passi rimarranno.</p>
+      <div class="modal-btns">
+        <button class="btn btn-flat" onclick="this.closest('.modal-bg').remove()">Annulla</button>
+        <button class="btn btn-r" onclick="deleteWorkout('${dateStr}',this.closest('.modal-bg'))">🗑️ Elimina</button>
+      </div>
+    </div>`;
+  document.body.appendChild(bg);
+  bg.onclick = e => { if (e.target === bg) bg.remove(); };
+};
+
+window.deleteWorkout = async function(dateStr, modalBg) {
+  try {
+    await setDoc(doc(db, 'users', USER_ID, 'daily_logs', dateStr),
+      { workout: deleteField() }, { merge: true });
+    if (monthLogs[dateStr]) delete monthLogs[dateStr].workout;
+    modalBg?.remove();
+    showToast('✅ Allenamento rimosso');
+    renderGrid(currentMonth.getFullYear(), currentMonth.getMonth());
+    showDay(dateStr);
+  } catch(e) {
+    showToast('Errore eliminazione', 'err');
   }
 };
 
