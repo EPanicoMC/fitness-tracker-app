@@ -319,6 +319,23 @@ function buildFitScore() {
   const objective = activeProgram?.objective || 'recomposizione';
   const stepsGoal = appSettings?.steps_goal || 0;
 
+  if (!plan) {
+    box.innerHTML = `
+      <div class="fitscore-card">
+        <span class="clabel">⚡ FitScore oggi</span>
+        <div style="font-size:13px;color:var(--t2)">Nessun piano dieta attivo. Impossibile calcolare il FitScore.</div>
+      </div>`;
+    return;
+  }
+  if (tots.kcal === 0) {
+    box.innerHTML = `
+      <div class="fitscore-card">
+        <span class="clabel">⚡ FitScore oggi</span>
+        <div style="font-size:13px;color:var(--t2)">Completa almeno un pasto per sbloccare il FitScore!</div>
+      </div>`;
+    return;
+  }
+
   const fakeLog = {
     workout:   { completed: !!logData.workout?.completed },
     nutrition: { kcal: tots.kcal, protein: tots.protein },

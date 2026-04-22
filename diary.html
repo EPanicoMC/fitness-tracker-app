@@ -24,17 +24,17 @@
 
   <!-- TAB SWITCHER -->
   <div class="tab-sw">
-    <button class="tab-btn tab-active" onclick="showTab('week')">📊 2 Settimane</button>
-    <button class="tab-btn" onclick="showTab('cal')">🗓️ Mese</button>
+    <button class="tab-btn" onclick="showTab('week')">📊 2 Settimane</button>
+    <button class="tab-btn tab-active" onclick="showTab('cal')">🗓️ Mese</button>
   </div>
 
   <!-- WEEK VIEW -->
-  <div id="week-view">
+  <div id="week-view" style="display:none">
     <div class="spin"></div>
   </div>
 
   <!-- CALENDAR VIEW -->
-  <div id="cal-view" style="display:none">
+  <div id="cal-view" style="display:block">
     <!-- MONTH NAV -->
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
       <button class="btn-icon" onclick="changeMonth(-1)">←</button>

@@ -38,6 +38,22 @@ async function requestWakeLock() {
 function releaseWakeLock() { if (wakeLock) { wakeLock.release(); wakeLock = null; } }
 
 // ── Notification helpers ───────────────────────────────────
+function beep() {
+  try {
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.type = 'sine';
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(1, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+    osc.start(audioCtx.currentTime);
+    osc.stop(audioCtx.currentTime + 0.5);
+  } catch(e) {}
+}
+
 function postToSW(msg) {
   navigator.serviceWorker?.controller?.postMessage(msg);
 }
@@ -160,7 +176,7 @@ function launchActive(title, sub) {
   document.getElementById('st-sel').style.display = 'none';
   document.getElementById('st-act').style.display = 'block';
   document.getElementById('s-title').textContent = title;
-  document.getElementById('s-sub').textContent   = sub;
+  document.getElementById('s-sub').innerHTML = sub + ` &nbsp; <label style="font-size:12px;background:var(--bg3);padding:2px 6px;border-radius:4px;cursor:pointer"><input type="checkbox" id="sound-tgl" checked> 🔔 Suono</label>`;
 
   if (sessionData?.cardio?.type) {
     const c = sessionData.cardio;
@@ -360,6 +376,7 @@ function startRest(sec, label) {
     updateRestDisplay();
     if (restSec <= 0) {
       clearInterval(restInt); hideRest(); showToast('⚡ Recupero terminato!');
+      if (document.getElementById('sound-tgl')?.checked) beep();
       if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
     }
   }, 500);

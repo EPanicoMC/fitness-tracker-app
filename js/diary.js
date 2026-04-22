@@ -347,14 +347,10 @@ function buildWeekView() {
   const el = document.getElementById('week-view');
   if (!el) return;
 
-  // Find Monday of last week
+  // Find past 7 days up to today
   const todayDate = new Date(TODAY + 'T12:00:00');
-  const dow = todayDate.getDay();
-  const daysSinceMonday = dow === 0 ? 6 : dow - 1;
-  const thisMonday = new Date(todayDate);
-  thisMonday.setDate(thisMonday.getDate() - daysSinceMonday);
-  const lastMonday = new Date(thisMonday);
-  lastMonday.setDate(lastMonday.getDate() - 7);
+  const lastMonday = new Date(todayDate);
+  lastMonday.setDate(todayDate.getDate() - 6);
 
   const dates = [];
   for (let i = 0; i < 14; i++) {
@@ -413,7 +409,7 @@ function buildWeekView() {
     const proteinHtml = protein > 0 ? `· P:${Math.round(protein)}g` : '';
 
     return `
-      ${isWeekSep ? '<p class="sdiv" style="margin-top:16px">Settimana corrente</p>' : idx === 0 ? '<p class="sdiv">Settimana scorsa</p>' : ''}
+      ${isWeekSep ? '<p class="sdiv" style="margin-top:16px">Settimana corrente</p>' : idx === 0 ? '<p class="sdiv">Ultimi 7 giorni</p>' : ''}
       <div class="week-row" style="${isToday ? 'background:rgba(124,111,255,.07);border-radius:8px;padding:10px 8px;margin:0 -8px;' : ''}">
         <div class="week-row-date" style="color:${isToday ? 'var(--accent)' : 'var(--t3)'}">${dayLabel}</div>
         <div class="week-row-ico">${icon}</div>
