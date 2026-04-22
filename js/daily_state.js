@@ -271,7 +271,10 @@ function buildNutrition() {
 
   const pct = Math.round((tots.kcal / tgt.kcal) * 100);
   const cring = document.getElementById('cring-box');
-  if(cring) cring.innerHTML = `
+  if(cring) {
+    const C = 2 * Math.PI * 20;
+    const off = C - (Math.min(pct, 100) / 100) * C;
+    cring.innerHTML = `
     <div class="cring">
       <svg viewBox="0 0 50 50">
         <circle cx="25" cy="25" r="20" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="4"/>
@@ -280,6 +283,7 @@ function buildNutrition() {
       </svg>
       <div class="cring-n" style="font-size:13px">${pct}%</div>
     </div>`;
+  }
 }
 
 function calcTotals() {

@@ -396,7 +396,7 @@ body.minimal-dark {
   color: #fff;
 }
 .pano-arrow {
-  color: var(--t3);
+  color: var(--accent);
   font-size: 20px;
 }
 .tgl-row { cursor: default; }
