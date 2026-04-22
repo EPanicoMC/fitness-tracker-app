@@ -575,6 +575,7 @@ window.applyMealAI = function(mi, kcal, protein, carbs, fats) {
 // ── Workout ────────────────────────────────────────────────
 function buildWorkout() {
   const el = document.getElementById('workout-content');
+  if (!el) return;
   const dow = getDayOfWeek(TODAY);
   const session = activeProgram?.schedule?.[dow];
   const workout = logData.workout;
@@ -628,25 +629,33 @@ function refreshStepsGoal() {
 
 // ── Stats ──────────────────────────────────────────────────
 function buildStats() {
-  if (logData.steps)       document.getElementById('steps-in')?.value  = logData.steps;
-  if (logData.burned_kcal) document.getElementById('burned-in')?.value = logData.burned_kcal;
-  if (logData.daily_note)  document.getElementById('note-in')?.value   = logData.daily_note;
+  const sf = document.getElementById('steps-in');
+  if(sf) {
+    sf.value = logData.steps || '';
+    sf.addEventListener('change', () => {
+      logData.steps = parseInt(sf.value) || null;
+      saveToLocal();
+      refreshStepsGoal();
+    });
+  }
 
-  refreshStepsGoal();
+  const kf = document.getElementById('burned-in');
+  if(kf) {
+    kf.value = logData.burned_kcal || '';
+    kf.addEventListener('change', () => {
+      logData.burned_kcal = parseInt(kf.value) || null;
+      saveToLocal();
+    });
+  }
 
-  document.getElementById('steps-in').addEventListener('change', () => {
-    logData.steps = parseInt(document.getElementById('steps-in')?.value) || null;
-    saveToLocal();
-    refreshStepsGoal();
-  });
-  document.getElementById('burned-in').addEventListener('change', () => {
-    logData.burned_kcal = parseInt(document.getElementById('burned-in')?.value) || null;
-    saveToLocal();
-  });
-  document.getElementById('note-in').addEventListener('blur', () => {
-    logData.daily_note = document.getElementById('note-in')?.value;
-    saveToLocal();
-  });
+  const nf = document.getElementById('note-in');
+  if(nf) {
+    nf.value = logData.daily_note || '';
+    nf.addEventListener('blur', () => {
+      logData.daily_note = nf.value;
+      saveToLocal();
+    });
+  }
 }
 
 // ── AI ─────────────────────────────────────────────────────
@@ -684,13 +693,14 @@ window.openAddMealFromAI = function(kcal, protein, carbs, fats, text) {
 
 // ── Save ───────────────────────────────────────────────────
 window.saveDay = async function() {
-  const steps       = parseInt(document.getElementById('steps-in')?.value)  || null;
-  const burned_kcal = parseInt(document.getElementById('burned-in')?.value) || null;
-  const daily_note  = document.getElementById('note-in')?.value;
+  const sf = document.getElementById('steps-in');
+  if(sf) logData.steps = parseInt(sf.value) || null;
 
-  logData.steps       = steps;
-  logData.burned_kcal = burned_kcal;
-  logData.daily_note  = daily_note;
+  const kf = document.getElementById('burned-in');
+  if(kf) logData.burned_kcal = parseInt(kf.value) || null;
+
+  const nf = document.getElementById('note-in');
+  if(nf) logData.daily_note = nf.value;
 
   const tots = calcTotals();
   saveToLocal();
