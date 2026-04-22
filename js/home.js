@@ -429,6 +429,8 @@ function renderMealRow(m, mi) {
         ${typeof m.variants[m.active_variant] === 'object' ? m.variants[m.active_variant].detail : m.variants[m.active_variant]}
        </div>` : '';
 
+  const userTxt = logData.meals_overrides?.[mi]?.items_text ?? m.items ?? '';
+
   return `
     <div class="meal-item ${m.eaten ? 'eaten' : ''}" id="meal-${mi}">
       <div class="meal-top" onclick="toggleMeal(${mi})" style="cursor:pointer">
@@ -441,7 +443,7 @@ function renderMealRow(m, mi) {
         <div class="meal-kcal">${kcalDisplay}</div>
       </div>
       <div class="meal-detail" id="mdtl-${mi}" style="display:none">
-        <p style="font-size:13px;color:var(--t2);line-height:1.6;margin-bottom:8px">${m.items || ''}</p>
+        <p style="font-size:13px;color:var(--t2);line-height:1.6;margin-bottom:8px">${userTxt}</p>
         ${varsHtml}
         ${selVariantDetail}
         ${logData.meals_state?.[mi]?.custom_macros
@@ -452,7 +454,7 @@ function renderMealRow(m, mi) {
           : ''}
         <div style="margin-top:12px">
           <label class="fl">✏️ Ingredienti (modifica)</label>
-          <textarea id="meal-txt-${mi}" class="fi" rows="2" style="font-size:13px">${m.items || ''}</textarea>
+          <textarea id="meal-txt-${mi}" class="fi" rows="2" style="font-size:13px">${userTxt}</textarea>
           <button class="btn btn-ghost btn-sm" onclick="recalcMeal(${mi})" style="margin-top:8px">✨ Ricalcola con AI</button>
           <div id="meal-ai-${mi}" style="display:none;margin-top:8px"></div>
           <div style="margin-top:8px">
@@ -648,7 +650,19 @@ window.calcAI = async function() {
       <div class="fmp-item"><div class="fmp-v" style="color:var(--yellow)">${r.carbs}g</div><div class="fmp-l">Carbo</div></div>
       <div class="fmp-item"><div class="fmp-v" style="color:var(--purple)">${r.fats}g</div><div class="fmp-l">Grassi</div></div>
     </div>
-    ${r.items.map(i => `<div style="font-size:12px;color:var(--t2);margin-top:4px">• ${i.name} (${i.grams}g) → ${i.kcal}kcal</div>`).join('')}`;
+    ${r.items.map(i => `<div style="font-size:12px;color:var(--t2);margin-top:4px">• ${i.name} (${i.grams}g) → ${i.kcal}kcal</div>`).join('')}
+    <button class="btn btn-v btn-sm" onclick="openAddMealFromAI(${r.kcal}, ${r.protein}, ${r.carbs}, ${r.fats}, '${text.replace(/'/g, "\\'")}')" style="margin-top:12px;width:100%">➕ Aggiungi come Extra</button>`;
+};
+
+window.openAddMealFromAI = function(kcal, protein, carbs, fats, text) {
+  openAddMeal();
+  setTimeout(() => {
+    document.getElementById('am-ingredients').value = text;
+    document.getElementById('am-kcal').value = kcal;
+    document.getElementById('am-protein').value = protein;
+    document.getElementById('am-carbs').value = carbs;
+    document.getElementById('am-fats').value = fats;
+  }, 100);
 };
 
 // ── Save ───────────────────────────────────────────────────
