@@ -48,9 +48,9 @@ a{color:inherit;text-decoration:none}
 .pbf{height:100%;border-radius:100px;transition:width .8s cubic-bezier(.4,0,.2,1)}
 .pb-v{background:var(--accent)}
 .pb-g{background:var(--green)}
-.pb-pro{background:var(--blue)}
-.pb-carb{background:var(--yellow)}
-.pb-fat{background:var(--purple)}
+.pb-pro{background:#e0e0e0}
+.pb-carb{background:#8e8e93}
+.pb-fat{background:#48484a}
 .mrow{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
 .mlabel{font-size:13px;color:var(--t2);display:flex;align-items:center;gap:5px}
 .mval{font-size:13px;font-weight:700}
@@ -59,7 +59,7 @@ a{color:inherit;text-decoration:none}
 .mchips{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 .mchip{flex:1;min-width:0;text-align:center;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:10px;padding:8px 4px}
 .mchip-v{font-size:16px;font-weight:800}.mchip-l{font-size:10px;color:var(--t2);font-weight:600;margin-top:2px;text-transform:uppercase;letter-spacing:.5px}
-.mc-pro .mchip-v{color:var(--blue)}.mc-carb .mchip-v{color:var(--yellow)}.mc-fat .mchip-v{color:var(--purple)}
+.mc-pro .mchip-v{color:#fff}.mc-carb .mchip-v{color:#fff}.mc-fat .mchip-v{color:#fff}
 
 /* BUTTONS */
 .btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:15px;border:none;border-radius:var(--r);font-size:15px;font-weight:700;cursor:pointer;text-align:center;transition:transform .15s,opacity .15s;letter-spacing:.3px}
@@ -307,3 +307,145 @@ textarea.fi{resize:vertical;min-height:70px;line-height:1.5}
 .bnav a .ni { font-size: 24px; margin-bottom: 4px; transition: all .3s cubic-bezier(.34,1.56,.64,1); }
 .bnav a.on { color: var(--t1); font-weight: 700; }
 .bnav a.on .ni { transform: translateY(-4px); color: var(--accent); }
+
+/* =========================================
+   DOGMA STYLE RESPONSIVE
+   ========================================= */
+body.minimal-dark {
+  background: #111111;
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* BIG RING */
+.cring-giant {
+  width: 180px; 
+  height: 180px; 
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cring-giant .cring { width: 100%; height: 100%; }
+.cring-giant .cring svg {
+  width: 100%; height: 100%;
+  filter: drop-shadow(0 0 10px rgba(200,255,0,0.5)); /* Lime or Orange */
+  transform: rotate(-90deg);
+}
+.cring-giant .cring circle:nth-child(2) {
+  stroke: var(--orange); /* Use orange per user request */
+  filter: drop-shadow(0 0 8px rgba(255, 106, 0, 0.4));
+}
+.cring-giant .cring-n {
+  position: absolute;
+  top: 45%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 42px !important;
+  font-weight: 700;
+  letter-spacing: -2px;
+}
+.cring-giant .cring::after {
+  content: 'OBIETTIVO';
+  position: absolute;
+  top: 68%; left: 50%;
+  transform: translateX(-50%);
+  font-size: 8px;
+  letter-spacing: 2px;
+  color: var(--t3);
+  font-weight: 800;
+  opacity: 0.8;
+}
+
+/* PANORAMICA LIST */
+.pano-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.pano-card {
+  display: flex;
+  align-items: center;
+  background: #1c1c1e;
+  border-radius: 16px;
+  padding: 16px 20px;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+.pano-card:active { transform: scale(0.98); }
+.pano-icon {
+  width: 32px;
+  font-size: 20px;
+  color: var(--t3);
+}
+.pano-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pano-label {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: var(--t2);
+  text-transform: uppercase;
+}
+.pano-val {
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+}
+.pano-arrow {
+  color: var(--t3);
+  font-size: 20px;
+}
+.tgl-row { cursor: default; }
+.tgl-row:active { transform: none; }
+
+/* DOGMA STYLE MACRO CHIPS */
+.mchip-min {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 1;
+  justify-content: flex-start;
+}
+.mchip-min .mdot {
+  width: 6px; height: 6px; border-radius: 50%;
+  margin-top: 5px;
+}
+.mchip-min .mchip-l {
+  font-size: 9px !important;
+  color: var(--t3) !important;
+  font-weight: 800 !important;
+  text-transform: uppercase;
+  order: 2;
+  margin-bottom: 0;
+}
+.mchip-min .mchip-v {
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  color: #fff !important;
+  order: 1;
+}
+
+/* SAVE FAB (Floating action button minimal in nav) */
+.save-fab {
+  background: var(--orange);
+  color: #111;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 24px;
+  margin-top: -24px;
+  box-shadow: 0 4px 12px rgba(255, 106, 0, 0.4);
+  cursor: pointer;
+}
+.save-fab:active { transform: scale(0.95); }
+.bnav a { flex: 1; }
