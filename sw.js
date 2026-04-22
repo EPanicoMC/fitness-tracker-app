@@ -1,4 +1,4 @@
-const CACHE = 'ft-v3';
+const CACHE = 'ft-v4';
 const FILES = [
   '/fitness-tracker-app/',
   '/fitness-tracker-app/index.html',
@@ -32,6 +32,27 @@ self.addEventListener('activate', e => e.waitUntil(
     .then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))
     .then(() => self.clients.claim())
 ));
+
+// Rest timer notification scheduling
+let restTimerId = null;
+self.addEventListener('message', event => {
+  if (event.data?.type === 'schedule-rest-done') {
+    clearTimeout(restTimerId);
+    restTimerId = setTimeout(() => {
+      self.registration.showNotification('⚡ Recupero terminato!', {
+        body: 'Pronti per la prossima serie? 💪',
+        icon: '/fitness-tracker-app/icon.svg',
+        vibrate: [200, 100, 200],
+        tag: 'rest-timer',
+        renotify: true
+      });
+    }, event.data.ms);
+  }
+  if (event.data?.type === 'cancel-rest') {
+    clearTimeout(restTimerId);
+    restTimerId = null;
+  }
+});
 
 self.addEventListener('fetch', e => {
   const url = e.request.url;

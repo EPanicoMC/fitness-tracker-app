@@ -12,7 +12,7 @@
   --glow:0 0 30px rgba(124,111,255,0.2);
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{background:var(--bg);color:var(--t1);font-family:'Outfit',sans-serif;min-height:100vh;overscroll-behavior:none;padding-top:env(safe-area-inset-top)}
+body{background:var(--bg);color:var(--t1);font-family:'Outfit',sans-serif;min-height:100vh;overscroll-behavior:none;padding-top:env(safe-area-inset-top);overflow-x:hidden}
 ::-webkit-scrollbar{width:0;height:0}
 input,button,select,textarea{font-family:'Outfit',sans-serif}
 a{color:inherit;text-decoration:none}
@@ -175,9 +175,9 @@ textarea.fi{resize:vertical;min-height:70px;line-height:1.5}
 .ss-meta{font-size:12px;color:var(--t2);margin-top:3px}
 
 /* CALENDAR */
-.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;position:relative;z-index:1}
-.cal-head{font-size:10px;color:var(--t3);font-weight:700;padding:8px 0;text-transform:uppercase}
-.cal-day{aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;transition:all .2s;position:relative;z-index:1;gap:2px}
+.cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px;text-align:center;position:relative;z-index:1;overflow:hidden}
+.cal-head{font-size:9px;color:var(--t3);font-weight:700;padding:6px 0;text-transform:uppercase}
+.cal-day{aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;transition:all .2s;position:relative;z-index:1;gap:2px;min-width:0;overflow:hidden}
 .cal-day:hover{background:rgba(255,255,255,.05)}
 .cal-day.today{border:2px solid var(--accent)}
 .cal-day.has-on::after{content:'';width:6px;height:6px;border-radius:50%;background:var(--green)}
@@ -189,7 +189,7 @@ textarea.fi{resize:vertical;min-height:70px;line-height:1.5}
 
 /* DIARY DAY CARD */
 #day-detail{position:relative;z-index:10;margin-top:16px;background:var(--bg);animation:fup .3s ease both}
-.diary-card{background:var(--bg3);border-radius:var(--r);padding:18px;border:1px solid var(--border);position:relative;z-index:10}
+.diary-card{background:var(--bg3);border-radius:var(--r);padding:18px;border:1px solid var(--border);position:relative;z-index:10;overflow:hidden;word-break:break-word}
 
 /* AUTOCOMPLETE */
 .ac-wrap{position:relative}
@@ -242,6 +242,32 @@ textarea.fi{resize:vertical;min-height:70px;line-height:1.5}
 
 /* SCREEN NOTICE */
 .screen-on{font-size:11px;color:var(--t3);text-align:center;padding:6px}
+
+/* TAB SWITCHER */
+.tab-sw{display:flex;gap:8px;margin-bottom:16px}
+.tab-btn{flex:1;padding:9px 0;border:1px solid var(--border);border-radius:var(--rs);background:rgba(255,255,255,.04);color:var(--t2);font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;font-family:'Outfit',sans-serif}
+.tab-btn.tab-active{background:rgba(124,111,255,.15);border-color:var(--border2);color:var(--accent2)}
+
+/* WEEK VIEW */
+.week-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
+.week-row:last-child{border-bottom:none}
+.week-row-date{width:36px;font-size:11px;font-weight:700;color:var(--t3);text-align:center;flex-shrink:0}
+.week-row-ico{width:24px;text-align:center;font-size:16px;flex-shrink:0}
+.week-row-body{flex:1;min-width:0}
+.week-row-name{font-size:13px;font-weight:700}
+.week-row-meta{font-size:11px;color:var(--t2);margin-top:1px}
+.week-row-kcal{font-size:13px;font-weight:800;color:var(--green);flex-shrink:0}
+.week-summary{background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:var(--rs);padding:14px 16px;margin-top:12px}
+.week-rec{background:rgba(124,111,255,.08);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;margin-top:8px;font-size:12px;line-height:1.5;color:var(--t1)}
+
+/* FITSCORE */
+.fitscore-card{background:linear-gradient(135deg,rgba(124,111,255,.1),rgba(0,217,126,.07));border:1px solid var(--border2);border-radius:var(--r);padding:16px 20px;margin-bottom:14px}
+.fitscore-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.fitscore-num{font-size:42px;font-weight:900;letter-spacing:-2px;line-height:1}
+.fitscore-label{font-size:12px;font-weight:700;margin-top:2px}
+.fitscore-bar-row{display:flex;align-items:center;gap:8px;margin-top:6px}
+.fitscore-bar-lbl{font-size:11px;color:var(--t2);width:72px;flex-shrink:0}
+.fitscore-bar-val{font-size:11px;font-weight:700;width:36px;text-align:right;flex-shrink:0}
 
 /* NOTES AREA */
 .notes-area{width:100%;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:var(--rs);padding:12px 14px;color:var(--t1);font-size:13px;outline:none;resize:none;min-height:64px;line-height:1.5}

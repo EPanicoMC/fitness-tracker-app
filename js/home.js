@@ -2,7 +2,7 @@ import {
   db, USER_ID, doc, getDoc, setDoc, getDocs, collection, query, orderBy, limit
 } from './firebase-config.js';
 import {
-  getTodayString, getYesterdayString, getDayOfWeek, formatDateIT, formatDateShort, addDays, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER, cleanOldLogs
+  getTodayString, getYesterdayString, getDayOfWeek, formatDateIT, formatDateShort, addDays, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER, cleanOldLogs, calcFitScore
 } from './app.js';
 import { calcMacrosFromText } from './gemini.js';
 
@@ -120,12 +120,31 @@ async function init() {
   buildMeals();
   buildWorkout();
   buildStats();
+  buildFitScore();
 
   if (new Date().getDate() === 1) {
     cleanOldLogs(db, USER_ID);
   }
 
   checkYesterdayLog();
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (getTodayString() !== TODAY) { window.location.reload(); return; }
+    const cached = localStorage.getItem('fittracker_today_' + TODAY);
+    if (cached) {
+      try {
+        const local = JSON.parse(cached);
+        logData.meals_overrides = local.meals_overrides || {};
+        logData.meals_state     = local.meals_state     || {};
+        logData.extra_meals     = local.extra_meals     || [];
+        if (local.steps != null)       logData.steps       = local.steps;
+        if (local.burned_kcal != null) logData.burned_kcal = local.burned_kcal;
+        if (local.daily_note != null)  logData.daily_note  = local.daily_note;
+      } catch(e) {}
+    }
+    buildNutrition(); buildMeals(); buildWorkout(); buildStats(); buildFitScore();
+  });
 }
 
 // ── Streak ─────────────────────────────────────────────────
@@ -209,6 +228,7 @@ function buildDayType() {
     buildNutrition();
     buildMeals();
     buildWorkout();
+    buildFitScore();
   };
 }
 
@@ -288,6 +308,51 @@ function calcTotals() {
 }
 
 function updateNutritionTotals() { buildNutrition(); }
+
+// ── FitScore ───────────────────────────────────────────────
+function buildFitScore() {
+  const box = document.getElementById('fitscore-box');
+  if (!box) return;
+  const dayKey  = isTrainingDay ? 'day_on' : 'day_off';
+  const plan    = activeDiet?.[dayKey] || null;
+  const tots    = calcTotals();
+  const objective = activeProgram?.objective || 'recomposizione';
+  const stepsGoal = appSettings?.steps_goal || 0;
+
+  const fakeLog = {
+    workout:   { completed: !!logData.workout?.completed },
+    nutrition: { kcal: tots.kcal, protein: tots.protein },
+    steps:     logData.steps || 0
+  };
+  const fakePlan = plan ? { kcal: plan.kcal || 0, macros: { protein: plan.protein || 0 } } : null;
+
+  const result = calcFitScore({ log: fakeLog, plan: fakePlan, isOn: isTrainingDay, objective, stepsGoal });
+  if (!result) { box.innerHTML = ''; return; }
+
+  const { score, label, breakdown } = result;
+  const scoreCol = score >= 75 ? 'var(--green)' : score >= 50 ? 'var(--yellow)' : 'var(--orange)';
+
+  box.innerHTML = `
+    <div class="fitscore-card">
+      <span class="clabel">⚡ FitScore oggi</span>
+      <div class="fitscore-top">
+        <div>
+          <div class="fitscore-num" style="color:${scoreCol}">${score}</div>
+          <div class="fitscore-label" style="color:${scoreCol}">${label}</div>
+        </div>
+        <div style="flex:1;margin-left:16px">
+          <div class="pbb h8"><div class="pbf" style="width:${score}%;background:${scoreCol}"></div></div>
+          <div style="font-size:10px;color:var(--t3);margin-top:4px;text-align:right">/ 100</div>
+        </div>
+      </div>
+      ${breakdown.map(b => `
+        <div class="fitscore-bar-row">
+          <span class="fitscore-bar-lbl">${b.label}</span>
+          <div class="pbb h4" style="flex:1"><div class="pbf" style="width:${Math.round(b.score/b.max*100)}%;background:${b.ok?'var(--green)':'var(--orange)'}"></div></div>
+          <span class="fitscore-bar-val" style="color:${b.ok?'var(--green)':'var(--t2)'}">${b.score}/${b.max}</span>
+        </div>`).join('')}
+    </div>`;
+}
 
 // ── Macro compare helper ───────────────────────────────────
 function renderMacroCompare(target, actual) {
@@ -407,6 +472,7 @@ window.toggleMeal = function(mi) {
   saveToLocal();
   buildMeals();
   buildNutrition();
+  buildFitScore();
 };
 
 window.toggleMealDetail = function(mi) {

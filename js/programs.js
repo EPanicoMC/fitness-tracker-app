@@ -24,16 +24,18 @@ function renderList() {
     el.innerHTML = '<div class="empty"><span class="ei">💪</span><p>Nessuna scheda ancora.<br>Crea il tuo primo programma!</p></div>';
     return;
   }
+  const objLabel = { recomposizione:'⚖️ Ricomp.', cut:'✂️ Cut', bulk:'📈 Bulk', maintenance:'🔄 Maint.' };
   el.innerHTML = programs.map(p => {
     const days = DAY_ORDER.filter(d => p.schedule?.[d]);
     const dayLabels = days.map(d => DAYS_IT[d].substring(0,3)).join(', ');
     const weeks = p.weeks ? ` · ${p.weeks} sett.` : '';
     const dates = p.start_date ? ` · ${p.start_date}` : '';
+    const objBadge = p.objective ? `<span class="badge badge-v" style="margin-left:6px;font-size:10px">${objLabel[p.objective]||p.objective}</span>` : '';
     return `
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <div style="flex:1">
-            <div style="font-size:17px;font-weight:800">${p.name}</div>
+            <div style="font-size:17px;font-weight:800">${p.name}${objBadge}</div>
             <div style="font-size:12px;color:var(--t2);margin-top:3px">${dayLabels||'Nessun giorno'}${weeks}${dates}</div>
           </div>
           <div style="display:flex;gap:8px;align-items:center">
@@ -153,6 +155,13 @@ function renderForm(prog) {
         <div class="fg" style="margin:0"><label class="fl">Settimane</label>
           <input type="number" class="fi" id="pf-weeks" placeholder="4" value="${prog?.weeks||''}"></div>
       </div>
+      <div class="fg"><label class="fl">Obiettivo</label>
+        <select class="fi" id="pf-objective">
+          <option value="recomposizione" ${(prog?.objective||'recomposizione')==='recomposizione'?'selected':''}>⚖️ Ricomposizione corporea</option>
+          <option value="cut" ${prog?.objective==='cut'?'selected':''}>✂️ Cut (definizione)</option>
+          <option value="bulk" ${prog?.objective==='bulk'?'selected':''}>📈 Bulk (massa)</option>
+          <option value="maintenance" ${prog?.objective==='maintenance'?'selected':''}>🔄 Mantenimento</option>
+        </select></div>
       <div class="fg"><label class="fl">Regola progressione</label>
         <textarea class="fi" id="pf-prog" rows="2" placeholder="Es. +0.5kg a settimana…">${prog?.progression_rule||''}</textarea></div>
     </div>
@@ -311,6 +320,7 @@ window.saveProgram = async function() {
 
   const data = {
     name,
+    objective: document.getElementById('pf-objective')?.value || 'recomposizione',
     start_date: document.getElementById('pf-start')?.value || null,
     weeks: +document.getElementById('pf-weeks')?.value || null,
     progression_rule: document.getElementById('pf-prog')?.value.trim() || '',

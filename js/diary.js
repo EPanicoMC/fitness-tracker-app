@@ -1,36 +1,42 @@
 import {
   db, USER_ID, collection, doc, getDoc, getDocs, setDoc, deleteField, query, where, orderBy, limit
 } from './firebase-config.js';
-import { getTodayString, getDayOfWeek, formatDateIT, formatDateShort, showToast, DAYS_IT, DAY_ORDER } from './app.js';
+import { getTodayString, getDayOfWeek, formatDateIT, formatDateShort, showToast, DAYS_IT, DAY_ORDER, calcFitScore } from './app.js';
 
 const TODAY = getTodayString();
 let currentMonth = new Date(TODAY + 'T12:00:00');
 currentMonth.setDate(1);
 let programData  = null;
 let monthLogs    = {};
+let allRecentLogs = {};
 let selectedDate = null;
 let settingsData = null;
 
 async function init() {
-  const [progSnap, logsSnap, settSnap] = await Promise.all([
+  const [progSnap, logsSnap, settSnap, dietSnap] = await Promise.all([
     getDocs(collection(db, 'users', USER_ID, 'programs')),
     getDocs(query(
       collection(db, 'users', USER_ID, 'daily_logs'),
       orderBy('date', 'desc'),
       limit(60)
     )),
-    getDoc(doc(db, 'users', USER_ID, 'settings', 'app'))
+    getDoc(doc(db, 'users', USER_ID, 'settings', 'app')),
+    getDocs(collection(db, 'users', USER_ID, 'diet_plans'))
   ]);
 
   const activeDoc = progSnap.docs.find(d => d.data().active);
   if (activeDoc) programData = activeDoc.data();
   settingsData = settSnap.exists() ? settSnap.data() : {};
+  _dietPlanCache = dietSnap.docs.find(d => d.data().active)?.data() || null;
+
+  logsSnap.docs.forEach(d => { allRecentLogs[d.data().date] = d.data(); });
 
   const lastCompleted = logsSnap.docs
     .map(d => d.data())
     .find(d => d.workout?.completed);
 
   renderNextSession(lastCompleted);
+  buildWeekView();
   loadCalendar();
 }
 
@@ -294,48 +300,169 @@ async function getActiveDietPlan() {
 }
 
 function computeDayBadge(log, plan, isOn) {
-  const checks = [];
-  const stepsGoal = settingsData?.steps_goal;
+  const fakePlan = plan ? { kcal: plan.kcal || 0, macros: { protein: plan.protein || 0 } } : null;
+  const fakeLog = {
+    workout:   { completed: !!log.workout?.completed },
+    nutrition: { kcal: log.nutrition?.totals?.kcal || 0, protein: log.nutrition?.totals?.protein || 0 },
+    steps:     log.steps || 0
+  };
+  const objective = programData?.objective || 'recomposizione';
+  const stepsGoal = settingsData?.steps_goal || 0;
+  const result = calcFitScore({ log: fakeLog, plan: fakePlan, isOn, objective, stepsGoal });
+  if (!result) return '';
 
-  // Workout check
-  if (isOn) {
-    checks.push({ ok: !!log.workout?.completed, label: log.workout?.completed ? '💪 Allenamento ✓' : '💪 Allenamento ✗' });
-  } else {
-    checks.push({ ok: true, label: '😴 Riposo rispettato' });
-  }
+  const { score, label, breakdown } = result;
+  const scoreCol = score >= 75 ? 'var(--green)' : score >= 50 ? 'var(--yellow)' : 'var(--orange)';
 
-  // Nutrition check
-  if (log.nutrition?.totals?.kcal && plan?.kcal) {
-    const r = log.nutrition.totals.kcal / plan.kcal;
-    checks.push({ ok: r >= 0.85 && r <= 1.15, label: r >= 0.85 && r <= 1.15 ? '🥗 Macro in target' : '🥗 Macro fuori target' });
-  }
-
-  // Steps check
-  if (stepsGoal && log.steps) {
-    checks.push({ ok: log.steps >= stepsGoal, label: log.steps >= stepsGoal ? '👟 Obiettivo passi ✓' : '👟 Passi incompleti' });
-  }
-
-  if (!checks.length) return '';
-
-  const achieved = checks.filter(c => c.ok).length;
-  const total    = checks.length;
-  let emoji, label, color;
-  if (achieved === total)     { emoji = '🌟'; label = 'Giornata perfetta';  color = 'var(--green)'; }
-  else if (achieved >= total * 0.67) { emoji = '💪'; label = 'Buona giornata';    color = 'var(--blue)'; }
-  else if (achieved >= total * 0.33) { emoji = '📊'; label = 'Nella media';       color = 'var(--yellow)'; }
-  else                               { emoji = '😤'; label = 'Da migliorare';     color = 'var(--orange)'; }
-
-  const dots = checks.map(c =>
-    `<span style="color:${c.ok ? 'var(--green)' : 'var(--t3)'};font-size:11px">${c.label}</span>`
+  const dots = breakdown.map(b =>
+    `<span style="color:${b.ok ? 'var(--green)' : 'var(--t3)'};font-size:11px">${b.label}: ${b.score}/${b.max}</span>`
   ).join(' · ');
 
-  return `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;margin-bottom:12px">
-    <span style="font-size:22px;line-height:1">${emoji}</span>
-    <div>
-      <div style="font-size:13px;font-weight:800;color:${color}">${label}</div>
-      <div style="margin-top:4px;line-height:1.8">${dots}</div>
+  return `<div style="padding:10px 12px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;margin-bottom:12px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+      <div style="font-size:28px;font-weight:900;color:${scoreCol};letter-spacing:-1px">${score}</div>
+      <div>
+        <div style="font-size:13px;font-weight:800;color:${scoreCol}">${label}</div>
+        <div style="font-size:10px;color:var(--t3)">FitScore / 100</div>
+      </div>
+      <div style="flex:1;margin-left:4px">
+        <div class="pbb h4"><div class="pbf" style="width:${score}%;background:${scoreCol}"></div></div>
+      </div>
     </div>
+    <div style="line-height:1.9">${dots}</div>
   </div>`;
+}
+
+// ── Tab switcher ───────────────────────────────────────────
+window.showTab = function(tab) {
+  document.getElementById('week-view').style.display = tab === 'week' ? 'block' : 'none';
+  document.getElementById('cal-view').style.display  = tab === 'cal'  ? 'block' : 'none';
+  document.querySelectorAll('.tab-btn').forEach((btn, i) => {
+    btn.classList.toggle('tab-active', (i === 0 && tab === 'week') || (i === 1 && tab === 'cal'));
+  });
+};
+
+// ── 2-Week view ────────────────────────────────────────────
+function buildWeekView() {
+  const el = document.getElementById('week-view');
+  if (!el) return;
+
+  // Find Monday of last week
+  const todayDate = new Date(TODAY + 'T12:00:00');
+  const dow = todayDate.getDay();
+  const daysSinceMonday = dow === 0 ? 6 : dow - 1;
+  const thisMonday = new Date(todayDate);
+  thisMonday.setDate(thisMonday.getDate() - daysSinceMonday);
+  const lastMonday = new Date(thisMonday);
+  lastMonday.setDate(lastMonday.getDate() - 7);
+
+  const dates = [];
+  for (let i = 0; i < 14; i++) {
+    const d = new Date(lastMonday);
+    d.setDate(d.getDate() + i);
+    dates.push(d.toISOString().split('T')[0]);
+  }
+
+  const objective = programData?.objective || 'recomposizione';
+  const stepsGoal = settingsData?.steps_goal || 0;
+
+  // Aggregate stats
+  let totalKcal = 0, totalProtein = 0, totalSteps = 0;
+  let trainingDaysCount = 0, trainingDone = 0;
+  let kcalDays = 0, proteinDays = 0;
+  const kcalWarnings = [], proteinWarnings = [];
+
+  const weekSep = ['', ''];
+  const rowsHtml = dates.map((dateStr, idx) => {
+    const isWeekSep = idx === 7;
+    const log = allRecentLogs[dateStr];
+    const dayDow = getDayOfWeek(dateStr);
+    const isOn  = !!(programData?.schedule?.[dayDow]);
+    const isFut = dateStr > TODAY;
+
+    // Day status
+    let icon, statusColor = 'var(--t2)';
+    if (isFut) {
+      icon = isOn ? '📅' : '😴';
+    } else if (log?.workout?.completed) {
+      icon = '✅'; statusColor = 'var(--green)';
+    } else if (!isOn) {
+      icon = '😴'; statusColor = 'var(--t3)';
+    } else if (log) {
+      icon = '⚠️'; statusColor = 'var(--orange)';
+    } else {
+      icon = '❌'; statusColor = 'var(--red)';
+    }
+
+    // Accumulators
+    if (!isFut && isOn) {
+      trainingDaysCount++;
+      if (log?.workout?.completed) trainingDone++;
+    }
+    const kcal    = log?.nutrition?.totals?.kcal    || 0;
+    const protein = log?.nutrition?.totals?.protein || 0;
+    if (!isFut && kcal > 0)    { totalKcal    += kcal;    kcalDays++; }
+    if (!isFut && protein > 0) { totalProtein += protein; proteinDays++; }
+    if (!isFut && log?.steps)   totalSteps    += log.steps;
+
+    const dayLabel = new Date(dateStr + 'T12:00:00')
+      .toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric' });
+    const isToday = dateStr === TODAY;
+
+    const kcalHtml    = kcal    > 0 ? `${Math.round(kcal)} kcal` : isFut ? '' : '—';
+    const proteinHtml = protein > 0 ? `· P:${Math.round(protein)}g` : '';
+
+    return `
+      ${isWeekSep ? '<p class="sdiv" style="margin-top:16px">Settimana corrente</p>' : idx === 0 ? '<p class="sdiv">Settimana scorsa</p>' : ''}
+      <div class="week-row" style="${isToday ? 'background:rgba(124,111,255,.07);border-radius:8px;padding:10px 8px;margin:0 -8px;' : ''}">
+        <div class="week-row-date" style="color:${isToday ? 'var(--accent)' : 'var(--t3)'}">${dayLabel}</div>
+        <div class="week-row-ico">${icon}</div>
+        <div class="week-row-body">
+          <div class="week-row-name" style="color:${statusColor}">${isOn ? (programData?.schedule?.[dayDow]?.name || 'Training') : 'Riposo'}</div>
+          <div class="week-row-meta">${kcalHtml} ${proteinHtml}</div>
+        </div>
+        ${log?.steps ? `<div style="font-size:11px;color:var(--t3)">👟${(log.steps/1000).toFixed(1)}k</div>` : ''}
+      </div>`;
+  }).join('');
+
+  // Recommendations
+  const recs = [];
+  const avgKcal    = kcalDays    > 0 ? Math.round(totalKcal    / kcalDays)    : 0;
+  const avgProtein = proteinDays > 0 ? Math.round(totalProtein / proteinDays) : 0;
+  const planKcal   = _dietPlanCache?.day_on?.kcal || 0;
+  const planPro    = _dietPlanCache?.day_on?.protein || 0;
+
+  if (trainingDaysCount > 0 && trainingDone < trainingDaysCount) {
+    const missed = trainingDaysCount - trainingDone;
+    recs.push(`💪 Hai saltato ${missed} allenament${missed > 1 ? 'i' : 'o'} su ${trainingDaysCount} — cerca di mantenerla costante!`);
+  }
+  if (planKcal > 0 && avgKcal > 0) {
+    const diff = Math.round(((avgKcal - planKcal) / planKcal) * 100);
+    if (diff > 10)  recs.push(`🔥 Kcal medie +${diff}% sopra il piano — considera di ridurre i pasti extra.`);
+    if (diff < -10) recs.push(`📉 Kcal medie ${diff}% sotto il piano — assicurati di mangiare abbastanza.`);
+  }
+  if (planPro > 0 && avgProtein > 0 && avgProtein < planPro * 0.85) {
+    recs.push(`🥩 Proteine medie (${avgProtein}g) sotto l'obiettivo (${planPro}g) — priorità alta!`);
+  }
+  if (stepsGoal > 0 && kcalDays > 0) {
+    const avgSteps = Math.round(totalSteps / kcalDays);
+    if (avgSteps < stepsGoal * 0.7) recs.push(`👟 Media passi bassa (${avgSteps.toLocaleString('it-IT')} / ${stepsGoal.toLocaleString('it-IT')} obiettivo) — aggiungi una camminata!`);
+  }
+
+  const adherence = trainingDaysCount > 0 ? Math.round((trainingDone / trainingDaysCount) * 100) : null;
+
+  el.innerHTML = `
+    ${rowsHtml}
+    <div class="week-summary">
+      <span class="clabel" style="margin-bottom:10px">📈 Riepilogo 2 settimane</span>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px">
+        ${adherence !== null ? `<div><div style="font-weight:800;color:var(--accent)">${adherence}%</div><div style="color:var(--t2);font-size:11px">Aderenza training</div></div>` : ''}
+        ${avgKcal    > 0 ? `<div><div style="font-weight:800;color:var(--green)">${avgKcal}</div><div style="color:var(--t2);font-size:11px">Kcal medie / giorno</div></div>` : ''}
+        ${avgProtein > 0 ? `<div><div style="font-weight:800;color:var(--blue)">${avgProtein}g</div><div style="color:var(--t2);font-size:11px">Proteine medie</div></div>` : ''}
+        ${totalSteps > 0 ? `<div><div style="font-weight:800;color:var(--yellow)">${Math.round(totalSteps/1000)}k</div><div style="color:var(--t2);font-size:11px">Passi totali</div></div>` : ''}
+      </div>
+      ${recs.length ? recs.map(r => `<div class="week-rec">💡 ${r}</div>`).join('') : ''}
+    </div>`;
 }
 
 window.changeMonth = function(delta) {

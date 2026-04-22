@@ -37,6 +37,17 @@ async function requestWakeLock() {
 }
 function releaseWakeLock() { if (wakeLock) { wakeLock.release(); wakeLock = null; } }
 
+// ── Notification helpers ───────────────────────────────────
+function postToSW(msg) {
+  navigator.serviceWorker?.controller?.postMessage(msg);
+}
+async function requestNotifPermission() {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'default') {
+    await Notification.requestPermission();
+  }
+}
+
 // ── Load select screen ─────────────────────────────────────
 async function loadSessionSelect() {
   const [progSnap, logsSnap] = await Promise.all([
@@ -206,6 +217,7 @@ window.startSession = function() {
 
   renderExercises();
   requestWakeLock();
+  requestNotifPermission();
 };
 
 function setT(id, v) { const e = document.getElementById(id); if (e) e.textContent = v; }
@@ -342,6 +354,7 @@ function startRest(sec, label) {
   document.getElementById('rest-box').style.display = 'block';
   document.getElementById('rest-next').textContent = label;
   updateRestDisplay();
+  postToSW({ type: 'schedule-rest-done', ms: sec * 1000 });
   restInt = setInterval(() => {
     restSec = Math.max(0, Math.ceil((restEndTime - Date.now()) / 1000));
     updateRestDisplay();
@@ -359,7 +372,7 @@ function updateRestDisplay() {
 }
 function hideRest() { document.getElementById('rest-box').style.display = 'none'; }
 
-window.skipRest    = function() { clearInterval(restInt); hideRest(); };
+window.skipRest = function() { clearInterval(restInt); hideRest(); postToSW({ type: 'cancel-rest' }); };
 window.togglePause = function() {
   isPaused = !isPaused;
   if (isPaused) {
@@ -385,6 +398,7 @@ window.confirmExit = function() {
     onConfirm: () => {
       document.removeEventListener('visibilitychange', onVisibilityChange);
       clearInterval(sessionInt); clearInterval(restInt); releaseWakeLock();
+      postToSW({ type: 'cancel-rest' });
       restEndTime = 0;
       sessionStarted = false;
       document.getElementById('st-act').style.display = 'none';
@@ -453,6 +467,7 @@ window.launchCustom = function() {
 window.finishSession = async function() {
   document.removeEventListener('visibilitychange', onVisibilityChange);
   clearInterval(sessionInt); clearInterval(restInt); releaseWakeLock();
+  postToSW({ type: 'cancel-rest' });
   restEndTime = 0;
 
   const cardioDone = document.getElementById('cardio-done')?.checked || false;

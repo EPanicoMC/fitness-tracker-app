@@ -22,29 +22,43 @@
   <!-- PROSSIMA SESSIONE -->
   <div id="next-session"></div>
 
-  <!-- MONTH NAV -->
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-    <button class="btn-icon" onclick="changeMonth(-1)">←</button>
-    <span id="month-label" style="font-size:18px;font-weight:800"></span>
-    <button class="btn-icon" onclick="changeMonth(1)">→</button>
+  <!-- TAB SWITCHER -->
+  <div class="tab-sw">
+    <button class="tab-btn tab-active" onclick="showTab('week')">📊 2 Settimane</button>
+    <button class="tab-btn" onclick="showTab('cal')">🗓️ Mese</button>
   </div>
 
-  <!-- CALENDAR HEADER -->
-  <div class="cal-grid" style="margin-bottom:4px">
-    <div class="cal-head">Lun</div>
-    <div class="cal-head">Mar</div>
-    <div class="cal-head">Mer</div>
-    <div class="cal-head">Gio</div>
-    <div class="cal-head">Ven</div>
-    <div class="cal-head">Sab</div>
-    <div class="cal-head">Dom</div>
+  <!-- WEEK VIEW -->
+  <div id="week-view">
+    <div class="spin"></div>
   </div>
 
-  <!-- CALENDAR DAYS -->
-  <div class="cal-grid" id="cal-grid"></div>
+  <!-- CALENDAR VIEW -->
+  <div id="cal-view" style="display:none">
+    <!-- MONTH NAV -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <button class="btn-icon" onclick="changeMonth(-1)">←</button>
+      <span id="month-label" style="font-size:18px;font-weight:800"></span>
+      <button class="btn-icon" onclick="changeMonth(1)">→</button>
+    </div>
 
-  <!-- DAY DETAIL -->
-  <div id="day-detail" style="margin-top:16px;display:none"></div>
+    <!-- CALENDAR HEADER -->
+    <div class="cal-grid" style="margin-bottom:4px">
+      <div class="cal-head">Lun</div>
+      <div class="cal-head">Mar</div>
+      <div class="cal-head">Mer</div>
+      <div class="cal-head">Gio</div>
+      <div class="cal-head">Ven</div>
+      <div class="cal-head">Sab</div>
+      <div class="cal-head">Dom</div>
+    </div>
+
+    <!-- CALENDAR DAYS -->
+    <div class="cal-grid" id="cal-grid"></div>
+
+    <!-- DAY DETAIL -->
+    <div id="day-detail" style="margin-top:16px;display:none"></div>
+  </div>
 </div>
 
 <nav class="bnav">
