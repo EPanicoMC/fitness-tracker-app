@@ -353,7 +353,7 @@ function buildWeekView() {
   lastMonday.setDate(todayDate.getDate() - 6);
 
   const dates = [];
-  for (let i = 0; i < 14; i++) {
+  for (let i = 0; i < 7; i++) {
     const d = new Date(lastMonday);
     d.setDate(d.getDate() + i);
     dates.push(d.toISOString().split('T')[0]);
@@ -370,10 +370,11 @@ function buildWeekView() {
 
   const weekSep = ['', ''];
   const rowsHtml = dates.map((dateStr, idx) => {
-    const isWeekSep = idx === 7;
+    const isWeekSep = false;
     const log = allRecentLogs[dateStr];
     const dayDow = getDayOfWeek(dateStr);
-    const isOn  = !!(programData?.schedule?.[dayDow]);
+    let isOn  = !!(programData?.schedule?.[dayDow]);
+    if (log && log.is_training_day != null) isOn = log.is_training_day;
     const isFut = dateStr > TODAY;
 
     // Day status
@@ -409,12 +410,12 @@ function buildWeekView() {
     const proteinHtml = protein > 0 ? `· P:${Math.round(protein)}g` : '';
 
     return `
-      ${isWeekSep ? '<p class="sdiv" style="margin-top:16px">Settimana corrente</p>' : idx === 0 ? '<p class="sdiv">Ultimi 7 giorni</p>' : ''}
+      ${idx === 0 ? '<p class="sdiv">Ultimi 7 giorni</p>' : ''}
       <div class="week-row" style="${isToday ? 'background:rgba(124,111,255,.07);border-radius:8px;padding:10px 8px;margin:0 -8px;' : ''}">
         <div class="week-row-date" style="color:${isToday ? 'var(--accent)' : 'var(--t3)'}">${dayLabel}</div>
         <div class="week-row-ico">${icon}</div>
         <div class="week-row-body">
-          <div class="week-row-name" style="color:${statusColor}">${isOn ? (programData?.schedule?.[dayDow]?.name || 'Training') : 'Riposo'}</div>
+          <div class="week-row-name" style="color:${statusColor}">${log?.workout?.session_name || (isOn ? (programData?.schedule?.[dayDow]?.name || 'Training') : 'Riposo')}</div>
           <div class="week-row-meta">${kcalHtml} ${proteinHtml}</div>
         </div>
         ${log?.steps ? `<div style="font-size:11px;color:var(--t3)">👟${(log.steps/1000).toFixed(1)}k</div>` : ''}
@@ -450,7 +451,7 @@ function buildWeekView() {
   el.innerHTML = `
     ${rowsHtml}
     <div class="week-summary">
-      <span class="clabel" style="margin-bottom:10px">📈 Riepilogo 2 settimane</span>
+      <span class="clabel" style="margin-bottom:10px">📈 Riepilogo 7 giorni</span>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px">
         ${adherence !== null ? `<div><div style="font-weight:800;color:var(--accent)">${adherence}%</div><div style="color:var(--t2);font-size:11px">Aderenza training</div></div>` : ''}
         ${avgKcal    > 0 ? `<div><div style="font-weight:800;color:var(--green)">${avgKcal}</div><div style="color:var(--t2);font-size:11px">Kcal medie / giorno</div></div>` : ''}
