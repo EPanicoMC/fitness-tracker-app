@@ -15,6 +15,31 @@
 </head>
 <body>
 <div class="wrap">
+  <div id="prog-today-section" style="margin-bottom:40px;">
+    <h2 style="font-size:24px;font-weight:900;color:var(--t1);margin:24px 0 16px;">Attività Oggi</h2>
+    <!-- WORKOUT RECAP -->
+    <div class="card" id="workout-section">
+      <span class="clabel"><i class="ri-medal-fill"></i> Allenamento</span>
+      <div id="workout-content"><div class="spin"></div></div>
+    </div>
+    <!-- STATS RAPIDE -->
+    <div class="grid2" style="margin-bottom:14px">
+      <div class="card card-dark" style="margin:0">
+        <span class="clabel"><i class="ri-footprint-line"></i> Passi</span>
+        <input type="number" class="fi-in" id="steps-in" placeholder="—" style="font-size:24px;width:100%">
+        <div id="steps-goal-row" style="display:none">
+          <div class="pbb h4" style="margin-top:6px"><div class="pbf pb-g" id="pb-steps" style="width:0%"></div></div>
+          <div id="steps-goal-lbl" style="font-size:11px;color:var(--t2);margin-top:3px"></div>
+        </div>
+      </div>
+      <div class="card card-dark" style="margin:0">
+        <span class="clabel"><i class="ri-fire-line"></i> Kcal bruciate</span>
+        <input type="number" class="fi-in" id="burned-in" placeholder="—" style="font-size:24px;width:100%">
+      </div>
+    </div>
+  </div>
+
+  <h2 style="font-size:24px;font-weight:900;color:var(--t1);margin:24px 0 16px;">Archivio Schede</h2>
   <div class="ph">
     <h1>💪 Schede</h1>
     <button class="btn btn-v btn-sm" onclick="openNew()">＋ Nuova</button>
@@ -33,5 +58,6 @@
 
 <script type="module" src="js/programs.js"></script>
 <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/fitness-tracker-app/sw.js')</script>
+<script type="module" src="js/daily_state.js"></script>
 </body>
 </html>

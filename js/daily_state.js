@@ -67,7 +67,7 @@ async function checkDayRollover() {
 
 // ── Init ───────────────────────────────────────────────────
 async function init() {
-  document.getElementById('date-label').textContent = formatDateIT(TODAY);
+  const dlabel = document.getElementById('date-label'); if(dlabel) dlabel.textContent = formatDateIT(TODAY);
 
   await checkDayRollover();
 
@@ -151,7 +151,7 @@ async function init() {
 function buildStreak() {
   const streak = logData.streak || 1;
   const box = document.getElementById('streak-box');
-  box.innerHTML = `<div class="streak">🔥 ${streak} giorni</div>`;
+  if(box) box.innerHTML = `<div class="streak">🔥 ${streak} giorni</div>`;
 }
 
 // ── Session picker modal ───────────────────────────────────
@@ -203,6 +203,7 @@ function buildDayType() {
   const lbl = document.getElementById('dtype-label');
   const sub = document.getElementById('dtype-sub');
   const tgl = document.getElementById('override-tgl');
+  if(!lbl || !sub || !tgl) return;
 
   if (isTrainingDay) {
     lbl.innerHTML = `<i class="ri-checkbox-circle-fill" style="color:var(--green)"></i> Giorno ON`;
@@ -260,19 +261,17 @@ function buildNutrition() {
 
   const rem = tgt.kcal - tots.kcal;
   const deltaEl = document.getElementById('kcal-delta');
-  if (rem >= 0) {
+  if(deltaEl) { if (rem >= 0) {
     deltaEl.style.color = 'var(--green)';
     deltaEl.textContent = `Rimangono ${Math.round(rem)} kcal`;
   } else {
     deltaEl.style.color = 'var(--orange)';
     deltaEl.textContent = `⚠️ +${Math.round(-rem)} kcal in eccesso`;
-  }
+  } }
 
   const pct = Math.round((tots.kcal / tgt.kcal) * 100);
   const cring = document.getElementById('cring-box');
-  const C = 125.7;
-  const off = C - (C * Math.min(pct, 100) / 100);
-  cring.innerHTML = `
+  if(cring) cring.innerHTML = `
     <div class="cring">
       <svg viewBox="0 0 50 50">
         <circle cx="25" cy="25" r="20" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="4"/>
@@ -411,6 +410,7 @@ function buildMeals() {
   });
 
   const el = document.getElementById('meals-list');
+  if (!el) return;
   if (!meals.length) {
     el.innerHTML = '<p style="color:var(--t2);font-size:13px;text-align:center;padding:16px">Nessun piano dieta attivo</p>';
     return;
@@ -628,23 +628,23 @@ function refreshStepsGoal() {
 
 // ── Stats ──────────────────────────────────────────────────
 function buildStats() {
-  if (logData.steps)       document.getElementById('steps-in').value  = logData.steps;
-  if (logData.burned_kcal) document.getElementById('burned-in').value = logData.burned_kcal;
-  if (logData.daily_note)  document.getElementById('note-in').value   = logData.daily_note;
+  if (logData.steps)       document.getElementById('steps-in')?.value  = logData.steps;
+  if (logData.burned_kcal) document.getElementById('burned-in')?.value = logData.burned_kcal;
+  if (logData.daily_note)  document.getElementById('note-in')?.value   = logData.daily_note;
 
   refreshStepsGoal();
 
   document.getElementById('steps-in').addEventListener('change', () => {
-    logData.steps = parseInt(document.getElementById('steps-in').value) || null;
+    logData.steps = parseInt(document.getElementById('steps-in')?.value) || null;
     saveToLocal();
     refreshStepsGoal();
   });
   document.getElementById('burned-in').addEventListener('change', () => {
-    logData.burned_kcal = parseInt(document.getElementById('burned-in').value) || null;
+    logData.burned_kcal = parseInt(document.getElementById('burned-in')?.value) || null;
     saveToLocal();
   });
   document.getElementById('note-in').addEventListener('blur', () => {
-    logData.daily_note = document.getElementById('note-in').value;
+    logData.daily_note = document.getElementById('note-in')?.value;
     saveToLocal();
   });
 }
@@ -684,9 +684,9 @@ window.openAddMealFromAI = function(kcal, protein, carbs, fats, text) {
 
 // ── Save ───────────────────────────────────────────────────
 window.saveDay = async function() {
-  const steps       = parseInt(document.getElementById('steps-in').value)  || null;
-  const burned_kcal = parseInt(document.getElementById('burned-in').value) || null;
-  const daily_note  = document.getElementById('note-in').value;
+  const steps       = parseInt(document.getElementById('steps-in')?.value)  || null;
+  const burned_kcal = parseInt(document.getElementById('burned-in')?.value) || null;
+  const daily_note  = document.getElementById('note-in')?.value;
 
   logData.steps       = steps;
   logData.burned_kcal = burned_kcal;

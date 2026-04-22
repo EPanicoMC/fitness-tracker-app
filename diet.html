@@ -15,6 +15,26 @@
 </head>
 <body>
 <div class="wrap">
+  <div id="diet-today-section" style="margin-bottom:40px;">
+    <h2 style="font-size:24px;font-weight:900;color:var(--t1);margin:24px 0 16px;">Oggi</h2>
+    <!-- PASTI -->
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <span class="clabel" style="margin:0"><i class="ri-restaurant-2-line"></i> Pasti del giorno</span>
+      </div>
+      <div id="meals-list"><div class="spin"></div></div>
+      <button class="btn btn-ghost btn-sm" onclick="openAddMeal()" style="margin-top:12px;width:100%">+ Aggiungi pasto extra</button>
+    </div>
+    <!-- AI QUICK INPUT -->
+    <div class="ai-box">
+      <span class="clabel"><i class="ri-magic-line"></i> Calcolo rapido AI</span>
+      <textarea id="ai-input" placeholder="Es: 100g pollo, 200g verdure, 130g riso, 20g olio evo"></textarea>
+      <button class="btn btn-v btn-sm" onclick="calcAI()" id="ai-btn" style="margin-top:10px;width:auto"><i class="ri-robot-2-line"></i> Calcola Macro</button>
+      <div class="ai-result" id="ai-result"></div>
+    </div>
+  </div>
+
+  <h2 style="font-size:24px;font-weight:900;color:var(--t1);margin:24px 0 16px;">Archivio Piani</h2>
   <div class="ph">
     <h1>🥗 Dieta</h1>
     <button class="btn btn-v btn-sm" onclick="openNewDiet()">＋ Nuovo</button>
@@ -33,5 +53,6 @@
 
 <script type="module" src="js/diet.js"></script>
 <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/fitness-tracker-app/sw.js')</script>
+<script type="module" src="js/daily_state.js"></script>
 </body>
 </html>
