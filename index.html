@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>KOVA.</title>
+  <link href="https://cdn.jsdelivr.net/npm/remixicon@4.2.0/fonts/remixicon.css" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#111111">
@@ -16,16 +17,20 @@
 <div class="wrap">
 
   <!-- TOP -->
-  <div class="top-bar-safe" style="display:flex;justify-content:space-between;align-items:flex-start;padding:24px 0 16px">
-    <div>
-      <h1 style="font-size:32px;font-weight:900;letter-spacing:-1px;color:var(--t1)">KOVA.</h1>
-      <p style="font-size:12px;color:var(--accent);font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-top:2px">Costanza. Dati. Risultati.</p>
-      <p id="welcome-name" style="font-size:14px;color:var(--t2);font-weight:600;margin-top:16px">Benvenuto</p>
-      <p id="date-label" style="font-size:12px;color:var(--t3);margin-top:2px;font-weight:700"></p>
+  <div class="top-bar-safe" style="padding:8px 0 24px">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <div style="display:flex;flex-direction:column">
+        <h1 style="font-size:26px;font-weight:900;letter-spacing:-1px;color:var(--t1)">KOVA.</h1>
+        <p style="font-size:9px;color:var(--accent);font-weight:800;letter-spacing:2px;text-transform:uppercase;margin-top:0px">Costanza. Dati. Risultati.</p>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <div id="streak-box"></div>
+        <a href="settings.html" class="btn-icon" style="border-radius:12px;background:var(--bg3);border:1px solid var(--border);color:var(--t2);width:38px;height:38px;"><i class="ri-settings-4-fill" style="font-size:18px"></i></a>
+      </div>
     </div>
-    <div style="display:flex;align-items:center;gap:10px">
-      <div id="streak-box"></div>
-      <a href="settings.html" class="btn-icon">⚙️</a>
+    <div style="margin-top:32px;">
+      <p id="welcome-name" style="font-size:18px;color:var(--t1);font-weight:600;letter-spacing:-0.4px">Benvenuto</p>
+      <p id="date-label" style="font-size:13px;color:var(--t3);font-weight:500;margin-top:2px;letter-spacing:0.5px"></p>
     </div>
   </div>
 
@@ -40,7 +45,7 @@
 
   <!-- NUTRITION HERO -->
   <div class="card card-glow">
-    <span class="clabel">🔥 Nutrizione oggi</span>
+    <span class="clabel"><i class="ri-fire-fill" style="color:var(--orange)"></i> Nutrizione oggi</span>
     <div style="display:flex;align-items:flex-end;justify-content:space-between">
       <div>
         <div class="kcal-big" id="kcal-now">0</div>
@@ -63,7 +68,7 @@
   <!-- PASTI -->
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <span class="clabel" style="margin:0">🥗 Pasti del giorno</span>
+      <span class="clabel" style="margin:0"><i class="ri-restaurant-2-line"></i> Pasti del giorno</span>
     </div>
     <div id="meals-list"><div class="spin"></div></div>
     <button class="btn btn-ghost btn-sm" onclick="openAddMeal()"
@@ -74,22 +79,22 @@
 
   <!-- AI QUICK INPUT -->
   <div class="ai-box">
-    <span class="clabel">✨ Calcolo rapido AI</span>
+    <span class="clabel"><i class="ri-magic-line"></i> Calcolo rapido AI</span>
     <textarea id="ai-input" placeholder="Es: 100g pollo, 200g verdure, 130g riso, 20g olio evo"></textarea>
-    <button class="btn btn-v btn-sm" onclick="calcAI()" id="ai-btn" style="margin-top:10px;width:auto">🤖 Calcola Macro</button>
+    <button class="btn btn-v btn-sm" onclick="calcAI()" id="ai-btn" style="margin-top:10px;width:auto"><i class="ri-robot-2-line"></i> Calcola Macro</button>
     <div class="ai-result" id="ai-result"></div>
   </div>
 
   <!-- WORKOUT RECAP -->
   <div class="card" id="workout-section">
-    <span class="clabel">💪 Allenamento</span>
+    <span class="clabel"><i class="ri-medal-fill"></i> Allenamento</span>
     <div id="workout-content"><div class="spin"></div></div>
   </div>
 
   <!-- STATS RAPIDE -->
   <div class="grid2" style="margin-bottom:14px">
     <div class="card card-dark" style="margin:0">
-      <span class="clabel">👟 Passi</span>
+      <span class="clabel"><i class="ri-footprint-line"></i> Passi</span>
       <input type="number" class="fi-in" id="steps-in" placeholder="—" style="font-size:24px;width:100%">
       <div id="steps-goal-row" style="display:none">
         <div class="pbb h4" style="margin-top:6px"><div class="pbf pb-g" id="pb-steps" style="width:0%"></div></div>
@@ -97,28 +102,28 @@
       </div>
     </div>
     <div class="card card-dark" style="margin:0">
-      <span class="clabel">🔥 Kcal bruciate</span>
+      <span class="clabel"><i class="ri-fire-line"></i> Kcal bruciate</span>
       <input type="number" class="fi-in" id="burned-in" placeholder="—" style="font-size:24px;width:100%">
     </div>
   </div>
 
   <!-- NOTA -->
   <div class="card card-dark">
-    <span class="clabel">📝 Nota del giorno</span>
+    <span class="clabel"><i class="ri-sticky-note-line"></i> Nota del giorno</span>
     <textarea id="note-in" class="fi" rows="2" placeholder="Come ti senti oggi..." style="background:transparent;border:none;padding:0"></textarea>
   </div>
 
   <!-- SALVA -->
-  <button class="btn btn-v" id="save-btn" onclick="saveDay()">💾 Salva Giornata</button>
+  <button class="btn btn-v" id="save-btn" onclick="saveDay()"><i class="ri-save-3-line"></i> Salva Giornata</button>
 
 </div>
 
 <nav class="bnav">
-  <a href="index.html" class="on"><span class="ni">🏠</span><span>Home</span></a>
-  <a href="programs.html"><span class="ni">💪</span><span>Schede</span></a>
-  <a href="diet.html"><span class="ni">🥗</span><span>Dieta</span></a>
-  <a href="diary.html"><span class="ni">📅</span><span>Diario</span></a>
-  <a href="session.html"><span class="ni">🏋️</span><span>Allenati</span></a>
+  <a href="index.html" class="on"><i class="ri-home-5-fill ni"></i><span>Home</span></a>
+  <a href="programs.html"><i class="ri-file-list-3-fill ni"></i><span>Schede</span></a>
+  <a href="diet.html"><i class="ri-restaurant-fill ni"></i><span>Dieta</span></a>
+  <a href="diary.html"><i class="ri-calendar-todo-fill ni"></i><span>Diario</span></a>
+  <a href="session.html"><i class="ri-play-circle-fill ni"></i><span>Allenati</span></a>
 </nav>
 
 <script type="module" src="js/home.js"></script>

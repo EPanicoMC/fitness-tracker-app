@@ -134,11 +134,11 @@ export function calcFitScore({ log, plan, isOn, objective = 'recomposizione', st
   const maxPossible = breakdown.reduce((s, b) => s + b.max, 0);
   const score = Math.round((total / maxPossible) * 100);
   let label;
-  if (score >= 90)      label = '🔥 Elite';
-  else if (score >= 75) label = '💪 Ottimo';
-  else if (score >= 60) label = '✅ Buono';
-  else if (score >= 45) label = '📊 Sufficiente';
-  else                  label = '💡 Da migliorare';
+  if (score >= 90)      label = 'Elite';
+  else if (score >= 75) label = 'Ottimo';
+  else if (score >= 60) label = 'Buono';
+  else if (score >= 45) label = 'Sufficiente';
+  else                  label = 'Da migliorare';
 
   return { score, label, breakdown };
 }

@@ -205,11 +205,11 @@ function buildDayType() {
   const tgl = document.getElementById('override-tgl');
 
   if (isTrainingDay) {
-    lbl.textContent = `💪 Giorno ON`;
+    lbl.innerHTML = `<i class="ri-checkbox-circle-fill" style="color:var(--green)"></i> Giorno ON`;
     sub.textContent = session?.name || 'Allenamento';
     tgl.checked = true;
   } else {
-    lbl.textContent = `😴 Giorno OFF — Riposo`;
+    lbl.innerHTML = `<i class="ri-moon-fill" style="color:var(--t3)"></i> Giorno OFF — Riposo`;
     sub.textContent = 'Nessuna sessione programmata';
     tgl.checked = false;
   }
@@ -322,7 +322,7 @@ function buildFitScore() {
   if (!plan) {
     box.innerHTML = `
       <div class="fitscore-card">
-        <span class="clabel">⚡ FitScore oggi</span>
+        <span class="clabel"><i class="ri-flashlight-fill" style="color:var(--orange)"></i> FitScore oggi</span>
         <div style="font-size:13px;color:var(--t2)">Nessun piano dieta attivo. Impossibile calcolare il FitScore.</div>
       </div>`;
     return;
@@ -330,7 +330,7 @@ function buildFitScore() {
   if (tots.kcal === 0) {
     box.innerHTML = `
       <div class="fitscore-card">
-        <span class="clabel">⚡ FitScore oggi</span>
+        <span class="clabel"><i class="ri-flashlight-fill" style="color:var(--orange)"></i> FitScore oggi</span>
         <div style="font-size:13px;color:var(--t2)">Completa almeno un pasto per sbloccare il FitScore!</div>
       </div>`;
     return;
@@ -351,7 +351,7 @@ function buildFitScore() {
 
   box.innerHTML = `
     <div class="fitscore-card">
-      <span class="clabel">⚡ FitScore oggi</span>
+      <span class="clabel"><i class="ri-flashlight-fill" style="color:var(--orange)"></i> FitScore oggi</span>
       <div class="fitscore-top">
         <div>
           <div class="fitscore-num" style="color:${scoreCol}">${score}</div>
@@ -470,12 +470,12 @@ function renderMealRow(m, mi) {
             )
           : ''}
         <div style="margin-top:12px">
-          <label class="fl">✏️ Ingredienti (modifica)</label>
+          <label class="fl"><i class="ri-edit-2-line"></i> Ingredienti (modifica)</label>
           <textarea id="meal-txt-${mi}" class="fi" rows="2" style="font-size:13px">${userTxt}</textarea>
           <button class="btn btn-ghost btn-sm" onclick="recalcMeal(${mi})" style="margin-top:8px">✨ Ricalcola con AI</button>
           <div id="meal-ai-${mi}" style="display:none;margin-top:8px"></div>
           <div style="margin-top:8px">
-            <button class="btn btn-ghost btn-sm" onclick="openManualMacro(${mi})">✏️ Inserisci manuale</button>
+            <button class="btn btn-ghost btn-sm" onclick="openManualMacro(${mi})"><i class="ri-pencil-line"></i> Inserisci manuale</button>
           </div>
         </div>
         <div class="meal-delta" id="meal-delta-${mi}"></div>
@@ -511,9 +511,9 @@ window.recalcMeal = async function(mi) {
   const txt = document.getElementById(`meal-txt-${mi}`)?.value.trim();
   if (!txt) return;
   const btn = document.querySelector(`#mdtl-${mi} .btn-ghost`);
-  if (btn) { btn.textContent = '⏳...'; btn.disabled = true; }
+  if (btn) { btn.innerHTML = `<i class="ri-loader-4-line ri-spin"></i>...`; btn.disabled = true; }
   const r = await calcMacrosFromText(txt);
-  if (btn) { btn.textContent = '✨ Ricalcola con AI'; btn.disabled = false; }
+  if (btn) { btn.innerHTML = `<i class="ri-magic-line"></i> Ricalcola con AI`; btn.disabled = false; }
   if (!r.success) { showToast('Errore AI: ' + r.error, 'err'); return; }
   const box = document.getElementById(`meal-ai-${mi}`);
   if (box) {
@@ -596,7 +596,7 @@ function buildWorkout() {
           <div style="font-size:15px;font-weight:700">${workout.session_name || 'Sessione'}</div>
           <div style="font-size:12px;color:var(--t2);margin-top:4px">⏱ ${dur} min · 🏋️ ${Math.round(vol)} kg volume</div>
         </div>
-        <span class="badge badge-g">✅ Completato</span>
+        <span class="badge badge-g"><i class="ri-check-line"></i> Completato</span>
       </div>
       ${notesHtml}`;
   } else {
@@ -654,9 +654,9 @@ window.calcAI = async function() {
   const text = document.getElementById('ai-input').value.trim();
   if (!text) { showToast('Scrivi gli alimenti', 'err'); return; }
   const btn = document.getElementById('ai-btn');
-  btn.textContent = '⏳ Calcolo...'; btn.disabled = true;
+  btn.innerHTML = `<i class="ri-loader-4-line ri-spin"></i> Calcolo...`; btn.disabled = true;
   const r = await calcMacrosFromText(text);
-  btn.textContent = '🤖 Calcola Macro'; btn.disabled = false;
+  btn.innerHTML = `<i class="ri-robot-2-line"></i> Calcola Macro`; btn.disabled = false;
   if (!r.success) { showToast('Errore AI: ' + r.error, 'err'); return; }
   const box = document.getElementById('ai-result');
   box.className = 'ai-result show';
@@ -668,7 +668,7 @@ window.calcAI = async function() {
       <div class="fmp-item"><div class="fmp-v" style="color:var(--purple)">${r.fats}g</div><div class="fmp-l">Grassi</div></div>
     </div>
     ${r.items.map(i => `<div style="font-size:12px;color:var(--t2);margin-top:4px">• ${i.name} (${i.grams}g) → ${i.kcal}kcal</div>`).join('')}
-    <button class="btn btn-v btn-sm" onclick="openAddMealFromAI(${r.kcal}, ${r.protein}, ${r.carbs}, ${r.fats}, '${text.replace(/'/g, "\\'")}')" style="margin-top:12px;width:100%">➕ Aggiungi come Extra</button>`;
+    <button class="btn btn-v btn-sm" onclick="openAddMealFromAI(${r.kcal}, ${r.protein}, ${r.carbs}, ${r.fats}, '${text.replace(/'/g, "\\'")}')" style="margin-top:12px;width:100%"><i class="ri-add-circle-fill"></i> Aggiungi come Extra</button>`;
 };
 
 window.openAddMealFromAI = function(kcal, protein, carbs, fats, text) {
