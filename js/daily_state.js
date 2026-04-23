@@ -726,7 +726,7 @@ window.openAddMealFromAI = function(kcal, protein, carbs, fats, text) {
 
 // ── Cloud Sync (called by saveToLocal debouncer + manual saveDay) ───
 async function syncToFirebase() {
-  if (!USER_ID || USER_ID === 'user_default') return;
+  if (!USER_ID) return;
 
   const sf = document.getElementById('steps-in');
   if(sf) logData.steps = parseInt(sf.value) || null;
