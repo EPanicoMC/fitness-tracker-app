@@ -312,7 +312,7 @@ window.addSetToExercise = function(ei) {
   ex.sets.push({
     reps_target:   lastSet?.reps_target || '8',
     ref_weight:    lastSet?.actual_weight || 0,
-    actual_weight: lastSet?.actual_weight || 0,
+    actual_weight: null,  // null = empty, 0 = explicitly zero
     actual_reps:   '',
     done:          false
   });
@@ -321,13 +321,14 @@ window.addSetToExercise = function(ei) {
 };
 
 window.onWeight = function(ei, si, val) {
-  const v = parseFloat(val) || 0;
+  const v = val === '' ? null : parseFloat(val);
   exState[ei].sets[si].actual_weight = v;
+  // Propagate only to sets that are still genuinely empty (null)
   for (let j = si + 1; j < exState[ei].sets.length; j++) {
-    if (!exState[ei].sets[j].actual_weight) {
+    if (exState[ei].sets[j].actual_weight === null) {
       exState[ei].sets[j].actual_weight = v;
       const inp = document.querySelector(`#srow-${ei}-${j} input[type="number"]`);
-      if (inp) inp.value = v || '';
+      if (inp) inp.value = v ?? '';
     }
   }
 };

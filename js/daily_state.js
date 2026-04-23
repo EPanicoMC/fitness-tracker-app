@@ -14,6 +14,7 @@ let appSettings = null;
 let isTrainingDay = false;
 let mealStates = [];
 
+let cloudSyncTimer = null;
 function saveToLocal() {
   try {
     const key = 'fittracker_today_' + getTodayString();
@@ -21,7 +22,7 @@ function saveToLocal() {
     mealStates.forEach((m, i) => {
       meals_state[i] = { eaten: m.eaten, variant: m.active_variant };
     });
-    localStorage.setItem(key, JSON.stringify({
+    const payload = {
       meals_state,
       meals_overrides: logData.meals_overrides || {},
       extra_meals:     logData.extra_meals     || [],
@@ -30,10 +31,15 @@ function saveToLocal() {
       daily_note:      logData.daily_note      || '',
       is_training_day: isTrainingDay,
       day_override:    logData.day_override
-    }));
+    };
+    localStorage.setItem(key, JSON.stringify(payload));
     Object.keys(localStorage)
       .filter(k => k.startsWith('fittracker_today_') && k !== key)
       .forEach(k => localStorage.removeItem(k));
+
+    // Debounced cloud sync — 1.5s after last change
+    if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
+    cloudSyncTimer = setTimeout(() => { syncToFirebase(); }, 1500);
   } catch(e) {
     console.warn('saveToLocal error:', e);
   }
@@ -147,11 +153,34 @@ async function init() {
   });
 }
 
-// ── Streak ─────────────────────────────────────────────────
-function buildStreak() {
-  const streak = logData.streak || 1;
+// ── Streak box: show weekly workout count ──────────────────────
+async function buildStreak() {
   const box = document.getElementById('streak-box');
-  if(box) box.innerHTML = `<div class="streak">🔥 ${streak} giorni</div>`;
+  if (!box) return;
+  try {
+    const snap = await getDocs(query(
+      collection(db, 'users', USER_ID, 'daily_logs'),
+      orderBy('date', 'desc'),
+      limit(14)
+    ));
+    const logs = snap.docs.map(d => d.data());
+    // Count training days completed in the last 7 days
+    const weekAgo = new Date(TODAY + 'T12:00:00');
+    weekAgo.setDate(weekAgo.getDate() - 6);
+    const weekAgoStr = weekAgo.toISOString().split('T')[0];
+    const weeklyDone = logs.filter(l => l.date >= weekAgoStr && l.workout?.completed).length;
+    const totalDone  = logs.filter(l => l.workout?.completed).length;
+    if (weeklyDone > 0) {
+      box.innerHTML = `<div class="streak">${weeklyDone} <span style="font-size:10px;opacity:.7">/ sett.</span></div>`;
+    } else if (totalDone > 0) {
+      box.innerHTML = `<div class="streak">0 <span style="font-size:10px;opacity:.7">/ sett.</span></div>`;
+    } else {
+      box.innerHTML = '';
+    }
+  } catch(e) {
+    const fallback = logData.streak || 0;
+    if (fallback) box.innerHTML = `<div class="streak">🔥 ${fallback} giorni</div>`;
+  }
 }
 
 // ── Session picker modal ───────────────────────────────────
@@ -675,10 +704,10 @@ window.calcAI = async function() {
   box.className = 'ai-result show';
   box.innerHTML = `
     <div class="fmp">
-      <div class="fmp-item"><div class="fmp-v" style="color:var(--green)">${r.kcal}</div><div class="fmp-l">Kcal</div></div>
-      <div class="fmp-item"><div class="fmp-v" style="color:var(--blue)">${r.protein}g</div><div class="fmp-l">Pro</div></div>
-      <div class="fmp-item"><div class="fmp-v" style="color:var(--yellow)">${r.carbs}g</div><div class="fmp-l">Carbo</div></div>
-      <div class="fmp-item"><div class="fmp-v" style="color:var(--purple)">${r.fats}g</div><div class="fmp-l">Grassi</div></div>
+      <div class="fmp-item"><div class="fmp-v">${r.kcal}</div><div class="fmp-l">Kcal</div></div>
+      <div class="fmp-item"><div class="fmp-v">${r.protein}g</div><div class="fmp-l">Pro</div></div>
+      <div class="fmp-item"><div class="fmp-v">${r.carbs}g</div><div class="fmp-l">Carbo</div></div>
+      <div class="fmp-item"><div class="fmp-v">${r.fats}g</div><div class="fmp-l">Grassi</div></div>
     </div>
     ${r.items.map(i => `<div style="font-size:12px;color:var(--t2);margin-top:4px">• ${i.name} (${i.grams}g) → ${i.kcal}kcal</div>`).join('')}
     <button class="btn btn-v btn-sm" onclick="openAddMealFromAI(${r.kcal}, ${r.protein}, ${r.carbs}, ${r.fats}, '${text.replace(/'/g, "\\'")}')" style="margin-top:12px;width:100%"><i class="ri-add-circle-fill"></i> Aggiungi come Extra</button>`;
@@ -695,8 +724,10 @@ window.openAddMealFromAI = function(kcal, protein, carbs, fats, text) {
   }, 100);
 };
 
-// ── Save ───────────────────────────────────────────────────
-window.saveDay = async function() {
+// ── Cloud Sync (called by saveToLocal debouncer + manual saveDay) ───
+async function syncToFirebase() {
+  if (!USER_ID || USER_ID === 'user_default') return;
+
   const sf = document.getElementById('steps-in');
   if(sf) logData.steps = parseInt(sf.value) || null;
 
@@ -707,30 +738,36 @@ window.saveDay = async function() {
   if(nf) logData.daily_note = nf.value;
 
   const tots = calcTotals();
-  saveToLocal();
 
   const data = {
     date:            TODAY,
     is_training_day: isTrainingDay,
-    steps,
-    burned_kcal,
-    daily_note,
+    steps:           logData.steps || null,
+    burned_kcal:     logData.burned_kcal || null,
+    daily_note:      logData.daily_note || '',
     nutrition:       { totals: tots },
     streak:          logData.streak || 1,
     meals_state:     logData.meals_state     || {},
     meals_overrides: logData.meals_overrides || {},
     extra_meals:     logData.extra_meals     || []
   };
+  
   if (logData.day_override != null) data.day_override = logData.day_override;
+  if (logData.selected_session_day) data.selected_session_day = logData.selected_session_day;
+  if (logData.workout) data.workout = logData.workout;
 
-  console.log('Saving to Firestore:', JSON.stringify(data).slice(0, 300));
   try {
     await setDoc(doc(db, 'users', USER_ID, 'daily_logs', TODAY), data, { merge: true });
-    showToast('💾 Giornata salvata!');
+    console.log('✅ Auto-synced to Firebase');
   } catch(e) {
-    console.error('Errore Firestore saveDay:', e);
-    showToast('Errore salvataggio: ' + e.message, 'err');
+    console.error('Errore Auto-Sync:', e);
   }
+};
+
+window.saveDay = async function() {
+  // Manual trigger if button still exists
+  await syncToFirebase();
+  showToast('✅ Sincronizzato con il Cloud!');
 };
 
 // ── Recupero giorni passati ────────────────────────────────
