@@ -77,17 +77,27 @@ async function init() {
 
   await checkDayRollover();
 
-  const [logSnap, progSnap, dietSnap, settSnap] = await Promise.all([
-    getDoc(doc(db, 'users', USER_ID, 'daily_logs', TODAY)),
-    getDocs(collection(db, 'users', USER_ID, 'programs')),
-    getDocs(collection(db, 'users', USER_ID, 'diet_plans')),
-    getDoc(doc(db, 'users', USER_ID, 'settings', 'app'))
-  ]);
+  try {
+    const [logSnap, progSnap, dietSnap, settSnap] = await Promise.all([
+      getDoc(doc(db, 'users', USER_ID, 'daily_logs', TODAY)),
+      getDocs(collection(db, 'users', USER_ID, 'programs')),
+      getDocs(collection(db, 'users', USER_ID, 'diet_plans')),
+      getDoc(doc(db, 'users', USER_ID, 'settings', 'app'))
+    ]);
 
-  logData = logSnap.exists() ? logSnap.data() : {};
-  activeProgram = progSnap.docs.find(d => d.data().active)?.data() || null;
-  activeDiet    = dietSnap.docs.find(d => d.data().active)?.data() || null;
-  appSettings   = settSnap.exists() ? settSnap.data() : {};
+    logData = logSnap.exists() ? logSnap.data() : {};
+    activeProgram = progSnap.docs.find(d => d.data().active)?.data() || null;
+    activeDiet    = dietSnap.docs.find(d => d.data().active)?.data() || null;
+    appSettings   = settSnap.exists() ? settSnap.data() : {};
+  } catch (e) {
+    console.error('DIAGNOSTIC: Error fetching DB data:', e);
+    showToast('Errore nel caricamento dati dal cloud', 'err');
+    // Fallback to empty states to allow the app to at least boot
+    logData = {};
+    activeProgram = null;
+    activeDiet = null;
+    appSettings = {};
+  }
 
   // Merge localStorage (higher priority for today's working state)
   const lsKey = 'fittracker_today_' + getTodayString();
