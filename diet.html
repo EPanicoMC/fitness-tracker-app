@@ -2,7 +2,7 @@
 <html lang="it">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
   <title>KOVA.</title>
   <link href="https://cdn.jsdelivr.net/npm/remixicon@4.2.0/fonts/remixicon.css" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
@@ -17,6 +17,38 @@
 <div class="wrap">
   <div id="diet-today-section" style="margin-bottom:40px;">
     <h2 style="font-size:24px;font-weight:900;color:var(--t1);margin:24px 0 16px;">Oggi</h2>
+    <!-- RECAP MACRO -->
+    <div id="diet-recap" class="card" style="padding:16px; margin-bottom:16px;">
+      <div style="font-size:12px;font-weight:800;color:var(--accent);margin-bottom:8px;text-transform:uppercase;letter-spacing:1px">Riepilogo (Pasti Spuntati)</div>
+      <div class="mchips-dogma" style="display:flex;gap:8px;margin-bottom:12px">
+        <div class="mchip mchip-min" style="background:rgba(255,255,255,.05)!important;padding:8px!important;border-radius:12px!important">
+          <div>
+            <div class="mchip-l" style="font-size:9px!important;color:var(--t2)!important;margin-bottom:2px">Kcal Totali</div>
+            <div class="mchip-v" id="recap-kcal" style="font-size:18px!important;color:#fff!important">0</div>
+          </div>
+        </div>
+      </div>
+      <div class="mchips-dogma" style="display:flex;gap:8px">
+        <div class="mchip mchip-min" style="background:rgba(255,255,255,.05)!important;padding:8px!important;border-radius:12px!important">
+          <div>
+            <div class="mchip-l" style="font-size:9px!important;color:var(--t2)!important;margin-bottom:2px">Proteine</div>
+            <div class="mchip-v" id="recap-pro" style="font-size:14px!important;color:#fff!important">0g</div>
+          </div>
+        </div>
+        <div class="mchip mchip-min" style="background:rgba(255,255,255,.05)!important;padding:8px!important;border-radius:12px!important">
+          <div>
+            <div class="mchip-l" style="font-size:9px!important;color:var(--t2)!important;margin-bottom:2px">Carbo</div>
+            <div class="mchip-v" id="recap-carb" style="font-size:14px!important;color:#fff!important">0g</div>
+          </div>
+        </div>
+        <div class="mchip mchip-min" style="background:rgba(255,255,255,.05)!important;padding:8px!important;border-radius:12px!important">
+          <div>
+            <div class="mchip-l" style="font-size:9px!important;color:var(--t2)!important;margin-bottom:2px">Grassi</div>
+            <div class="mchip-v" id="recap-fat" style="font-size:14px!important;color:#fff!important">0g</div>
+          </div>
+        </div>
+      </div>
+    </div>
     <!-- PASTI -->
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">

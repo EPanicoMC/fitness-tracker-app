@@ -448,18 +448,29 @@ function buildWeekView() {
 
   const adherence = trainingDaysCount > 0 ? Math.round((trainingDone / trainingDaysCount) * 100) : null;
 
-  el.innerHTML = `
-    ${rowsHtml}
-    <div class="week-summary">
-      <span class="clabel" style="margin-bottom:10px">📈 Riepilogo 7 giorni</span>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px">
-        ${adherence !== null ? `<div><div style="font-weight:800;color:var(--accent)">${adherence}%</div><div style="color:var(--t2);font-size:11px">Aderenza training</div></div>` : ''}
-        ${avgKcal    > 0 ? `<div><div style="font-weight:800;color:var(--green)">${avgKcal}</div><div style="color:var(--t2);font-size:11px">Kcal medie / giorno</div></div>` : ''}
-        ${avgProtein > 0 ? `<div><div style="font-weight:800;color:var(--blue)">${avgProtein}g</div><div style="color:var(--t2);font-size:11px">Proteine medie</div></div>` : ''}
-        ${totalSteps > 0 ? `<div><div style="font-weight:800;color:var(--yellow)">${Math.round(totalSteps/1000)}k</div><div style="color:var(--t2);font-size:11px">Passi totali</div></div>` : ''}
+  el.innerHTML = rowsHtml;
+
+  let recapHtml = '';
+  if (recs.length || adherence !== null || avgKcal > 0) {
+    const pills = [];
+    if (adherence !== null) pills.push(`<div style="background:rgba(255,106,0,0.1); border:1px solid rgba(255,106,0,0.3); border-radius:100px; padding:6px 12px; display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:700; color:var(--accent); white-space:nowrap"><i class="ri-fire-fill"></i> ${adherence}% Aderenza</div>`);
+    if (avgKcal > 0) pills.push(`<div style="background:rgba(28,227,112,0.1); border:1px solid rgba(28,227,112,0.3); border-radius:100px; padding:6px 12px; display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:700; color:var(--green); white-space:nowrap"><i class="ri-restaurant-fill"></i> ${avgKcal} kcal/gg</div>`);
+    if (avgProtein > 0) pills.push(`<div style="background:rgba(58,134,255,0.1); border:1px solid rgba(58,134,255,0.3); border-radius:100px; padding:6px 12px; display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:700; color:var(--blue); white-space:nowrap"><i class="ri-drop-fill"></i> ${avgProtein}g pro medie</div>`);
+    if (totalSteps > 0) pills.push(`<div style="background:rgba(255,195,0,0.1); border:1px solid rgba(255,195,0,0.3); border-radius:100px; padding:6px 12px; display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:700; color:var(--yellow); white-space:nowrap"><i class="ri-footprint-fill"></i> ${Math.round(totalSteps/1000)}k passi</div>`);
+
+    const recPills = recs.map(r => `<div style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:10px 12px; display:flex; align-items:flex-start; gap:8px; font-size:12px; font-weight:500; color:var(--t1); margin-top:8px"><i class="ri-lightbulb-flash-line" style="color:var(--accent);font-size:14px;margin-top:2px"></i><div style="flex:1">${r.replace(/^([💡💪🔥📉🥩👟]\s*)/, '')}</div></div>`);
+
+    recapHtml = `
+      <div class="clabel" style="margin-bottom:12px"><i class="ri-bar-chart-box-line"></i> Performance (ultimi 7 giorni)</div>
+      <div style="display:flex; flex-wrap:nowrap; gap:8px; overflow-x:auto; padding-bottom:8px; margin-bottom:4px; -webkit-overflow-scrolling:touch; scrollbar-width:none">
+        ${pills.join('')}
       </div>
-      ${recs.length ? recs.map(r => `<div class="week-rec">💡 ${r}</div>`).join('') : ''}
-    </div>`;
+      ${recPills.join('')}
+    `;
+  }
+  
+  const recapEl = document.getElementById('recent-recap');
+  if (recapEl) recapEl.innerHTML = recapHtml;
 }
 
 window.changeMonth = function(delta) {

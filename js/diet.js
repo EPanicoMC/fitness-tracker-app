@@ -294,22 +294,36 @@ window.saveDiet = async function() {
       fats:    Number(m.fats)    || 0,
       variants: m.variants || null
     }));
+    
+    const sumMeals = (meals) => {
+      const s = sanitizeMeals(meals);
+      return s.reduce((a, m) => ({
+        kcal: a.kcal + m.kcal,
+        protein: a.protein + m.protein,
+        carbs: a.carbs + m.carbs,
+        fats: a.fats + m.fats
+      }), { kcal: 0, protein: 0, carbs: 0, fats: 0 });
+    };
+
+    const dayOnTotals = sumMeals(formData.day_on?.meals);
+    const dayOffTotals = sumMeals(formData.day_off?.meals);
+
     const dataToSave = {
       name:       nameVal,
       active:     editingId ? (diets.find(d => d.id === editingId)?.active || false) : false,
       updated_at: new Date().toISOString(),
       day_on: {
-        kcal:    Number(formData.day_on?.kcal)    || 0,
-        protein: Number(formData.day_on?.protein) || 0,
-        carbs:   Number(formData.day_on?.carbs)   || 0,
-        fats:    Number(formData.day_on?.fats)    || 0,
+        kcal:    dayOnTotals.kcal,
+        protein: dayOnTotals.protein,
+        carbs:   dayOnTotals.carbs,
+        fats:    dayOnTotals.fats,
         meals:   sanitizeMeals(formData.day_on?.meals)
       },
       day_off: {
-        kcal:    Number(formData.day_off?.kcal)    || 0,
-        protein: Number(formData.day_off?.protein) || 0,
-        carbs:   Number(formData.day_off?.carbs)   || 0,
-        fats:    Number(formData.day_off?.fats)    || 0,
+        kcal:    dayOffTotals.kcal,
+        protein: dayOffTotals.protein,
+        carbs:   dayOffTotals.carbs,
+        fats:    dayOffTotals.fats,
         meals:   sanitizeMeals(formData.day_off?.meals)
       }
     };

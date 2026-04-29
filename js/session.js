@@ -370,6 +370,7 @@ function startRest(sec, label) {
   restSec = sec;
   document.getElementById('rest-box').style.display = 'block';
   document.getElementById('rest-next').textContent = label;
+  document.getElementById('rest-box').scrollIntoView({ behavior: 'smooth', block: 'center' });
   updateRestDisplay();
   postToSW({ type: 'schedule-rest-done', ms: sec * 1000 });
   restInt = setInterval(() => {

@@ -2,7 +2,7 @@
 <html lang="it">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
   <title>KOVA.</title>
   <link href="https://cdn.jsdelivr.net/npm/remixicon@4.2.0/fonts/remixicon.css" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
@@ -20,7 +20,47 @@
     <h1>📸 Check</h1>
     <button class="btn btn-v btn-sm" onclick="openNewCheck()">＋ Nuovo</button>
   </div>
-  <div id="checks-list"><div class="spin"></div></div>
+  
+  <!-- BODY MAP -->
+  <div id="body-map-section" class="card card-dark" style="text-align:center; position:relative; margin-bottom:30px">
+    <div style="font-size:11px;color:var(--t2);font-weight:800;letter-spacing:1px;text-transform:uppercase;margin-bottom:16px">Seleziona un'area muscolare</div>
+    <svg viewBox="0 0 200 280" style="width:100%; max-width:250px; display:block; margin:0 auto; overflow:visible;">
+      <style>
+        .b-zone { fill: rgba(255,255,255,0.05); stroke: rgba(255,255,255,0.1); stroke-width: 2; transition: all 0.2s; cursor: pointer; }
+        .b-zone:hover, .b-zone.active { fill: rgba(255,106,0,0.2); stroke: var(--accent); filter: drop-shadow(0 0 8px var(--accent)); transform-origin: center; transform: scale(1.02); }
+      </style>
+      <!-- Head -->
+      <circle cx="100" cy="30" r="16" class="b-zone" id="bz-head" onclick="window.showZone('weight', 'Peso totale')"/>
+      <!-- Shoulders -->
+      <path d="M 60 50 Q 100 40 140 50 L 130 65 L 70 65 Z" class="b-zone" id="bz-shoulders" onclick="window.showZone('shoulders', 'Spalle')"/>
+      <!-- Chest -->
+      <rect x="70" y="70" width="60" height="35" rx="10" class="b-zone" id="bz-chest" onclick="window.showZone('chest', 'Petto')"/>
+      <!-- Waist -->
+      <rect x="74" y="110" width="52" height="35" rx="10" class="b-zone" id="bz-waist" onclick="window.showZone('waist', 'Vita')"/>
+      <!-- Left Arm -->
+      <rect x="42" y="70" width="20" height="45" rx="10" class="b-zone" id="bz-bicep_l" onclick="window.showZone('bicep_l', 'Braccio SX')"/>
+      <!-- Right Arm -->
+      <rect x="138" y="70" width="20" height="45" rx="10" class="b-zone" id="bz-bicep_r" onclick="window.showZone('bicep_r', 'Braccio DX')"/>
+      <!-- Left Leg -->
+      <rect x="74" y="150" width="22" height="55" rx="11" class="b-zone" id="bz-thigh_l" onclick="window.showZone('thigh_l', 'Coscia SX')"/>
+      <!-- Right Leg -->
+      <rect x="104" y="150" width="22" height="55" rx="11" class="b-zone" id="bz-thigh_r" onclick="window.showZone('thigh_r', 'Coscia DX')"/>
+      <!-- Left Calf -->
+      <rect x="76" y="210" width="18" height="40" rx="9" class="b-zone" id="bz-calf_l" onclick="window.showZone('calf_l', 'Polpaccio SX')"/>
+      <!-- Right Calf -->
+      <rect x="106" y="210" width="18" height="40" rx="9" class="b-zone" id="bz-calf_r" onclick="window.showZone('calf_r', 'Polpaccio DX')"/>
+    </svg>
+    <div id="zone-info" style="margin-top:20px; min-height:60px; padding:12px; background:rgba(0,0,0,0.3); border-radius:12px; border:1px solid rgba(255,255,255,0.03);">
+      <div style="font-size:13px;color:var(--t3);line-height:1.6">Tocca un gruppo muscolare per visualizzare lo storico dei tuoi progressi.</div>
+    </div>
+  </div>
+
+  <div id="checks-list-container">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h2 style="font-size:20px;font-weight:900;color:var(--t1)">Storico Completo</h2>
+    </div>
+    <div id="checks-list"><div class="spin"></div></div>
+  </div>
   <div id="check-form" style="display:none"></div>
 </div>
 

@@ -96,11 +96,53 @@ window.deleteCheck = function(id) {
   });
 };
 
+// ── Body Map UI ────────────────────────────────────────────
+window.showZone = function(key, label) {
+  document.querySelectorAll('.b-zone').forEach(el => el.classList.remove('active'));
+  const target = document.getElementById(`bz-${key}`);
+  if (target) target.classList.add('active');
+
+  const history = checks.filter(c => c.measurements?.[key] != null || (key === 'weight' && c.weight != null));
+  if (!history.length) {
+    document.getElementById('zone-info').innerHTML = `
+      <div style="font-size:16px;font-weight:800;color:var(--t1);margin-bottom:4px">${label}</div>
+      <div style="font-size:13px;color:var(--t3)">Nessun dato registrato.</div>`;
+    return;
+  }
+
+  const latest = key === 'weight' ? history[0].weight : history[0].measurements[key];
+  const unit = key === 'weight' ? 'kg' : 'cm';
+  
+  let listHtml = history.slice(0, 5).map((c, i) => {
+    const val = key === 'weight' ? c.weight : c.measurements[key];
+    const prevC = history[i+1];
+    const pval = prevC ? (key === 'weight' ? prevC.weight : prevC.measurements[key]) : null;
+    const diff = pval != null ? (val - pval).toFixed(1) : null;
+    const col = diff == null ? 'var(--t2)' : diff > 0 ? 'var(--green)' : diff < 0 ? 'var(--red)' : 'var(--t2)';
+    
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:13px">
+      <span style="color:var(--t2)">${formatDateIT(c.date)}</span>
+      <div><span style="font-weight:700">${val}</span> <span style="font-size:11px;color:${col}">${diff? (diff>0?'+':'')+diff : ''}</span></div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('zone-info').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="font-size:16px;font-weight:800;color:var(--accent)">${label}</div>
+      <div style="font-size:20px;font-weight:900">${latest} <span style="font-size:12px;color:var(--t2)">${unit}</span></div>
+    </div>
+    <div style="margin-top:12px;text-align:left">
+      <div style="font-size:11px;color:var(--t2);font-weight:800;text-transform:uppercase;margin-bottom:6px">Ultimi 5 check</div>
+      ${listHtml}
+    </div>
+  `;
+};
+
 // ── Form ───────────────────────────────────────────────────
 window.openNewCheck = function() {
   formPhotos = [];
-  const el = document.getElementById('checks-list');
-  el.style.display = 'none';
+  document.getElementById('checks-list-container').style.display = 'none';
+  document.getElementById('body-map-section').style.display = 'none';
   document.querySelector('.ph').style.display = 'none';
   const fw = document.getElementById('check-form');
   fw.style.display = 'block';
@@ -151,7 +193,8 @@ window.openNewCheck = function() {
 
 window.closeCheckForm = function() {
   document.getElementById('check-form').style.display = 'none';
-  document.getElementById('checks-list').style.display = 'block';
+  document.getElementById('checks-list-container').style.display = 'block';
+  document.getElementById('body-map-section').style.display = 'block';
   document.querySelector('.ph').style.display = 'flex';
 };
 

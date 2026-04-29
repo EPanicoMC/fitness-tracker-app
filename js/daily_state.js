@@ -118,7 +118,7 @@ async function init() {
 
   const name = appSettings?.profile?.name || appSettings?.name || '';
   const welcomeEl = document.getElementById('welcome-name');
-  if (welcomeEl) welcomeEl.textContent = name ? `Benvenuto, ${name}` : 'Benvenuto';
+  if (welcomeEl) welcomeEl.textContent = name ? `BENVENUTO, ${name.toUpperCase()}` : 'BENVENUTO';
 
   const dow = getDayOfWeek(TODAY);
   const progDay = activeProgram?.schedule?.[dow];
@@ -128,6 +128,15 @@ async function init() {
     isTrainingDay = local.is_training_day;
   } else {
     isTrainingDay = !!progDay;
+  }
+  
+  const activeWorkoutEl = document.getElementById('active-workout-info');
+  if (activeWorkoutEl) {
+    if (isTrainingDay && progDay) {
+      activeWorkoutEl.innerHTML = `${progDay.name}<br><span style="font-size:20px;color:var(--accent)">${progDay.exercises?.length || 0} Esercizi</span>`;
+    } else {
+      activeWorkoutEl.innerHTML = `Giorno di riposo.<br><span style="font-size:20px;color:var(--t2)">Recupera le energie</span>`;
+    }
   }
 
   buildStreak();
@@ -349,7 +358,18 @@ function calcTotals() {
   return { kcal, protein, carbs, fats };
 }
 
-function updateNutritionTotals() { buildNutrition(); }
+function updateNutritionTotals() {
+  buildNutrition();
+  const tots = calcTotals();
+  const recapKcal = document.getElementById('recap-kcal');
+  const recapPro = document.getElementById('recap-pro');
+  const recapCarb = document.getElementById('recap-carb');
+  const recapFat = document.getElementById('recap-fat');
+  if (recapKcal) recapKcal.textContent = Math.round(tots.kcal);
+  if (recapPro) recapPro.textContent = Math.round(tots.protein) + 'g';
+  if (recapCarb) recapCarb.textContent = Math.round(tots.carbs) + 'g';
+  if (recapFat) recapFat.textContent = Math.round(tots.fats) + 'g';
+}
 
 // ── FitScore ───────────────────────────────────────────────
 function buildFitScore() {
@@ -533,7 +553,7 @@ window.toggleMeal = function(mi) {
   logData.meals_state[mi] = { eaten: mealStates[mi].eaten, variant: mealStates[mi].active_variant };
   saveToLocal();
   buildMeals();
-  buildNutrition();
+  updateNutritionTotals();
   buildFitScore();
 };
 
