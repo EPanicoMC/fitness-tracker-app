@@ -47,35 +47,45 @@
       <div style="flex:1">
         <svg viewBox="0 0 200 300" style="width:100%; display:block; overflow:visible;">
           <style>
-            .b-zone { fill: rgba(255,255,255,0.05); stroke: rgba(255,255,255,0.1); stroke-width: 2; transition: all 0.2s; cursor: pointer; }
-            .b-zone:hover, .b-zone.active { fill: rgba(186,255,41,0.3); stroke: #baff29; filter: drop-shadow(0 0 8px #baff29); transform-origin: center; transform: scale(1.02); }
+            .b-zone { fill: rgba(255,255,255,0.03); stroke: rgba(255,255,255,0.1); stroke-width: 1.5; transition: all 0.3s; cursor: pointer; stroke-linejoin: round; stroke-linecap: round; }
+            .b-zone:hover, .b-zone.active { fill: rgba(255,106,0,0.25); stroke: var(--accent); filter: drop-shadow(0 0 10px rgba(255,106,0,0.5)); z-index: 10; }
           </style>
-          <!-- Stylized abstract body -->
-          <!-- Head -->
-          <circle cx="100" cy="30" r="16" class="b-zone" id="bz-head" onclick="window.showZone('weight', 'Peso')"/>
-          <!-- Chest/Shoulders -->
-          <path d="M 60 50 Q 100 40 140 50 L 135 90 L 65 90 Z" rx="10" class="b-zone" id="bz-chest" onclick="window.showZone('chest', 'Petto')"/>
-          <!-- Waist/Abs -->
-          <path d="M 65 95 L 135 95 L 125 140 L 75 140 Z" rx="10" class="b-zone" id="bz-waist" onclick="window.showZone('waist', 'Core / Vita')"/>
-          <!-- Left Arm -->
-          <rect x="35" y="55" width="20" height="60" rx="10" class="b-zone" id="bz-bicep_l" onclick="window.showZone('bicep_l', 'Braccio SX')"/>
-          <!-- Right Arm -->
-          <rect x="145" y="55" width="20" height="60" rx="10" class="b-zone" id="bz-bicep_r" onclick="window.showZone('bicep_r', 'Braccio DX')"/>
-          <!-- Left Leg -->
-          <rect x="70" y="145" width="24" height="70" rx="12" class="b-zone" id="bz-thigh_l" onclick="window.showZone('thigh_l', 'Coscia SX')"/>
-          <!-- Right Leg -->
-          <rect x="106" y="145" width="24" height="70" rx="12" class="b-zone" id="bz-thigh_r" onclick="window.showZone('thigh_r', 'Coscia DX')"/>
-          <!-- Left Calf -->
-          <rect x="73" y="220" width="18" height="50" rx="9" class="b-zone" id="bz-calf_l" onclick="window.showZone('calf_l', 'Polpaccio SX')"/>
-          <!-- Right Calf -->
-          <rect x="109" y="220" width="18" height="50" rx="9" class="b-zone" id="bz-calf_r" onclick="window.showZone('calf_r', 'Polpaccio DX')"/>
+          
+          <g transform="translate(20, 10)">
+            <!-- Head -->
+            <path class="b-zone" id="bz-head" onclick="window.showZone('weight', 'Peso')" d="M 80 10 C 95 10 95 30 80 40 C 65 30 65 10 80 10 Z"/>
+            
+            <!-- Chest / Shoulders -->
+            <path class="b-zone" id="bz-chest" onclick="window.showZone('chest', 'Petto')" d="M 60 45 L 100 45 C 120 50 120 75 100 85 L 60 85 C 40 75 40 50 60 45 Z"/>
+            
+            <!-- Core / Waist -->
+            <path class="b-zone" id="bz-waist" onclick="window.showZone('waist', 'Core')" d="M 65 90 L 95 90 L 90 135 L 70 135 Z"/>
+            
+            <!-- Left Arm -->
+            <path class="b-zone" id="bz-bicep_l" onclick="window.showZone('bicep_l', 'Braccio SX')" d="M 55 50 C 40 55 35 90 40 110 C 45 110 50 90 55 85 Z"/>
+            
+            <!-- Right Arm -->
+            <path class="b-zone" id="bz-bicep_r" onclick="window.showZone('bicep_r', 'Braccio DX')" d="M 105 50 C 120 55 125 90 120 110 C 115 110 110 90 105 85 Z"/>
+            
+            <!-- Left Leg -->
+            <path class="b-zone" id="bz-thigh_l" onclick="window.showZone('thigh_l', 'Coscia SX')" d="M 65 140 L 78 140 L 78 205 C 70 205 60 180 65 140 Z"/>
+            
+            <!-- Right Leg -->
+            <path class="b-zone" id="bz-thigh_r" onclick="window.showZone('thigh_r', 'Coscia DX')" d="M 82 140 L 95 140 C 100 180 90 205 82 205 L 82 140 Z"/>
+            
+            <!-- Left Calf -->
+            <path class="b-zone" id="bz-calf_l" onclick="window.showZone('calf_l', 'Polp. SX')" d="M 68 210 L 78 210 C 80 240 75 260 70 260 C 65 260 60 240 68 210 Z"/>
+            
+            <!-- Right Calf -->
+            <path class="b-zone" id="bz-calf_r" onclick="window.showZone('calf_r', 'Polp. DX')" d="M 82 210 L 92 210 C 100 240 95 260 90 260 C 85 260 80 240 82 210 Z"/>
+          </g>
         </svg>
       </div>
       <div style="width:100px; display:flex; flex-direction:column; gap:16px;">
         <div style="font-size:10px;color:var(--t1);font-weight:800"><div style="width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,0.2);display:inline-block;margin-right:6px"></div>PETTO<br><span style="color:var(--t3);font-size:12px;font-weight:500;margin-left:14px" id="lbl-chest">—</span></div>
-        <div style="font-size:10px;color:var(--t1);font-weight:800"><div style="width:8px;height:8px;border-radius:50%;background:#baff29;display:inline-block;margin-right:6px"></div>CORE<br><span style="color:var(--t3);font-size:12px;font-weight:500;margin-left:14px" id="lbl-waist">—</span></div>
-        <div style="font-size:10px;color:var(--t1);font-weight:800"><div style="width:8px;height:8px;border-radius:50%;background:#baff29;display:inline-block;margin-right:6px"></div>GAMBE<br><span style="color:var(--t3);font-size:12px;font-weight:500;margin-left:14px" id="lbl-legs">—</span></div>
-        <div style="font-size:10px;color:var(--t1);font-weight:800"><div style="width:8px;height:8px;border-radius:50%;background:#baff29;display:inline-block;margin-right:6px"></div>BRACCIA<br><span style="color:var(--t3);font-size:12px;font-weight:500;margin-left:14px" id="lbl-arms">—</span></div>
+        <div style="font-size:10px;color:var(--t1);font-weight:800"><div style="width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block;margin-right:6px"></div>CORE<br><span style="color:var(--t3);font-size:12px;font-weight:500;margin-left:14px" id="lbl-waist">—</span></div>
+        <div style="font-size:10px;color:var(--t1);font-weight:800"><div style="width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block;margin-right:6px"></div>GAMBE<br><span style="color:var(--t3);font-size:12px;font-weight:500;margin-left:14px" id="lbl-legs">—</span></div>
+        <div style="font-size:10px;color:var(--t1);font-weight:800"><div style="width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block;margin-right:6px"></div>BRACCIA<br><span style="color:var(--t3);font-size:12px;font-weight:500;margin-left:14px" id="lbl-arms">—</span></div>
       </div>
     </div>
     <div id="zone-info" style="margin-top:20px; min-height:60px; padding:12px; background:rgba(0,0,0,0.3); border-radius:12px; border:1px solid rgba(255,255,255,0.03);">

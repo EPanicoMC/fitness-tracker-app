@@ -125,6 +125,8 @@ window.openEdit = function(id) {
   formData  = JSON.parse(JSON.stringify(d));
   window.formData = formData;
   renderDietForm(d);
+  recalcTotals('day_on');
+  recalcTotals('day_off');
 };
 
 function renderDietForm(diet) {

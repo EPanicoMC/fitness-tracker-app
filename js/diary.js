@@ -455,7 +455,8 @@ function buildWeekView() {
     let statusText = 'IN CORSO';
     let statusColor = 'var(--t2)';
     if (adherence !== null) {
-      if (adherence >= 80) { statusText = 'OTTIMO LAGO'; statusColor = 'var(--green)'; }
+      if (adherence === 100) { statusText = 'PERFETTO'; statusColor = 'var(--green)'; }
+      else if (adherence >= 75) { statusText = 'IN TARGET'; statusColor = 'var(--green)'; }
       else if (adherence >= 50) { statusText = 'NELLA MEDIA'; statusColor = 'var(--yellow)'; }
       else { statusText = 'DA MIGLIORARE'; statusColor = 'var(--orange)'; }
     }
