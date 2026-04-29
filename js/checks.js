@@ -30,7 +30,89 @@ async function loadChecks() {
     query(collection(db, 'users', USER_ID, 'checks'), orderBy('date', 'desc'))
   );
   checks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  
+  // Fill the legend values
+  const lastCheck = checks[0];
+  if (lastCheck && lastCheck.measurements) {
+    const ms = lastCheck.measurements;
+    if (ms.chest) document.getElementById('lbl-chest').textContent = ms.chest + ' cm';
+    if (ms.waist) document.getElementById('lbl-waist').textContent = ms.waist + ' cm';
+    if (ms.thigh_l) document.getElementById('lbl-legs').textContent = ms.thigh_l + ' cm';
+    if (ms.bicep_l) document.getElementById('lbl-arms').textContent = ms.bicep_l + ' cm';
+  }
+
   renderList();
+  loadVolumeStats();
+}
+
+async function loadVolumeStats() {
+  const elChart = document.getElementById('vol-chart');
+  if (!elChart) return;
+  try {
+    const snap = await getDocs(query(collection(db, 'users', USER_ID, 'daily_logs'), orderBy('date', 'desc'), limit(14)));
+    const logs = snap.docs.map(d => d.data());
+    
+    // Calculate volumes per day
+    const vols = [];
+    let totThisWeek = 0;
+    let totLastWeek = 0;
+    
+    const todayObj = new Date();
+    // 7 days ago
+    for(let i=6; i>=0; i--) {
+      const d = new Date(todayObj);
+      d.setDate(d.getDate() - i);
+      const ds = d.toISOString().split('T')[0];
+      const log = logs.find(l => l.date === ds);
+      let v = 0;
+      if (log && log.workout && log.workout.exercises) {
+        v = log.workout.exercises.reduce((a, ex) => a + ex.sets.reduce((b, s) => b + (parseFloat(s.weight) || 0) * (parseFloat(s.reps) || 1), 0), 0);
+      }
+      vols.push({ date: ds, val: v });
+      totThisWeek += v;
+    }
+
+    // Last week total
+    for(let i=13; i>=7; i--) {
+      const d = new Date(todayObj);
+      d.setDate(d.getDate() - i);
+      const ds = d.toISOString().split('T')[0];
+      const log = logs.find(l => l.date === ds);
+      let v = 0;
+      if (log && log.workout && log.workout.exercises) {
+        v = log.workout.exercises.reduce((a, ex) => a + ex.sets.reduce((b, s) => b + (parseFloat(s.weight) || 0) * (parseFloat(s.reps) || 1), 0), 0);
+      }
+      totLastWeek += v;
+    }
+
+    document.getElementById('vol-total').textContent = totThisWeek.toLocaleString('it-IT');
+    const trendEl = document.getElementById('vol-trend');
+    if (totLastWeek > 0) {
+      const diff = Math.round(((totThisWeek - totLastWeek) / totLastWeek) * 100);
+      trendEl.textContent = `${diff >= 0 ? '+' : ''}${diff}% vs settimana scorsa`;
+      trendEl.style.color = diff >= 0 ? 'var(--green)' : 'var(--red)';
+    } else {
+      trendEl.textContent = '';
+    }
+
+    const maxV = Math.max(...vols.map(v => v.val), 100); // minimum 100 to avoid div by zero
+    elChart.innerHTML = vols.map((v, i) => {
+      const isToday = i === 6;
+      const hPct = Math.max(5, (v.val / maxV) * 100);
+      const lbl = new Date(v.date).toLocaleDateString('it-IT', { weekday: 'short' }).toUpperCase();
+      return `
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">
+          ${isToday && v.val > 0 ? `<div style="font-size:10px;font-weight:700;color:var(--t1);background:rgba(255,255,255,0.1);padding:2px 4px;border-radius:4px;margin-bottom:2px">${v.val}</div>` : ''}
+          <div style="width:100%;max-width:24px;height:100px;display:flex;align-items:flex-end">
+            <div style="width:100%;background:${isToday ? 'var(--accent)' : 'rgba(255,255,255,0.1)'};height:${hPct}%;border-radius:4px 4px 0 0;transition:all 0.3s"></div>
+          </div>
+          <div style="font-size:9px;color:${isToday ? 'var(--t1)' : 'var(--t3)'};font-weight:700">${lbl}</div>
+        </div>
+      `;
+    }).join('');
+  } catch(e) {
+    elChart.innerHTML = '';
+  }
 }
 
 function renderList() {
@@ -208,6 +290,13 @@ window.saveCheck = async function() {
     const v = document.getElementById(`ck-${m.key}`)?.value;
     measurements[m.key] = v ? parseFloat(v) : null;
   });
+
+  if (measurements['bicep_l'] != null && measurements['bicep_r'] == null) measurements['bicep_r'] = measurements['bicep_l'];
+  if (measurements['bicep_r'] != null && measurements['bicep_l'] == null) measurements['bicep_l'] = measurements['bicep_r'];
+  if (measurements['thigh_l'] != null && measurements['thigh_r'] == null) measurements['thigh_r'] = measurements['thigh_l'];
+  if (measurements['thigh_r'] != null && measurements['thigh_l'] == null) measurements['thigh_l'] = measurements['thigh_r'];
+  if (measurements['calf_l'] != null && measurements['calf_r'] == null) measurements['calf_r'] = measurements['calf_l'];
+  if (measurements['calf_r'] != null && measurements['calf_l'] == null) measurements['calf_l'] = measurements['calf_r'];
 
   showToast('💾 Salvataggio...', 'info');
 

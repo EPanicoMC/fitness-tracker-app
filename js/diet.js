@@ -155,11 +155,11 @@ function renderDayForm(dk, title, day) {
       <span class="clabel">${title}</span>
       <div class="grid3" style="margin-bottom:16px">
         <div class="fg" style="margin:0"><label class="fl">Kcal</label>
-          <input type="number" class="fi" value="${day.kcal||''}" oninput="formData.${dk}.kcal=+this.value;recalcTotals('${dk}')"></div>
+          <input type="number" class="fi" id="${dk}-kcal-input" value="${day.kcal||0}" readonly style="background:transparent;border-color:transparent;color:var(--t1);font-weight:bold;padding:0"></div>
         <div class="fg" style="margin:0"><label class="fl">Pro (g)</label>
-          <input type="number" class="fi" value="${day.protein||''}" oninput="formData.${dk}.protein=+this.value"></div>
+          <input type="number" class="fi" id="${dk}-pro-input" value="${day.protein||0}" readonly style="background:transparent;border-color:transparent;color:var(--t1);font-weight:bold;padding:0"></div>
         <div class="fg" style="margin:0"><label class="fl">Carb (g)</label>
-          <input type="number" class="fi" value="${day.carbs||''}" oninput="formData.${dk}.carbs=+this.value"></div>
+          <input type="number" class="fi" id="${dk}-carb-input" value="${day.carbs||0}" readonly style="background:transparent;border-color:transparent;color:var(--t1);font-weight:bold;padding:0"></div>
       </div>
       <div id="meal-list-${dk}">
         ${(day.meals||[]).map((m,mi) => renderMealForm(dk,mi,m)).join('')}
@@ -266,10 +266,22 @@ window.recalcTotals = function(dk) {
     carbs:   a.carbs   + (m.carbs||0),
     fats:    a.fats    + (m.fats||0)
   }), { kcal:0, protein:0, carbs:0, fats:0 });
-  const tgt = formData[dk];
+
+  formData[dk].kcal = sum.kcal;
+  formData[dk].protein = sum.protein;
+  formData[dk].carbs = sum.carbs;
+  formData[dk].fats = sum.fats;
+
+  const kIn = document.getElementById(`${dk}-kcal-input`);
+  const pIn = document.getElementById(`${dk}-pro-input`);
+  const cIn = document.getElementById(`${dk}-carb-input`);
+  if (kIn) kIn.value = sum.kcal;
+  if (pIn) pIn.value = sum.protein;
+  if (cIn) cIn.value = sum.carbs;
+
   const el = document.getElementById(`totals-${dk}`);
   if (el) {
-    el.innerHTML = `Totale pasti: ${sum.kcal} kcal (target: ${tgt.kcal||0}) · P:${sum.protein}g C:${sum.carbs}g F:${sum.fats}g`;
+    el.innerHTML = `Totale pasti: ${sum.kcal} kcal · P:${sum.protein}g C:${sum.carbs}g F:${sum.fats}g`;
   }
 };
 

@@ -138,6 +138,11 @@ async function init() {
       activeWorkoutEl.innerHTML = `Giorno di riposo.<br><span style="font-size:20px;color:var(--t2)">Recupera le energie</span>`;
     }
   }
+  
+  const progNameEl = document.getElementById('active-program-name');
+  if (progNameEl) {
+    progNameEl.textContent = activeProgram ? activeProgram.name : 'Nessuna scheda';
+  }
 
   buildStreak();
   buildDayType();
@@ -473,9 +478,13 @@ function buildMeals() {
   });
 
   const el = document.getElementById('meals-list');
-  if (!el) return;
+  if (!el) {
+    updateNutritionTotals();
+    return;
+  }
   if (!meals.length) {
     el.innerHTML = '<p style="color:var(--t2);font-size:13px;text-align:center;padding:16px">Nessun piano dieta attivo</p>';
+    updateNutritionTotals();
     return;
   }
   const extraHtml = (logData.extra_meals || []).map((m, xi) => `
@@ -491,6 +500,7 @@ function buildMeals() {
       </div>
     </div>`).join('');
   el.innerHTML = mealStates.map((m, mi) => renderMealRow(m, mi)).join('') + extraHtml;
+  updateNutritionTotals();
 }
 
 function renderMealRow(m, mi) {

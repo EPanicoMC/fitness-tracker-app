@@ -446,23 +446,33 @@ function buildWeekView() {
     if (avgSteps < stepsGoal * 0.7) recs.push(`👟 Media passi bassa (${avgSteps.toLocaleString('it-IT')} / ${stepsGoal.toLocaleString('it-IT')} obiettivo) — aggiungi una camminata!`);
   }
 
-  const adherence = trainingDaysCount > 0 ? Math.round((trainingDone / trainingDaysCount) * 100) : null;
+    const adherence = trainingDaysCount > 0 ? Math.round((trainingDone / trainingDaysCount) * 100) : null;
 
   el.innerHTML = rowsHtml;
 
   let recapHtml = '';
   if (recs.length || adherence !== null || avgKcal > 0) {
-    const pills = [];
-    if (adherence !== null) pills.push(`<div style="background:rgba(255,106,0,0.1); border:1px solid rgba(255,106,0,0.3); border-radius:100px; padding:6px 12px; display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:700; color:var(--accent); white-space:nowrap"><i class="ri-fire-fill"></i> ${adherence}% Aderenza</div>`);
-    if (avgKcal > 0) pills.push(`<div style="background:rgba(28,227,112,0.1); border:1px solid rgba(28,227,112,0.3); border-radius:100px; padding:6px 12px; display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:700; color:var(--green); white-space:nowrap"><i class="ri-restaurant-fill"></i> ${avgKcal} kcal/gg</div>`);
-    if (avgProtein > 0) pills.push(`<div style="background:rgba(58,134,255,0.1); border:1px solid rgba(58,134,255,0.3); border-radius:100px; padding:6px 12px; display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:700; color:var(--blue); white-space:nowrap"><i class="ri-drop-fill"></i> ${avgProtein}g pro medie</div>`);
-    if (totalSteps > 0) pills.push(`<div style="background:rgba(255,195,0,0.1); border:1px solid rgba(255,195,0,0.3); border-radius:100px; padding:6px 12px; display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:700; color:var(--yellow); white-space:nowrap"><i class="ri-footprint-fill"></i> ${Math.round(totalSteps/1000)}k passi</div>`);
+    let statusText = 'IN CORSO';
+    let statusColor = 'var(--t2)';
+    if (adherence !== null) {
+      if (adherence >= 80) { statusText = 'OTTIMO LAGO'; statusColor = 'var(--green)'; }
+      else if (adherence >= 50) { statusText = 'NELLA MEDIA'; statusColor = 'var(--yellow)'; }
+      else { statusText = 'DA MIGLIORARE'; statusColor = 'var(--orange)'; }
+    }
 
-    const recPills = recs.map(r => `<div style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:10px 12px; display:flex; align-items:flex-start; gap:8px; font-size:12px; font-weight:500; color:var(--t1); margin-top:8px"><i class="ri-lightbulb-flash-line" style="color:var(--accent);font-size:14px;margin-top:2px"></i><div style="flex:1">${r.replace(/^([💡💪🔥📉🥩👟]\s*)/, '')}</div></div>`);
+    const pills = [];
+    if (adherence !== null) pills.push(`<div style="background:rgba(255,255,255,0.03); border-radius:12px; padding:12px; flex:1; text-align:center"><div style="font-size:11px;color:var(--t3);margin-bottom:4px;text-transform:uppercase;font-weight:700">Aderenza</div><div style="font-size:22px;font-weight:900;color:${statusColor}">${adherence}%</div></div>`);
+    if (avgKcal > 0) pills.push(`<div style="background:rgba(255,255,255,0.03); border-radius:12px; padding:12px; flex:1; text-align:center"><div style="font-size:11px;color:var(--t3);margin-bottom:4px;text-transform:uppercase;font-weight:700">Kcal Medie</div><div style="font-size:20px;font-weight:900;color:var(--t1)">${avgKcal}</div></div>`);
+    if (avgProtein > 0) pills.push(`<div style="background:rgba(255,255,255,0.03); border-radius:12px; padding:12px; flex:1; text-align:center"><div style="font-size:11px;color:var(--t3);margin-bottom:4px;text-transform:uppercase;font-weight:700">Pro Medie</div><div style="font-size:20px;font-weight:900;color:var(--blue)">${avgProtein}g</div></div>`);
+
+    const recPills = recs.map(r => `<div style="background:rgba(255,255,255,0.05); border-left:3px solid var(--accent); border-radius:8px; padding:10px 12px; font-size:13px; font-weight:500; color:var(--t1); margin-top:8px">${r.replace(/^([💡💪🔥📉🥩👟]\s*)/, '')}</div>`);
 
     recapHtml = `
-      <div class="clabel" style="margin-bottom:12px"><i class="ri-bar-chart-box-line"></i> Performance (ultimi 7 giorni)</div>
-      <div style="display:flex; flex-wrap:nowrap; gap:8px; overflow-x:auto; padding-bottom:8px; margin-bottom:4px; -webkit-overflow-scrolling:touch; scrollbar-width:none">
+      <div class="clabel" style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center">
+        <span><i class="ri-bar-chart-box-line"></i> Performance (7 gg)</span>
+        <span style="font-size:11px;padding:4px 10px;background:rgba(255,255,255,0.1);border-radius:100px;color:${statusColor};font-weight:800">${statusText}</span>
+      </div>
+      <div style="display:flex; gap:8px; margin-bottom:12px;">
         ${pills.join('')}
       </div>
       ${recPills.join('')}
