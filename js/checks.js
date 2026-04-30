@@ -166,6 +166,37 @@ async function loadCheckStats() {
       if (valEl) valEl.textContent = '—';
     }
   });
+
+  // Highlight overlay zones that have data with dynamic intensity based on improvement
+  const ovHighlight = { chest: ['ov-chest','ov-back'], shoulders: ['ov-shoulders'], waist: ['ov-waist'], arms: ['ov-bicep_l','ov-bicep_r'], legs: ['ov-thigh_l','ov-thigh_r'] };
+  Object.keys(groups).forEach(key => {
+    const vals = groups[key].keys.map(k => ms[k]).filter(v => v != null);
+    const prevVals = groups[key].keys.map(k => pm[k]).filter(v => v != null);
+    
+    if (vals.length > 0 && ovHighlight[key]) {
+      const avg = vals.reduce((a,b) => a+b, 0) / vals.length;
+      const prevAvg = prevVals.length ? prevVals.reduce((a,b) => a+b, 0) / prevVals.length : null;
+      
+      let improved = false;
+      if (prevAvg != null) {
+        if (key === 'waist') improved = avg < prevAvg;
+        else improved = avg > prevAvg;
+      }
+
+      ovHighlight[key].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+          const baseOp = improved ? 0.4 : 0.2;
+          const strokeOp = improved ? 0.7 : 0.4;
+          el.style.fill = `rgba(255,106,0,${baseOp})`;
+          el.style.stroke = `rgba(255,106,0,${strokeOp})`;
+          if (improved) {
+            el.style.filter = 'drop-shadow(0 0 8px rgba(255,106,0,0.6))';
+          }
+        }
+      });
+    }
+  });
 }
 
 function renderList() {
@@ -233,9 +264,10 @@ window.deleteCheck = function(id) {
 
 // ── Body Map UI ────────────────────────────────────────────
 window.showZone = function(key, label) {
-  document.querySelectorAll('.m-zone').forEach(el => el.classList.remove('active'));
-  const target = document.getElementById(`bz-${key}`);
-  if (target) target.classList.add('active');
+  document.querySelectorAll('.ov-zone').forEach(el => el.classList.remove('active'));
+  // Highlight matching overlay zones
+  const ovMap = { chest: ['ov-chest','ov-back'], shoulders: ['ov-shoulders'], waist: ['ov-waist'], bicep_l: ['ov-bicep_l','ov-bicep_r'], bicep_r: ['ov-bicep_l','ov-bicep_r'], thigh_l: ['ov-thigh_l','ov-thigh_r'], thigh_r: ['ov-thigh_l','ov-thigh_r'], weight: [] };
+  (ovMap[key] || []).forEach(id => { const el = document.getElementById(id); if (el) el.classList.add('active'); });
 
   const history = checks.filter(c => c.measurements?.[key] != null || (key === 'weight' && c.weight != null));
   if (!history.length) {

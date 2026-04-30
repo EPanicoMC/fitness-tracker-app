@@ -52,6 +52,29 @@
     <div style="display:grid; grid-template-columns: 1.2fr 1fr; gap:16px; align-items:start">
       <div style="position:relative; display:flex; justify-content:center">
         <img src="img/anatomy.png" alt="Anatomia muscolare" style="width:100%; max-width:220px; opacity:0.85; filter:brightness(1.1)"/>
+        <!-- SVG overlay zones -->
+        <svg viewBox="0 0 1024 1024" style="position:absolute; top:0; left:50%; transform:translateX(-50%); width:100%; max-width:220px; height:100%;" preserveAspectRatio="xMidYMid meet">
+          <style>
+            .ov-zone { fill: transparent; stroke: transparent; stroke-width: 2; cursor: pointer; transition: all 0.4s; }
+            .ov-zone:hover, .ov-zone.active { fill: rgba(255,106,0,0.25); stroke: rgba(255,106,0,0.6); filter: drop-shadow(0 0 12px rgba(255,106,0,0.5)); }
+          </style>
+          <!-- FRONT (left figure) - Chest -->
+          <path class="ov-zone" id="ov-chest" onclick="window.showZone('chest','Petto')" d="M160,260 L350,260 C370,260 380,280 380,300 L380,400 C370,420 340,440 260,440 C180,440 150,420 140,400 L140,300 C140,280 150,260 160,260 Z"/>
+          <!-- FRONT - Shoulders -->
+          <path class="ov-zone" id="ov-shoulders" onclick="window.showZone('shoulders','Spalle')" d="M120,220 L170,200 L250,190 L340,200 L400,220 L380,260 L140,260 Z"/>
+          <!-- FRONT - Abs/Core -->
+          <path class="ov-zone" id="ov-waist" onclick="window.showZone('waist','Vita')" d="M175,445 L345,445 L335,580 L185,580 Z"/>
+          <!-- FRONT - Left Arm -->
+          <path class="ov-zone" id="ov-bicep_l" onclick="window.showZone('bicep_l','Braccia')" d="M80,240 L140,240 L140,450 L115,500 L80,500 C65,430 60,340 80,240 Z"/>
+          <!-- FRONT - Right Arm -->
+          <path class="ov-zone" id="ov-bicep_r" onclick="window.showZone('bicep_l','Braccia')" d="M380,240 L440,240 C460,340 455,430 440,500 L405,500 L380,450 L380,240 Z"/>
+          <!-- FRONT - Left Leg -->
+          <path class="ov-zone" id="ov-thigh_l" onclick="window.showZone('thigh_l','Gambe')" d="M170,600 L260,600 L250,800 C240,820 220,820 200,820 C180,800 165,750 170,600 Z"/>
+          <!-- FRONT - Right Leg -->
+          <path class="ov-zone" id="ov-thigh_r" onclick="window.showZone('thigh_l','Gambe')" d="M265,600 L355,600 C360,750 345,800 325,820 C305,820 285,820 275,800 L265,600 Z"/>
+          <!-- BACK (right figure) - Back/Lats -->
+          <path class="ov-zone" id="ov-back" onclick="window.showZone('chest','Petto')" d="M600,260 L880,260 L890,400 C880,440 840,460 740,460 C640,460 600,440 590,400 L600,260 Z"/>
+        </svg>
       </div>
 
       <div style="display:flex; flex-direction:column; gap:14px; padding-top:8px">
