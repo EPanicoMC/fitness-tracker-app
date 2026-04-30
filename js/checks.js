@@ -1,5 +1,5 @@
 import {
-  db, USER_ID, collection, doc, getDocs, setDoc, deleteDoc, query, orderBy, storage
+  db, USER_ID, collection, doc, getDocs, setDoc, deleteDoc, query, orderBy, limit, storage
 } from './firebase-config.js';
 import { showToast, showModal, formatDateIT } from './app.js';
 import {
@@ -30,19 +30,9 @@ async function loadChecks() {
     query(collection(db, 'users', USER_ID, 'checks'), orderBy('date', 'desc'))
   );
   checks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  
-  // Fill the legend values
-  const lastCheck = checks[0];
-  if (lastCheck && lastCheck.measurements) {
-    const ms = lastCheck.measurements;
-    if (ms.chest) document.getElementById('lbl-chest').textContent = ms.chest + ' cm';
-    if (ms.waist) document.getElementById('lbl-waist').textContent = ms.waist + ' cm';
-    if (ms.thigh_l) document.getElementById('lbl-legs').textContent = ms.thigh_l + ' cm';
-    if (ms.bicep_l) document.getElementById('lbl-arms').textContent = ms.bicep_l + ' cm';
-  }
 
   renderList();
-  loadVolumeStats();
+  try { await loadVolumeStats(); } catch(e) { console.warn('loadVolumeStats error:', e); }
 }
 
 async function loadVolumeStats() {
@@ -232,7 +222,7 @@ window.deleteCheck = function(id) {
 
 // ── Body Map UI ────────────────────────────────────────────
 window.showZone = function(key, label) {
-  document.querySelectorAll('.b-zone').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.m-zone').forEach(el => el.classList.remove('active'));
   const target = document.getElementById(`bz-${key}`);
   if (target) target.classList.add('active');
 
