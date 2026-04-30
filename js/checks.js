@@ -107,52 +107,63 @@ async function loadVolumeStats() {
         <span>0</span>
       </div>
     `;
-    loadMuscleStats(logs);
+    loadCheckStats();
   } catch(e) {
     elChart.innerHTML = '';
   }
 }
 
-async function loadMuscleStats(logs) {
-  // Simple heuristic based on exercise names in the last 14 days
+async function loadCheckStats() {
+  if (checks.length === 0) return;
+  const latest = checks[0];
+  const prev = checks.length > 1 ? checks[1] : null;
+  const ms = latest.measurements || {};
+  const pm = prev?.measurements || {};
+
+  // Map: legend id -> { keys to average, label }
   const groups = {
-    chest: { vol: 0, label: 'PETTO' },
-    back: { vol: 0, label: 'DORSO' },
-    legs: { vol: 0, label: 'GAMBE' },
-    shoulders: { vol: 0, label: 'SPALLE' },
-    arms: { vol: 0, label: 'BRACCIA' }
+    chest:     { keys: ['chest'],              label: 'PETTO' },
+    shoulders: { keys: ['shoulders'],          label: 'SPALLE' },
+    waist:     { keys: ['waist'],              label: 'VITA' },
+    arms:      { keys: ['bicep_l','bicep_r'],  label: 'BRACCIA' },
+    legs:      { keys: ['thigh_l','thigh_r'],  label: 'GAMBE' }
   };
 
-  logs.forEach(log => {
-    if (log.workout && log.workout.exercises) {
-      log.workout.exercises.forEach(ex => {
-        const name = ex.name.toLowerCase();
-        const v = ex.sets.reduce((a, s) => a + (parseFloat(s.weight) || 0) * (parseFloat(s.reps) || 1), 0);
-        
-        if (name.includes('panca') || name.includes('chest') || name.includes('petto') || name.includes('spinta')) groups.chest.vol += v;
-        else if (name.includes('dorso') || name.includes('lat') || name.includes('trazioni') || name.includes('rematore') || name.includes('stacco')) groups.back.vol += v;
-        else if (name.includes('squat') || name.includes('leg') || name.includes('gambe') || name.includes('affondi') || name.includes('pressa')) groups.legs.vol += v;
-        else if (name.includes('spalle') || name.includes('shoulder') || name.includes('military') || name.includes('alzate')) groups.shoulders.vol += v;
-        else if (name.includes('curl') || name.includes('braccia') || name.includes('bicipiti') || name.includes('tricipiti') || name.includes('pushdown')) groups.arms.vol += v;
-      });
-    }
+  // Collect all measurement values to determine the max for bar scaling
+  const allVals = [];
+  Object.values(groups).forEach(g => {
+    g.keys.forEach(k => { if (ms[k] != null) allVals.push(ms[k]); });
   });
+  const maxVal = Math.max(...allVals, 1);
 
-  const maxVol = Math.max(...Object.values(groups).map(g => g.vol), 1);
   Object.keys(groups).forEach(key => {
-    const pct = Math.round((groups[key].vol / maxVol) * 100);
-    const pctEl = document.getElementById(`pct-${key}`);
+    const g = groups[key];
+    // Average of the relevant keys
+    const vals = g.keys.map(k => ms[k]).filter(v => v != null);
+    const prevVals = g.keys.map(k => pm[k]).filter(v => v != null);
+    const avg = vals.length ? vals.reduce((a,b) => a+b, 0) / vals.length : null;
+    const prevAvg = prevVals.length ? prevVals.reduce((a,b) => a+b, 0) / prevVals.length : null;
+
+    const valEl = document.getElementById(`val-${key}`);
     const barEl = document.getElementById(`bar-${key}`);
-    const svgEl = document.getElementById(`bz-${key}`);
-    
-    if (pctEl) pctEl.textContent = pct + '%';
-    if (barEl) {
-      barEl.style.width = pct + '%';
-      barEl.style.background = pct > 70 ? 'var(--accent)' : pct > 30 ? 'rgba(255,106,0,0.5)' : 'rgba(255,255,255,0.15)';
-    }
-    if (svgEl) {
-      svgEl.classList.toggle('active', pct > 50);
-      svgEl.style.fill = `rgba(255,106,0, ${pct / 200})`;
+
+    if (avg != null) {
+      let deltaHtml = '';
+      if (prevAvg != null) {
+        const diff = (avg - prevAvg).toFixed(1);
+        const col = diff > 0 ? 'var(--green)' : diff < 0 ? 'var(--red)' : 'var(--t3)';
+        deltaHtml = ` <span style="font-size:10px;color:${col}">${diff > 0 ? '+' : ''}${diff}</span>`;
+      }
+      if (valEl) valEl.innerHTML = `<span style="color:var(--t1)">${avg.toFixed(1)} cm</span>${deltaHtml}`;
+      
+      // Bar width proportional to max measurement
+      const pct = Math.round((avg / maxVal) * 100);
+      if (barEl) {
+        barEl.style.width = pct + '%';
+        barEl.style.background = 'var(--accent)';
+      }
+    } else {
+      if (valEl) valEl.textContent = '—';
     }
   });
 }

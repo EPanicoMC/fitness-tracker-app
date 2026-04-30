@@ -49,139 +49,52 @@
   <div id="body-map-section" class="card card-dark" style="position:relative; margin-bottom:30px; padding:24px; border-radius:24px; background:rgba(255,255,255,0.02)">
     <div style="font-size:11px;color:var(--t3);font-weight:800;letter-spacing:1px;text-transform:uppercase;margin-bottom:24px">Gruppi Muscolari</div>
     
-    <div style="display:grid; grid-template-columns: 1.5fr 1fr; gap:20px; align-items:start">
-      <!-- TWO SILHOUETTES -->
-      <div style="display:flex; gap:6px; justify-content:center; align-items:flex-start">
-        <!-- FRONT VIEW -->
-        <svg viewBox="0 0 120 280" style="width:100%; max-width:90px; overflow:visible;">
-          <defs>
-            <linearGradient id="muscleGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="rgba(255,106,0,0.4)"/>
-              <stop offset="100%" stop-color="rgba(255,106,0,0.15)"/>
-            </linearGradient>
-          </defs>
-          <style>
-            .m-zone { fill: rgba(255,255,255,0.04); stroke: rgba(255,255,255,0.12); stroke-width: 0.6; transition: all 0.4s; cursor: pointer; }
-            .m-zone:hover, .m-zone.active { fill: url(#muscleGrad); stroke: var(--accent); filter: drop-shadow(0 0 6px rgba(255,106,0,0.4)); }
-            .m-outline { fill: none; stroke: rgba(255,255,255,0.08); stroke-width: 0.3; }
-          </style>
-          <!-- Head -->
-          <ellipse cx="60" cy="18" rx="12" ry="14" class="m-zone" id="bz-head"/>
-          <!-- Neck -->
-          <rect x="54" y="32" width="12" height="10" rx="3" style="fill:rgba(255,255,255,0.03); stroke:rgba(255,255,255,0.06); stroke-width:0.4"/>
-          <!-- Shoulders / Traps -->
-          <path class="m-zone" id="bz-shoulders-f" d="M35,42 C40,38 80,38 85,42 L82,54 L38,54 Z"/>
-          <!-- Pectorals -->
-          <path class="m-zone" id="bz-chest" d="M38,56 C42,54 58,54 60,55 C62,54 78,54 82,56 L80,76 C75,80 65,82 60,82 C55,82 45,80 40,76 Z"/>
-          <!-- Abs -->
-          <path class="m-zone" id="bz-waist" d="M44,84 L76,84 L74,90 L46,90 Z"/>
-          <path class="m-zone" d="M45,92 L75,92 L73,98 L47,98 Z" style="fill:rgba(255,255,255,0.03)"/>
-          <path class="m-zone" d="M46,100 L74,100 L72,106 L48,106 Z" style="fill:rgba(255,255,255,0.03)"/>
-          <path class="m-zone" d="M47,108 L73,108 L70,118 L50,118 Z" style="fill:rgba(255,255,255,0.03)"/>
-          <!-- Obliques -->
-          <path class="m-outline" d="M38,76 L44,84 L47,118 M82,76 L76,84 L73,118"/>
-          <!-- Left Bicep -->
-          <path class="m-zone" id="bz-bicep_l" d="M35,44 C28,48 22,58 20,72 C18,82 20,96 24,108 L32,108 C34,96 36,84 38,76 L38,56 Z"/>
-          <!-- Right Bicep -->
-          <path class="m-zone" id="bz-bicep_r" d="M85,44 C92,48 98,58 100,72 C102,82 100,96 96,108 L88,108 C86,96 84,84 82,76 L82,56 Z"/>
-          <!-- Left Forearm -->
-          <path class="m-zone" d="M24,110 C22,120 20,132 22,148 L30,148 C32,136 32,124 32,110 Z" style="fill:rgba(255,255,255,0.03); stroke:rgba(255,255,255,0.08); stroke-width:0.4"/>
-          <!-- Right Forearm -->
-          <path class="m-zone" d="M96,110 C98,120 100,132 98,148 L90,148 C88,136 88,124 88,110 Z" style="fill:rgba(255,255,255,0.03); stroke:rgba(255,255,255,0.08); stroke-width:0.4"/>
-          <!-- Hip -->
-          <path d="M50,120 L70,120 L74,132 L46,132 Z" style="fill:rgba(255,255,255,0.02); stroke:rgba(255,255,255,0.06); stroke-width:0.4"/>
-          <!-- Left Quad -->
-          <path class="m-zone" id="bz-thigh_l" d="M46,134 L58,134 L56,180 C54,188 50,192 46,194 C42,188 38,172 46,134 Z"/>
-          <!-- Right Quad -->
-          <path class="m-zone" id="bz-thigh_r" d="M62,134 L74,134 C82,172 78,188 74,194 C70,192 66,188 64,180 L62,134 Z"/>
-          <!-- Left Shin -->
-          <path class="m-zone" id="bz-calf_l" d="M44,198 L56,198 C58,218 56,240 54,258 L48,258 C44,240 42,218 44,198 Z" style="fill:rgba(255,255,255,0.03); stroke:rgba(255,255,255,0.08); stroke-width:0.4"/>
-          <!-- Right Shin -->
-          <path class="m-zone" id="bz-calf_r" d="M64,198 L76,198 C78,218 76,240 72,258 L66,258 C64,240 62,218 64,198 Z" style="fill:rgba(255,255,255,0.03); stroke:rgba(255,255,255,0.08); stroke-width:0.4"/>
-          <!-- Muscle detail lines -->
-          <line x1="60" y1="56" x2="60" y2="80" class="m-outline"/>
-          <path d="M48,60 Q52,66 48,72 M72,60 Q68,66 72,72" class="m-outline"/>
-        </svg>
-        
-        <!-- BACK VIEW -->
-        <svg viewBox="0 0 120 280" style="width:100%; max-width:90px; overflow:visible;">
-          <defs>
-            <linearGradient id="muscleGrad2" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="rgba(255,106,0,0.4)"/>
-              <stop offset="100%" stop-color="rgba(255,106,0,0.15)"/>
-            </linearGradient>
-          </defs>
-          <!-- Head -->
-          <ellipse cx="60" cy="18" rx="12" ry="14" style="fill:rgba(255,255,255,0.03); stroke:rgba(255,255,255,0.1); stroke-width:0.5"/>
-          <!-- Neck -->
-          <rect x="54" y="32" width="12" height="10" rx="3" style="fill:rgba(255,255,255,0.03); stroke:rgba(255,255,255,0.06); stroke-width:0.4"/>
-          <!-- Traps -->
-          <path class="m-zone" id="bz-shoulders-b" d="M35,42 C40,38 80,38 85,42 L82,54 L38,54 Z"/>
-          <!-- Back (Lats + Upper) -->
-          <path class="m-zone" id="bz-back" d="M38,56 L82,56 L84,76 C82,84 78,90 76,96 L76,118 L44,118 L44,96 C42,90 38,84 36,76 Z"/>
-          <!-- Back detail lines -->
-          <line x1="60" y1="56" x2="60" y2="116" class="m-outline"/>
-          <path d="M44,60 Q50,72 44,84 M76,60 Q70,72 76,84" class="m-outline"/>
-          <path d="M48,70 L60,66 L72,70" class="m-outline"/>
-          <path d="M48,80 L60,76 L72,80" class="m-outline"/>
-          <!-- Left Tricep -->
-          <path class="m-zone" d="M35,44 C28,48 22,58 20,72 C18,82 20,96 24,108 L32,108 C34,96 36,84 38,76 L38,56 Z"/>
-          <!-- Right Tricep -->
-          <path class="m-zone" d="M85,44 C92,48 98,58 100,72 C102,82 100,96 96,108 L88,108 C86,96 84,84 82,76 L82,56 Z"/>
-          <!-- Left Forearm -->
-          <path d="M24,110 C22,120 20,132 22,148 L30,148 C32,136 32,124 32,110 Z" style="fill:rgba(255,255,255,0.03); stroke:rgba(255,255,255,0.06); stroke-width:0.4"/>
-          <!-- Right Forearm -->
-          <path d="M96,110 C98,120 100,132 98,148 L90,148 C88,136 88,124 88,110 Z" style="fill:rgba(255,255,255,0.03); stroke:rgba(255,255,255,0.06); stroke-width:0.4"/>
-          <!-- Glutes -->
-          <path class="m-zone" id="bz-glutes" d="M44,120 L76,120 L78,140 C72,146 60,148 60,148 C60,148 48,146 42,140 Z"/>
-          <line x1="60" y1="120" x2="60" y2="146" class="m-outline"/>
-          <!-- Left Hamstring -->
-          <path class="m-zone" id="bz-legs" d="M42,150 L58,150 L56,194 C52,198 46,198 44,194 C38,176 38,162 42,150 Z"/>
-          <!-- Right Hamstring -->
-          <path class="m-zone" d="M62,150 L78,150 C82,162 82,176 76,194 C74,198 68,198 64,194 L62,150 Z"/>
-          <!-- Left Calf -->
-          <path class="m-zone" d="M44,200 L56,200 C58,212 56,230 55,258 L49,258 C46,230 42,212 44,200 Z" style="fill:rgba(255,255,255,0.03); stroke:rgba(255,255,255,0.08); stroke-width:0.4"/>
-          <!-- Right Calf -->
-          <path class="m-zone" d="M64,200 L76,200 C78,212 76,230 71,258 L65,258 C64,230 62,212 64,200 Z" style="fill:rgba(255,255,255,0.03); stroke:rgba(255,255,255,0.08); stroke-width:0.4"/>
-        </svg>
+    <div style="display:grid; grid-template-columns: 1.2fr 1fr; gap:16px; align-items:start">
+      <div style="position:relative; display:flex; justify-content:center">
+        <img src="img/anatomy.png" alt="Anatomia muscolare" style="width:100%; max-width:220px; opacity:0.85; filter:brightness(1.1)"/>
       </div>
 
-      <!-- LEGEND -->
-      <div style="display:flex; flex-direction:column; gap:16px;">
-        <div class="legend-item" onclick="window.showZone('chest', 'Petto')">
+      <div style="display:flex; flex-direction:column; gap:14px; padding-top:8px">
+        <div style="font-size:9px; color:var(--t3); font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px">Ultimo Check</div>
+
+        <div class="legend-item" onclick="window.showZone('chest', 'Petto')" style="cursor:pointer">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px">
-            <span style="font-size:10px; font-weight:800; color:var(--t1)">PETTO</span>
-            <span style="font-size:10px; font-weight:800; color:var(--t3)" id="pct-chest">0%</span>
+            <span style="font-size:11px; font-weight:800; color:var(--t1)">PETTO</span>
+            <span style="font-size:11px; font-weight:800" id="val-chest">—</span>
           </div>
-          <div class="pbb h4"><div class="pbf" id="bar-chest" style="width:0%; background:rgba(255,255,255,0.2)"></div></div>
+          <div class="pbb h4"><div class="pbf" id="bar-chest" style="width:0%; background:rgba(255,255,255,0.15); transition:all 0.6s"></div></div>
         </div>
-        <div class="legend-item" onclick="window.showZone('back', 'Dorso')">
+
+        <div class="legend-item" onclick="window.showZone('shoulders', 'Spalle')" style="cursor:pointer">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px">
-            <span style="font-size:10px; font-weight:800; color:var(--t1)">DORSO</span>
-            <span style="font-size:10px; font-weight:800; color:var(--t3)" id="pct-back">0%</span>
+            <span style="font-size:11px; font-weight:800; color:var(--t1)">SPALLE</span>
+            <span style="font-size:11px; font-weight:800" id="val-shoulders">—</span>
           </div>
-          <div class="pbb h4"><div class="pbf" id="bar-back" style="width:0%; background:rgba(255,106,0,0.4)"></div></div>
+          <div class="pbb h4"><div class="pbf" id="bar-shoulders" style="width:0%; background:rgba(255,255,255,0.15); transition:all 0.6s"></div></div>
         </div>
-        <div class="legend-item" onclick="window.showZone('legs', 'Gambe')">
+
+        <div class="legend-item" onclick="window.showZone('waist', 'Vita')" style="cursor:pointer">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px">
-            <span style="font-size:10px; font-weight:800; color:var(--t1)">GAMBE</span>
-            <span style="font-size:10px; font-weight:800; color:var(--accent)" id="pct-legs">0%</span>
+            <span style="font-size:11px; font-weight:800; color:var(--t1)">VITA</span>
+            <span style="font-size:11px; font-weight:800" id="val-waist">—</span>
           </div>
-          <div class="pbb h4"><div class="pbf" id="bar-legs" style="width:0%; background:var(--accent)"></div></div>
+          <div class="pbb h4"><div class="pbf" id="bar-waist" style="width:0%; background:rgba(255,255,255,0.15); transition:all 0.6s"></div></div>
         </div>
-        <div class="legend-item" onclick="window.showZone('shoulders', 'Spalle')">
+
+        <div class="legend-item" onclick="window.showZone('bicep_l', 'Braccia')" style="cursor:pointer">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px">
-            <span style="font-size:10px; font-weight:800; color:var(--t1)">SPALLE</span>
-            <span style="font-size:10px; font-weight:800; color:var(--t3)" id="pct-shoulders">0%</span>
+            <span style="font-size:11px; font-weight:800; color:var(--t1)">BRACCIA</span>
+            <span style="font-size:11px; font-weight:800" id="val-arms">—</span>
           </div>
-          <div class="pbb h4"><div class="pbf" id="bar-shoulders" style="width:0%; background:rgba(255,255,255,0.2)"></div></div>
+          <div class="pbb h4"><div class="pbf" id="bar-arms" style="width:0%; background:rgba(255,255,255,0.15); transition:all 0.6s"></div></div>
         </div>
-        <div class="legend-item" onclick="window.showZone('arms', 'Braccia')">
+
+        <div class="legend-item" onclick="window.showZone('thigh_l', 'Gambe')" style="cursor:pointer">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px">
-            <span style="font-size:10px; font-weight:800; color:var(--t1)">BRACCIA</span>
-            <span style="font-size:10px; font-weight:800; color:var(--t3)" id="pct-arms">0%</span>
+            <span style="font-size:11px; font-weight:800; color:var(--t1)">GAMBE</span>
+            <span style="font-size:11px; font-weight:800" id="val-legs">—</span>
           </div>
-          <div class="pbb h4"><div class="pbf" id="bar-arms" style="width:0%; background:rgba(255,255,255,0.2)"></div></div>
+          <div class="pbb h4"><div class="pbf" id="bar-legs" style="width:0%; background:rgba(255,255,255,0.15); transition:all 0.6s"></div></div>
         </div>
       </div>
     </div>

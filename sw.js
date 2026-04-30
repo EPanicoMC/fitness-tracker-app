@@ -1,4 +1,4 @@
-const CACHE = 'ft-v18';
+const CACHE = 'ft-v19';
 const FILES = [
   '/fitness-tracker-app/',
   '/fitness-tracker-app/index.html',
@@ -20,7 +20,8 @@ const FILES = [
   '/fitness-tracker-app/js/gemini.js',
   '/fitness-tracker-app/js/autocomplete.js',
   '/fitness-tracker-app/js/firebase-config.js',
-  '/fitness-tracker-app/icon.svg'
+  '/fitness-tracker-app/icon.svg',
+  '/fitness-tracker-app/img/anatomy.png'
 ];
 
 self.addEventListener('install', e => e.waitUntil(
