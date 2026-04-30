@@ -95,24 +95,76 @@ async function loadVolumeStats() {
       trendEl.textContent = '';
     }
 
-    const maxV = Math.max(...vols.map(v => v.val), 100); // minimum 100 to avoid div by zero
+    const maxV = Math.max(...vols.map(v => v.val), 100); 
     elChart.innerHTML = vols.map((v, i) => {
       const isToday = i === 6;
       const hPct = Math.max(5, (v.val / maxV) * 100);
       const lbl = new Date(v.date).toLocaleDateString('it-IT', { weekday: 'short' }).toUpperCase();
       return `
-        <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">
-          ${isToday && v.val > 0 ? `<div style="font-size:10px;font-weight:700;color:var(--t1);background:rgba(255,255,255,0.1);padding:2px 4px;border-radius:4px;margin-bottom:2px">${v.val}</div>` : ''}
-          <div style="width:100%;max-width:24px;height:100px;display:flex;align-items:flex-end">
-            <div style="width:100%;background:${isToday ? 'var(--accent)' : 'rgba(255,255,255,0.1)'};height:${hPct}%;border-radius:4px 4px 0 0;transition:all 0.3s"></div>
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:8px; z-index: 1">
+          <div style="width:100%;max-width:32px;height:100px;display:flex;align-items:flex-end; position:relative">
+            <div style="width:100%;background:${isToday ? 'var(--accent)' : 'rgba(255,255,255,0.08)'};height:${hPct}%;border-radius:100px;transition:all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)"></div>
+            ${isToday ? `<div style="position:absolute; bottom:${hPct}%; left:50%; transform:translate(-50%, -10px); background:#000; color:#fff; font-size:10px; font-weight:900; padding:4px 8px; border-radius:8px; white-space:nowrap; border:1px solid rgba(255,255,255,0.1); box-shadow: 0 4px 12px rgba(0,0,0,0.5)">${v.val}</div>` : ''}
           </div>
-          <div style="font-size:9px;color:${isToday ? 'var(--t1)' : 'var(--t3)'};font-weight:700">${lbl}</div>
+          <div style="font-size:10px;color:${isToday ? 'var(--t1)' : 'var(--t3)'};font-weight:700; letter-spacing:0.5px">${lbl}</div>
         </div>
       `;
-    }).join('');
+    }).join('') + `
+      <!-- Grid lines labels -->
+      <div style="position:absolute; right:-20px; height:100%; display:flex; flex-direction:column; justify-content:space-between; font-size:9px; color:var(--t3); padding-bottom:18px">
+        <span>${Math.round(maxV/1000)}k</span>
+        <span>${Math.round(maxV/2000)}k</span>
+        <span>0</span>
+      </div>
+    `;
+    loadMuscleStats(logs);
   } catch(e) {
     elChart.innerHTML = '';
   }
+}
+
+async function loadMuscleStats(logs) {
+  // Simple heuristic based on exercise names in the last 14 days
+  const groups = {
+    chest: { vol: 0, label: 'PETTO' },
+    back: { vol: 0, label: 'DORSO' },
+    legs: { vol: 0, label: 'GAMBE' },
+    shoulders: { vol: 0, label: 'SPALLE' },
+    arms: { vol: 0, label: 'BRACCIA' }
+  };
+
+  logs.forEach(log => {
+    if (log.workout && log.workout.exercises) {
+      log.workout.exercises.forEach(ex => {
+        const name = ex.name.toLowerCase();
+        const v = ex.sets.reduce((a, s) => a + (parseFloat(s.weight) || 0) * (parseFloat(s.reps) || 1), 0);
+        
+        if (name.includes('panca') || name.includes('chest') || name.includes('petto') || name.includes('spinta')) groups.chest.vol += v;
+        else if (name.includes('dorso') || name.includes('lat') || name.includes('trazioni') || name.includes('rematore') || name.includes('stacco')) groups.back.vol += v;
+        else if (name.includes('squat') || name.includes('leg') || name.includes('gambe') || name.includes('affondi') || name.includes('pressa')) groups.legs.vol += v;
+        else if (name.includes('spalle') || name.includes('shoulder') || name.includes('military') || name.includes('alzate')) groups.shoulders.vol += v;
+        else if (name.includes('curl') || name.includes('braccia') || name.includes('bicipiti') || name.includes('tricipiti') || name.includes('pushdown')) groups.arms.vol += v;
+      });
+    }
+  });
+
+  const maxVol = Math.max(...Object.values(groups).map(g => g.vol), 1);
+  Object.keys(groups).forEach(key => {
+    const pct = Math.round((groups[key].vol / maxVol) * 100);
+    const pctEl = document.getElementById(`pct-${key}`);
+    const barEl = document.getElementById(`bar-${key}`);
+    const svgEl = document.getElementById(`bz-${key}`);
+    
+    if (pctEl) pctEl.textContent = pct + '%';
+    if (barEl) {
+      barEl.style.width = pct + '%';
+      barEl.style.background = pct > 70 ? 'var(--accent)' : pct > 30 ? 'rgba(255,106,0,0.5)' : 'rgba(255,255,255,0.15)';
+    }
+    if (svgEl) {
+      svgEl.classList.toggle('active', pct > 50);
+      svgEl.style.fill = `rgba(255,106,0, ${pct / 200})`;
+    }
+  });
 }
 
 function renderList() {

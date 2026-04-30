@@ -19,7 +19,27 @@ async function loadDiets() {
   const el = document.getElementById('diet-list');
   el.innerHTML = '<div class="spin"></div>';
   const snap = await getDocs(collection(db, 'users', USER_ID, 'diet_plans'));
-  diets = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  diets = await Promise.all(snap.docs.map(async d => {
+    const data = d.data();
+    let updated = false;
+    ['day_on', 'day_off'].forEach(dk => {
+      if (!data[dk]) return;
+      const meals = data[dk].meals || [];
+      const sum = meals.reduce((a, m) => ({
+        kcal: a.kcal + (m.kcal||0), protein: a.protein + (m.protein||0),
+        carbs: a.carbs + (m.carbs||0), fats: a.fats + (m.fats||0)
+      }), { kcal:0, protein:0, carbs:0, fats:0 });
+      if (data[dk].kcal !== sum.kcal || data[dk].protein !== sum.protein || data[dk].carbs !== sum.carbs || data[dk].fats !== sum.fats) {
+        data[dk].kcal = sum.kcal; data[dk].protein = sum.protein;
+        data[dk].carbs = sum.carbs; data[dk].fats = sum.fats;
+        updated = true;
+      }
+    });
+    if (updated) {
+      try { await setDoc(doc(db, 'users', USER_ID, 'diet_plans', d.id), data); } catch(e){}
+    }
+    return { id: d.id, ...data };
+  }));
   diets.sort((a, b) => (b.active?1:0) - (a.active?1:0));
   renderList();
 }
