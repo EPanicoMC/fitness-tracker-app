@@ -2,7 +2,7 @@ import {
   db, USER_ID, doc, getDoc, setDoc, getDocs, collection, query, orderBy, limit
 } from './firebase-config.js';
 import {
-  getTodayString, getYesterdayString, getDayOfWeek, formatDateIT, formatDateShort, addDays, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER, cleanOldLogs, calcFitScore
+  getTodayString, getYesterdayString, getDayOfWeek, formatDateIT, formatDateShort, addDays, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER, cleanOldLogs, calcFitScore, calcSmartScore
 } from './app.js';
 import { calcMacrosFromText } from './gemini.js';
 
@@ -64,6 +64,9 @@ async function checkDayRollover() {
         auto_saved: true
       }, { merge: false });
       console.log('Auto-salvato giorno precedente:', yesterday);
+    } else if (data.daily_note) {
+      // Doc esiste ma la nota in localStorage potrebbe non essere stata sincronizzata
+      await setDoc(doc(db, 'users', USER_ID, 'daily_logs', yesterday), { daily_note: data.daily_note }, { merge: true });
     }
     localStorage.removeItem('fittracker_today_' + yesterday);
   } catch(e) {
@@ -159,7 +162,14 @@ async function init() {
   checkYesterdayLog();
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return;
+    if (document.visibilityState === 'hidden') {
+      // Pagina va in background/navigazione: forza sync immediato
+      const nf = document.getElementById('note-in');
+      if (nf) logData.daily_note = nf.value;
+      saveToLocal();
+      syncToFirebase();
+      return;
+    }
     if (getTodayString() !== TODAY) { window.location.reload(); return; }
     const cached = localStorage.getItem('fittracker_today_' + TODAY);
     if (cached) {
@@ -174,6 +184,13 @@ async function init() {
       } catch(e) {}
     }
     buildNutrition(); buildMeals(); buildWorkout(); buildStats(); buildFitScore();
+  });
+
+  window.addEventListener('pagehide', () => {
+    const nf = document.getElementById('note-in');
+    if (nf) logData.daily_note = nf.value;
+    saveToLocal();
+    syncToFirebase();
   });
 }
 
@@ -376,66 +393,72 @@ function updateNutritionTotals() {
   if (recapFat) recapFat.textContent = Math.round(tots.fats) + 'g';
 }
 
-// ── FitScore ───────────────────────────────────────────────
+// ── SmartScore ─────────────────────────────────────────────
 function buildFitScore() {
   const box = document.getElementById('fitscore-box');
   if (!box) return;
-  const dayKey  = isTrainingDay ? 'day_on' : 'day_off';
-  const plan    = activeDiet?.[dayKey] || null;
-  const tots    = calcTotals();
-  const objective = activeProgram?.objective || 'recomposizione';
-  const stepsGoal = appSettings?.steps_goal || 0;
+  const dayKey = isTrainingDay ? 'day_on' : 'day_off';
+  const plan   = activeDiet?.[dayKey] || null;
+  const tots   = calcTotals();
 
   if (!plan) {
-    box.innerHTML = `
-      <div class="fitscore-card">
-        <span class="clabel"><i class="ri-flashlight-fill" style="color:var(--orange)"></i> FitScore oggi</span>
-        <div style="font-size:13px;color:var(--t2)">Nessun piano dieta attivo. Impossibile calcolare il FitScore.</div>
-      </div>`;
-    return;
-  }
-  if (tots.kcal === 0) {
-    box.innerHTML = `
-      <div class="fitscore-card">
-        <span class="clabel"><i class="ri-flashlight-fill" style="color:var(--orange)"></i> FitScore oggi</span>
-        <div style="font-size:13px;color:var(--t2)">Completa almeno un pasto per sbloccare il FitScore!</div>
-      </div>`;
+    box.innerHTML = `<div class="fitscore-card">
+      <span class="clabel"><i class="ri-pulse-fill" style="color:var(--orange)"></i> SmartScore</span>
+      <div style="font-size:13px;color:var(--t2)">Nessun piano dieta attivo.</div>
+    </div>`;
     return;
   }
 
-  const fakeLog = {
-    workout:   { completed: !!logData.workout?.completed },
-    nutrition: { kcal: tots.kcal, protein: tots.protein },
-    steps:     logData.steps || 0
-  };
-  const fakePlan = plan ? { kcal: plan.kcal || 0, macros: { protein: plan.protein || 0 } } : null;
+  const todayKey = getDayOfWeek(TODAY);
+  const result = calcSmartScore({
+    meals: plan.meals || [],
+    mealStates,
+    workout: logData.workout,
+    workoutScheduledTime: activeProgram?.schedule?.[todayKey]?.time || null,
+    isTrainingDay,
+    steps: logData.steps || 0,
+    stepsGoal: appSettings?.steps_goal || 0,
+    planProtein: plan.protein || 0,
+    actualProtein: tots.protein,
+  });
 
-  const result = calcFitScore({ log: fakeLog, plan: fakePlan, isOn: isTrainingDay, objective, stepsGoal });
   if (!result) { box.innerHTML = ''; return; }
 
-  const { score, label, breakdown } = result;
-  const scoreCol = score >= 75 ? 'var(--green)' : score >= 50 ? 'var(--yellow)' : 'var(--orange)';
+  const { score, label, icon, breakdown } = result;
+  const col = score >= 90 ? 'var(--green)' : score >= 75 ? '#4ade80' : score >= 55 ? 'var(--yellow)' : score >= 35 ? 'var(--orange)' : 'var(--red)';
 
-  box.innerHTML = `
-    <div class="fitscore-card">
-      <span class="clabel"><i class="ri-flashlight-fill" style="color:var(--orange)"></i> FitScore oggi</span>
-      <div class="fitscore-top">
-        <div>
-          <div class="fitscore-num" style="color:${scoreCol}">${score}</div>
-          <div class="fitscore-label" style="color:${scoreCol}">${label}</div>
-        </div>
-        <div style="flex:1;margin-left:16px">
-          <div class="pbb h8"><div class="pbf" style="width:${score}%;background:${scoreCol}"></div></div>
-          <div style="font-size:10px;color:var(--t3);margin-top:4px;text-align:right">/ 100</div>
+  const R = 38, C = 2 * Math.PI * R;
+  const dash = (score / 100) * C;
+
+  box.innerHTML = `<div class="fitscore-card">
+    <span class="clabel"><i class="ri-pulse-fill" style="color:var(--orange)"></i> SmartScore — andamento attuale</span>
+    <div class="fitscore-top" style="align-items:center;gap:14px">
+      <div style="position:relative;width:88px;height:88px;flex-shrink:0">
+        <svg width="88" height="88" viewBox="0 0 88 88" style="transform:rotate(-90deg)">
+          <circle cx="44" cy="44" r="${R}" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="8"/>
+          <circle cx="44" cy="44" r="${R}" fill="none" stroke="${col}" stroke-width="8"
+            stroke-dasharray="${dash.toFixed(1)} ${C.toFixed(1)}" stroke-linecap="round" style="transition:stroke-dasharray 0.6s ease"/>
+        </svg>
+        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px">
+          <div style="font-size:22px;font-weight:900;color:${col};line-height:1">${score}</div>
+          <div style="font-size:9px;color:var(--t3);font-weight:700">/100</div>
         </div>
       </div>
-      ${breakdown.map(b => `
-        <div class="fitscore-bar-row">
-          <span class="fitscore-bar-lbl">${b.label}</span>
-          <div class="pbb h4" style="flex:1"><div class="pbf" style="width:${Math.round(b.score/b.max*100)}%;background:${b.ok?'var(--green)':'var(--orange)'}"></div></div>
-          <span class="fitscore-bar-val" style="color:${b.ok?'var(--green)':'var(--t2)'}">${b.score}/${b.max}</span>
-        </div>`).join('')}
-    </div>`;
+      <div style="flex:1">
+        <div style="font-size:17px;font-weight:800;color:${col};margin-bottom:3px">${icon} ${label}</div>
+        <div style="font-size:11px;color:var(--t3);line-height:1.4">Rispetto a quello che dovevi fare fino ad ora</div>
+      </div>
+    </div>
+    <div style="margin-top:12px;display:flex;flex-direction:column;gap:7px">
+      ${breakdown.map(b => `<div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+          <span style="font-size:11px;font-weight:700;color:var(--t1)">${b.label}</span>
+          <span style="font-size:10px;color:var(--t3)">${b.note}</span>
+        </div>
+        <div class="pbb h4"><div class="pbf" style="width:${Math.round(b.score/b.max*100)}%;background:${b.ok ? 'var(--green)' : b.score > 0 ? 'var(--orange)' : 'rgba(255,255,255,0.1)'}"></div></div>
+      </div>`).join('')}
+    </div>
+  </div>`;
 }
 
 // ── Macro compare helper ───────────────────────────────────
@@ -724,6 +747,8 @@ function buildStats() {
   const nf = document.getElementById('note-in');
   if(nf) {
     nf.value = logData.daily_note || '';
+    // input aggiorna logData in real-time senza aspettare blur (fix iOS nav)
+    nf.addEventListener('input', () => { logData.daily_note = nf.value; });
     nf.addEventListener('blur', () => {
       logData.daily_note = nf.value;
       saveToLocal();

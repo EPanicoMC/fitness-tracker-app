@@ -77,17 +77,51 @@ function renderList() {
 }
 
 function renderDietPreview(d) {
-  const renderMeals = meals => (meals||[]).map(m => `
-    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">
-      <span>${m.label||m.type} ${m.time?'<span style="color:var(--t3)">'+m.time+'</span>':''}</span>
-      <span style="color:var(--green);font-weight:700">${m.kcal} kcal</span>
-    </div>`).join('');
+  const renderMeals = (meals, dayKey) => (meals||[]).map((m, mi) => {
+    const detId = `dm-${d.id}-${dayKey}-${mi}`;
+    const hasDetails = m.items || m.variants?.length || m.protein || m.carbs || m.fats;
+    return `
+      <div style="border-bottom:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;font-size:13px${hasDetails ? ';cursor:pointer' : ''}"
+          ${hasDetails ? `onclick="toggleMealDetail('${detId}')"` : ''}>
+          <span style="flex:1">${m.label||m.type} ${m.time ? `<span style="color:var(--t3)">${m.time}</span>` : ''}</span>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="color:var(--green);font-weight:700">${m.kcal} kcal</span>
+            ${hasDetails ? `<span id="chev-${detId}" style="color:var(--t3);font-size:11px;transition:transform 0.2s;display:inline-block">▼</span>` : ''}
+          </div>
+        </div>
+        ${hasDetails ? `<div id="${detId}" style="display:none;padding:0 0 12px;font-size:12px;color:var(--t2)">
+          ${m.items ? `<div style="margin-bottom:8px;line-height:1.6;color:var(--t2)">${m.items}</div>` : ''}
+          ${(m.protein || m.carbs || m.fats) ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+            <span style="background:rgba(255,255,255,0.06);padding:4px 10px;border-radius:8px">P: <b style="color:var(--t1)">${m.protein||0}g</b></span>
+            <span style="background:rgba(255,255,255,0.06);padding:4px 10px;border-radius:8px">C: <b style="color:var(--t1)">${m.carbs||0}g</b></span>
+            <span style="background:rgba(255,255,255,0.06);padding:4px 10px;border-radius:8px">G: <b style="color:var(--t1)">${m.fats||0}g</b></span>
+          </div>` : ''}
+          ${m.variants?.length ? `<div style="font-size:11px;font-weight:800;color:var(--t3);letter-spacing:0.5px;margin-bottom:4px">VARIANTI</div>
+            ${m.variants.map(v => {
+              const vl = typeof v === 'string' ? v : v.label;
+              const vd = typeof v === 'string' ? '' : v.detail;
+              return `<div style="padding:3px 0;font-size:12px">• <span style="color:var(--t1)">${vl}</span>${vd ? `<span style="color:var(--t3)"> — ${vd}</span>` : ''}</div>`;
+            }).join('')}` : ''}
+        </div>` : ''}
+      </div>`;
+  }).join('');
+
   return `
     <div style="font-size:12px;font-weight:800;color:var(--accent);margin-bottom:6px">💪 Giorno ON</div>
-    ${renderMeals(d.day_on?.meals)}
+    ${renderMeals(d.day_on?.meals, 'on')}
     <div style="font-size:12px;font-weight:800;color:var(--blue);margin:12px 0 6px">😴 Giorno OFF</div>
-    ${renderMeals(d.day_off?.meals)}`;
+    ${renderMeals(d.day_off?.meals, 'off')}`;
 }
+
+window.toggleMealDetail = function(id) {
+  const el = document.getElementById(id);
+  const chev = document.getElementById('chev-' + id);
+  if (!el) return;
+  const open = el.style.display !== 'none';
+  el.style.display = open ? 'none' : 'block';
+  if (chev) chev.style.transform = open ? '' : 'rotate(180deg)';
+};
 
 window.toggleDietDetail = function(id) {
   const el = document.getElementById(`ddet-${id}`);

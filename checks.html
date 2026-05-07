@@ -28,19 +28,12 @@
     <button class="btn btn-ghost btn-sm" style="border-radius:100px;padding:8px 20px; color:var(--t3)">ANNO</button>
   </div>
 
-  <!-- VOLUME ALLENAMENTO -->
+  <!-- TREND PESO CORPOREO -->
   <div class="card card-dark" style="margin-bottom:24px;padding:24px; border-radius:24px; background:rgba(255,255,255,0.02)">
-    <div style="font-size:11px;font-weight:800;letter-spacing:1px;color:var(--t3);text-transform:uppercase;margin-bottom:8px">Volume Allenamento</div>
-    <div style="font-size:32px;font-weight:900;color:var(--t1); margin-bottom:2px"><span id="vol-total">0</span> <span style="font-size:16px;color:var(--t3);font-weight:500">kg</span></div>
-    <div style="font-size:13px;color:var(--accent);font-weight:700;margin-bottom:24px" id="vol-trend">+0% vs settimana scorsa</div>
-    
-    <!-- BAR CHART -->
-    <div id="vol-chart" style="display:flex;justify-content:space-between;align-items:flex-end;height:140px;gap:10px;padding-top:20px; position:relative">
-      <!-- Grid lines -->
-      <div style="position:absolute; width:100%; height:1px; background:rgba(255,255,255,0.05); top:0"></div>
-      <div style="position:absolute; width:100%; height:1px; background:rgba(255,255,255,0.05); top:33%"></div>
-      <div style="position:absolute; width:100%; height:1px; background:rgba(255,255,255,0.05); top:66%"></div>
-      <div style="position:absolute; width:100%; height:1px; background:rgba(255,255,255,0.05); bottom:0"></div>
+    <div style="font-size:11px;font-weight:800;letter-spacing:1px;color:var(--t3);text-transform:uppercase;margin-bottom:8px">Trend Peso Corporeo</div>
+    <div style="font-size:32px;font-weight:900;color:var(--t1); margin-bottom:2px"><span id="vol-total">—</span> <span style="font-size:16px;color:var(--t3);font-weight:500">kg</span></div>
+    <div style="font-size:13px;font-weight:700;margin-bottom:24px" id="vol-trend"></div>
+    <div id="vol-chart" style="width:100%;height:120px;position:relative">
       <div class="spin"></div>
     </div>
   </div>
@@ -50,30 +43,64 @@
     <div style="font-size:11px;color:var(--t3);font-weight:800;letter-spacing:1px;text-transform:uppercase;margin-bottom:24px">Gruppi Muscolari</div>
     
     <div style="display:grid; grid-template-columns: 1.2fr 1fr; gap:16px; align-items:start">
-      <div style="position:relative; display:flex; justify-content:center">
-        <img src="img/anatomy.png" alt="Anatomia muscolare" style="width:100%; max-width:220px; opacity:0.85; filter:brightness(1.1)"/>
-        <!-- SVG overlay zones -->
-        <svg viewBox="0 0 1024 1024" style="position:absolute; top:0; left:50%; transform:translateX(-50%); width:100%; max-width:220px; height:100%;" preserveAspectRatio="xMidYMid meet">
+      <div style="display:flex;justify-content:center;align-items:flex-start">
+        <!-- Silhouette anatomica SVG (vista frontale) -->
+        <svg viewBox="0 0 120 280" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:130px;overflow:visible">
           <style>
-            .ov-zone { fill: transparent; stroke: transparent; stroke-width: 2; cursor: pointer; transition: all 0.4s; }
-            .ov-zone:hover, .ov-zone.active { fill: rgba(255,106,0,0.25); stroke: rgba(255,106,0,0.6); filter: drop-shadow(0 0 12px rgba(255,106,0,0.5)); }
+            .body-base { fill: rgba(255,255,255,0.07); stroke: rgba(255,255,255,0.18); stroke-width:1; }
+            .ov-zone { fill: transparent; stroke: transparent; cursor: pointer; transition: all 0.3s; }
+            .ov-zone:hover { fill: rgba(255,106,0,0.2); stroke: rgba(255,106,0,0.5); }
+            .ov-zone.active { fill: rgba(255,106,0,0.35); stroke: rgba(255,106,0,0.8); filter: drop-shadow(0 0 6px rgba(255,106,0,0.6)); }
           </style>
-          <!-- FRONT (left figure) - Chest -->
-          <path class="ov-zone" id="ov-chest" onclick="window.showZone('chest','Petto')" d="M160,260 L350,260 C370,260 380,280 380,300 L380,400 C370,420 340,440 260,440 C180,440 150,420 140,400 L140,300 C140,280 150,260 160,260 Z"/>
-          <!-- FRONT - Shoulders -->
-          <path class="ov-zone" id="ov-shoulders" onclick="window.showZone('shoulders','Spalle')" d="M120,220 L170,200 L250,190 L340,200 L400,220 L380,260 L140,260 Z"/>
-          <!-- FRONT - Abs/Core -->
-          <path class="ov-zone" id="ov-waist" onclick="window.showZone('waist','Vita')" d="M175,445 L345,445 L335,580 L185,580 Z"/>
-          <!-- FRONT - Left Arm -->
-          <path class="ov-zone" id="ov-bicep_l" onclick="window.showZone('bicep_l','Braccia')" d="M80,240 L140,240 L140,450 L115,500 L80,500 C65,430 60,340 80,240 Z"/>
-          <!-- FRONT - Right Arm -->
-          <path class="ov-zone" id="ov-bicep_r" onclick="window.showZone('bicep_l','Braccia')" d="M380,240 L440,240 C460,340 455,430 440,500 L405,500 L380,450 L380,240 Z"/>
-          <!-- FRONT - Left Leg -->
-          <path class="ov-zone" id="ov-thigh_l" onclick="window.showZone('thigh_l','Gambe')" d="M170,600 L260,600 L250,800 C240,820 220,820 200,820 C180,800 165,750 170,600 Z"/>
-          <!-- FRONT - Right Leg -->
-          <path class="ov-zone" id="ov-thigh_r" onclick="window.showZone('thigh_l','Gambe')" d="M265,600 L355,600 C360,750 345,800 325,820 C305,820 285,820 275,800 L265,600 Z"/>
-          <!-- BACK (right figure) - Back/Lats -->
-          <path class="ov-zone" id="ov-back" onclick="window.showZone('chest','Petto')" d="M600,260 L880,260 L890,400 C880,440 840,460 740,460 C640,460 600,440 590,400 L600,260 Z"/>
+          <!-- Testa -->
+          <ellipse class="body-base" cx="60" cy="20" rx="16" ry="18"/>
+          <!-- Collo -->
+          <rect class="body-base" x="53" y="36" width="14" height="10" rx="3"/>
+          <!-- Spalle + torso superiore -->
+          <path class="body-base" d="M22,52 Q18,58 17,70 L17,130 Q20,140 38,143 L82,143 Q100,140 103,130 L103,70 Q102,58 98,52 Q82,46 60,45 Q38,46 22,52 Z"/>
+          <!-- Vita/addome -->
+          <path class="body-base" d="M38,143 L40,175 L80,175 L82,143 Z"/>
+          <!-- Pelvi -->
+          <path class="body-base" d="M32,175 Q28,188 35,195 L85,195 Q92,188 88,175 Z"/>
+          <!-- Braccio SX -->
+          <path class="body-base" d="M17,68 Q10,74 7,88 L5,158 Q7,168 16,170 L26,170 Q30,162 29,150 L28,90 Q24,76 19,70 Z"/>
+          <!-- Avambraccio SX -->
+          <path class="body-base" d="M7,158 L5,205 Q7,214 15,216 L24,216 Q29,208 29,200 L28,168 Z"/>
+          <!-- Braccio DX -->
+          <path class="body-base" d="M103,68 Q110,74 113,88 L115,158 Q113,168 104,170 L94,170 Q90,162 91,150 L92,90 Q96,76 101,70 Z"/>
+          <!-- Avambraccio DX -->
+          <path class="body-base" d="M113,158 L115,205 Q113,214 105,216 L96,216 Q91,208 91,200 L92,168 Z"/>
+          <!-- Coscia SX -->
+          <path class="body-base" d="M36,195 L33,255 Q34,266 44,268 L58,268 L59,195 Z"/>
+          <!-- Coscia DX -->
+          <path class="body-base" d="M61,195 L62,268 L76,268 Q86,266 87,255 L84,195 Z"/>
+          <!-- Polpaccio SX -->
+          <path class="body-base" d="M34,256 L32,275 Q34,280 44,281 L58,281 L58,266 Z" opacity="0.6"/>
+          <!-- Polpaccio DX -->
+          <path class="body-base" d="M62,266 L62,281 L76,281 Q86,280 88,275 L86,256 Z" opacity="0.6"/>
+
+          <!-- OVERLAY ZONE (cliccabili, trasparenti di default) -->
+          <!-- Spalle -->
+          <path class="ov-zone" id="ov-shoulders" onclick="window.showZone('shoulders','Spalle')"
+            d="M20,48 Q18,54 17,68 L103,68 Q102,54 100,48 Q82,42 60,42 Q38,42 20,48 Z"/>
+          <!-- Petto -->
+          <path class="ov-zone" id="ov-chest" onclick="window.showZone('chest','Petto')"
+            d="M18,70 L18,140 Q38,146 60,146 Q82,146 102,140 L102,70 Z"/>
+          <!-- Vita -->
+          <path class="ov-zone" id="ov-waist" onclick="window.showZone('waist','Vita')"
+            d="M38,142 L40,178 L80,178 L82,142 Q62,148 38,142 Z"/>
+          <!-- Braccia SX -->
+          <path class="ov-zone" id="ov-bicep_l" onclick="window.showZone('bicep_l','Braccia')"
+            d="M5,65 Q2,75 2,90 L3,218 Q8,220 18,218 L28,218 Q31,208 30,196 L30,88 Q25,70 15,65 Z"/>
+          <!-- Braccia DX -->
+          <path class="ov-zone" id="ov-bicep_r" onclick="window.showZone('bicep_r','Braccia')"
+            d="M115,65 Q118,75 118,90 L117,218 Q112,220 102,218 L90,218 Q89,208 90,196 L90,88 Q95,70 105,65 Z"/>
+          <!-- Gambe SX -->
+          <path class="ov-zone" id="ov-thigh_l" onclick="window.showZone('thigh_l','Gambe')"
+            d="M33,193 L30,282 Q33,284 44,285 L59,285 L59,193 Z"/>
+          <!-- Gambe DX -->
+          <path class="ov-zone" id="ov-thigh_r" onclick="window.showZone('thigh_r','Gambe')"
+            d="M61,193 L61,285 L76,285 Q87,284 90,282 L87,193 Z"/>
         </svg>
       </div>
 

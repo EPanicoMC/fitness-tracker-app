@@ -143,6 +143,98 @@ export function calcFitScore({ log, plan, isOn, objective = 'recomposizione', st
   return { score, label, breakdown };
 }
 
+/**
+ * calcSmartScore — score contestuale all'ora del giorno (0-100)
+ * Risponde a: "sto andando bene rispetto a quello che dovevo fare FINO A ORA?"
+ */
+export function calcSmartScore({
+  meals = [],
+  mealStates = [],
+  workout = null,
+  workoutScheduledTime = null,
+  isTrainingDay = false,
+  steps = 0,
+  stepsGoal = 0,
+  planProtein = 0,
+  actualProtein = 0,
+}) {
+  const now = new Date();
+  const nowStr = now.toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit' });
+  const [nowH, nowM] = nowStr.split(':').map(Number);
+  const nowMin = nowH * 60 + (isNaN(nowM) ? 0 : nowM);
+
+  const toMin = t => { if (!t || !t.includes(':')) return null; const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+
+  const breakdown = [];
+  let total = 0, maxTotal = 0;
+
+  // 1. PASTI (40pt): quanti dei pasti "attesi" entro ora sono stati mangiati
+  const mealsT = meals.map((m, i) => ({
+    ...m,
+    timeMin: toMin(m.time) ?? (420 + Math.round((900 / Math.max(meals.length - 1, 1)) * i)),
+    eaten: mealStates[i]?.eaten || false
+  }));
+  const expected = mealsT.filter(m => m.timeMin <= nowMin);
+  const eatenExp = expected.filter(m => m.eaten).length;
+  const mealPt = expected.length === 0 ? 40 : Math.round((eatenExp / expected.length) * 40);
+  const mealNote = expected.length === 0 ? 'In anticipo' : `${eatenExp}/${expected.length} pasti previsti`;
+  breakdown.push({ label: 'Pasti', score: mealPt, max: 40, note: mealNote, ok: mealPt >= 32 });
+  total += mealPt; maxTotal += 40;
+
+  // 2. ALLENAMENTO (35pt): se non ancora l'ora → pieno punteggio, non penalizza
+  const wDone = !!workout?.completed;
+  let wPt, wNote;
+  if (!isTrainingDay) {
+    wPt = 35; wNote = 'Riposo programmato';
+  } else if (wDone) {
+    wPt = 35; wNote = 'Completato';
+  } else {
+    const schMin = toMin(workoutScheduledTime);
+    if (schMin !== null && nowMin < schMin) {
+      wPt = 35; wNote = `Programmato alle ${workoutScheduledTime}`;
+    } else if (nowMin < 22 * 60) {
+      wPt = 15; wNote = 'Da completare oggi';
+    } else {
+      wPt = 0; wNote = 'Saltato';
+    }
+  }
+  breakdown.push({ label: 'Allenamento', score: wPt, max: 35, note: wNote, ok: wPt >= 30 });
+  total += wPt; maxTotal += 35;
+
+  // 3. PASSI (15pt): proporzionale all'ora (fascia 7:00-23:00)
+  if (stepsGoal > 0) {
+    const actStart = 7 * 60, actEnd = 23 * 60;
+    const elapsed = Math.max(0, Math.min(nowMin, actEnd) - actStart);
+    const ratioT = elapsed / (actEnd - actStart);
+    const expSteps = Math.round(stepsGoal * ratioT);
+    const sPt = expSteps <= 0 ? 15 : Math.round(Math.min(1, steps / expSteps) * 15);
+    const sNote = expSteps <= 0 ? '—' : `${steps.toLocaleString('it-IT')} / ~${expSteps.toLocaleString('it-IT')} attesi`;
+    breakdown.push({ label: 'Passi', score: sPt, max: 15, note: sNote, ok: sPt >= 10 });
+    total += sPt; maxTotal += 15;
+  }
+
+  // 4. PROTEINE (10pt): proporzionale ai pasti attesi vs totali
+  if (planProtein > 0 && meals.length > 0) {
+    const mRatio = expected.length > 0 ? expected.length / meals.length : 1;
+    const expProt = planProtein * mRatio;
+    const pPt = Math.min(10, Math.round(Math.min(1.2, actualProtein / Math.max(expProt, 1)) * 10));
+    breakdown.push({ label: 'Proteine', score: pPt, max: 10, note: `${Math.round(actualProtein)}g / ~${Math.round(expProt)}g attesi`, ok: pPt >= 7 });
+    total += pPt; maxTotal += 10;
+  }
+
+  if (maxTotal === 0) return null;
+  const score = Math.round((total / maxTotal) * 100);
+
+  let label, icon;
+  if (score >= 90)      { label = 'In anticipo';          icon = '🚀'; }
+  else if (score >= 75) { label = 'In pari';              icon = '✅'; }
+  else if (score >= 55) { label = 'Leggermente indietro'; icon = '⚡'; }
+  else if (score >= 35) { label = 'Attenzione';           icon = '⚠️'; }
+  else                  { label = 'In ritardo';            icon = '🔴'; }
+
+  return { score, label, icon, breakdown };
+}
+
 export async function cleanOldLogs(db, USER_ID, monthsToKeep=12) {
   try {
     const { collection, getDocs, deleteDoc, doc } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');

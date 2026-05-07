@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Upload Foto Check-in</title>
+<style>
+  body { font-family: -apple-system, sans-serif; background:#07070f; color:#fff; padding:20px; max-width:600px; margin:0 auto; }
+  h2 { color:#ff6a00; margin-bottom:20px; }
+  select, input[type=file] { width:100%; padding:12px; background:#1a1a2e; border:1px solid rgba(255,255,255,0.15); border-radius:12px; color:#fff; font-size:15px; margin-bottom:16px; box-sizing:border-box; }
+  button { width:100%; padding:14px; background:#ff6a00; color:#fff; border:none; border-radius:12px; font-size:16px; font-weight:700; cursor:pointer; }
+  button:disabled { opacity:0.4; cursor:not-allowed; }
+  #log { margin-top:20px; padding:14px; background:#1a1a2e; border-radius:12px; font-size:13px; line-height:1.7; white-space:pre-wrap; min-height:60px; }
+  .preview { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+  .preview img { width:100px; height:100px; object-fit:cover; border-radius:10px; }
+  label { font-size:12px; color:rgba(255,255,255,0.5); font-weight:700; letter-spacing:1px; text-transform:uppercase; display:block; margin-bottom:6px; }
+  .ok { color:#4ade80; }
+  .err { color:#f87171; }
+</style>
+</head>
+<body>
+<h2>📸 Upload Foto Check-in</h2>
+
+<label>Seleziona Check-in</label>
+<select id="check-select"><option value="">— Caricamento check... —</option></select>
+
+<label>Seleziona le 3 foto (frontale, laterale, spalle)</label>
+<input type="file" id="photos" multiple accept="image/*">
+<div class="preview" id="preview"></div>
+
+<button id="upload-btn" onclick="doUpload()" disabled>🚀 Carica Foto</button>
+<div id="log">Caricamento lista check...</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { getFirestore, collection, getDocs, doc, setDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyC7bm-wJAScIaQfelZkGP4C7kw_FKI4Gv8",
+  authDomain: "fitness-tracker-app-b6792.firebaseapp.com",
+  projectId: "fitness-tracker-app-b6792",
+  storageBucket: "fitness-tracker-app-b6792.firebasestorage.app",
+  messagingSenderId: "458513477303",
+  appId: "1:458513477303:web:11c284ec5505e12a846732"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const storage = getStorage(app);
+const USER_ID = "user_default";
+
+const log = document.getElementById('log');
+const sel = document.getElementById('check-select');
+const btn = document.getElementById('upload-btn');
+const photosInput = document.getElementById('photos');
+const preview = document.getElementById('preview');
+
+function logMsg(msg, cls='') {
+  log.innerHTML += `<span class="${cls}">${msg}</span>\n`;
+}
+
+// Carica lista check dal DB
+async function loadChecks() {
+  try {
+    const snap = await getDocs(query(collection(db, 'users', USER_ID, 'checks'), orderBy('date', 'desc')));
+    sel.innerHTML = '<option value="">— Scegli il check-in —</option>';
+    snap.docs.forEach(d => {
+      const data = d.data();
+      const opt = document.createElement('option');
+      opt.value = d.id;
+      opt.textContent = `${data.date} — ${data.weight || '?'} kg — ${data.photos?.length || 0} foto esistenti`;
+      sel.appendChild(opt);
+    });
+    log.textContent = `✅ ${snap.size} check trovati. Seleziona quello giusto e carica le foto.`;
+  } catch(e) {
+    log.textContent = `❌ Errore caricamento check: ${e.message}`;
+  }
+}
+
+sel.addEventListener('change', () => { btn.disabled = !sel.value; });
+
+photosInput.addEventListener('change', function() {
+  preview.innerHTML = '';
+  Array.from(this.files).forEach(f => {
+    const img = document.createElement('img');
+    img.src = URL.createObjectURL(f);
+    preview.appendChild(img);
+  });
+});
+
+window.doUpload = async function() {
+  const checkId = sel.value;
+  if (!checkId) { log.textContent = '❌ Seleziona un check'; return; }
+  const files = photosInput.files;
+  if (!files.length) { log.textContent = '❌ Seleziona almeno una foto'; return; }
+
+  btn.disabled = true;
+  log.textContent = '';
+  logMsg(`📤 Upload di ${files.length} foto sul check: ${checkId}\n`);
+
+  const newUrls = [];
+  const date = checkId.replace('check_', '').replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
+
+  for (const file of files) {
+    try {
+      logMsg(`  ⏳ Caricamento ${file.name}...`);
+      const storePath = `users/${USER_ID}/checks/${date}_${Date.now()}_${file.name}`;
+      const storRef = ref(storage, storePath);
+      await uploadBytes(storRef, file);
+      const url = await getDownloadURL(storRef);
+      newUrls.push(url);
+      logMsg(`  ✅ ${file.name} → OK`, 'ok');
+    } catch(e) {
+      logMsg(`  ❌ ${file.name} → ERRORE: ${e.message}`, 'err');
+    }
+  }
+
+  if (newUrls.length) {
+    try {
+      // Legge le foto esistenti e aggiunge le nuove
+      const { getDoc } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js");
+      const snap = await getDoc(doc(db, 'users', USER_ID, 'checks', checkId));
+      const existing = snap.exists() ? (snap.data().photos || []) : [];
+      const allPhotos = [...existing, ...newUrls];
+
+      await setDoc(doc(db, 'users', USER_ID, 'checks', checkId), { photos: allPhotos }, { merge: true });
+      logMsg(`\n✅ Firestore aggiornato! Totale foto: ${allPhotos.length}`, 'ok');
+      logMsg(`\n🔗 URL caricate:`, 'ok');
+      newUrls.forEach(u => logMsg(`  ${u}`));
+    } catch(e) {
+      logMsg(`\n❌ Errore aggiornamento Firestore: ${e.message}`, 'err');
+    }
+  } else {
+    logMsg('\n❌ Nessuna foto caricata con successo', 'err');
+  }
+
+  btn.disabled = false;
+};
+
+loadChecks();
+</script>
+</body>
+</html>

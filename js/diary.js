@@ -362,10 +362,10 @@ function buildWeekView() {
   const objective = programData?.objective || 'recomposizione';
   const stepsGoal = settingsData?.steps_goal || 0;
 
-  // Aggregate stats
+  // Aggregate stats — solo giorni con dati effettivi influenzano le medie
   let totalKcal = 0, totalProtein = 0, totalSteps = 0;
   let trainingDaysCount = 0, trainingDone = 0;
-  let kcalDays = 0, proteinDays = 0;
+  let kcalDays = 0, proteinDays = 0, stepsDays = 0;
   const kcalWarnings = [], proteinWarnings = [];
 
   const weekSep = ['', ''];
@@ -400,7 +400,7 @@ function buildWeekView() {
     const protein = log?.nutrition?.totals?.protein || 0;
     if (!isFut && kcal > 0)    { totalKcal    += kcal;    kcalDays++; }
     if (!isFut && protein > 0) { totalProtein += protein; proteinDays++; }
-    if (!isFut && log?.steps)   totalSteps    += log.steps;
+    if (!isFut && log?.steps)  { totalSteps   += log.steps; stepsDays++; }
 
     const dayLabel = new Date(dateStr + 'T12:00:00')
       .toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric' });
@@ -441,9 +441,9 @@ function buildWeekView() {
   if (planPro > 0 && avgProtein > 0 && avgProtein < planPro * 0.85) {
     recs.push(`🥩 Proteine medie (${avgProtein}g) sotto l'obiettivo (${planPro}g) — priorità alta!`);
   }
-  if (stepsGoal > 0 && kcalDays > 0) {
-    const avgSteps = Math.round(totalSteps / kcalDays);
-    if (avgSteps < stepsGoal * 0.7) recs.push(`👟 Media passi bassa (${avgSteps.toLocaleString('it-IT')} / ${stepsGoal.toLocaleString('it-IT')} obiettivo) — aggiungi una camminata!`);
+  if (stepsGoal > 0 && stepsDays > 0) {
+    const avgSteps = Math.round(totalSteps / stepsDays);
+    if (avgSteps < stepsGoal * 0.7) recs.push(`👟 Media passi bassa (${avgSteps.toLocaleString('it-IT')} / ${stepsGoal.toLocaleString('it-IT')} obiettivo, su ${stepsDays} giorni con dati) — aggiungi una camminata!`);
   }
 
     const adherence = trainingDaysCount > 0 ? Math.round((trainingDone / trainingDaysCount) * 100) : null;
@@ -463,8 +463,8 @@ function buildWeekView() {
 
     const pills = [];
     if (adherence !== null) pills.push(`<div style="background:rgba(255,255,255,0.03); border-radius:12px; padding:12px; flex:1; text-align:center"><div style="font-size:11px;color:var(--t3);margin-bottom:4px;text-transform:uppercase;font-weight:700">Aderenza</div><div style="font-size:22px;font-weight:900;color:${statusColor}">${adherence}%</div></div>`);
-    if (avgKcal > 0) pills.push(`<div style="background:rgba(255,255,255,0.03); border-radius:12px; padding:12px; flex:1; text-align:center"><div style="font-size:11px;color:var(--t3);margin-bottom:4px;text-transform:uppercase;font-weight:700">Kcal Medie</div><div style="font-size:20px;font-weight:900;color:var(--t1)">${avgKcal}</div></div>`);
-    if (avgProtein > 0) pills.push(`<div style="background:rgba(255,255,255,0.03); border-radius:12px; padding:12px; flex:1; text-align:center"><div style="font-size:11px;color:var(--t3);margin-bottom:4px;text-transform:uppercase;font-weight:700">Pro Medie</div><div style="font-size:20px;font-weight:900;color:var(--blue)">${avgProtein}g</div></div>`);
+    if (avgKcal > 0) pills.push(`<div style="background:rgba(255,255,255,0.03); border-radius:12px; padding:12px; flex:1; text-align:center"><div style="font-size:11px;color:var(--t3);margin-bottom:4px;text-transform:uppercase;font-weight:700">Kcal Medie</div><div style="font-size:20px;font-weight:900;color:var(--t1)">${avgKcal}</div><div style="font-size:9px;color:var(--t3);margin-top:2px">${kcalDays} gg</div></div>`);
+    if (avgProtein > 0) pills.push(`<div style="background:rgba(255,255,255,0.03); border-radius:12px; padding:12px; flex:1; text-align:center"><div style="font-size:11px;color:var(--t3);margin-bottom:4px;text-transform:uppercase;font-weight:700">Pro Medie</div><div style="font-size:20px;font-weight:900;color:var(--blue)">${avgProtein}g</div><div style="font-size:9px;color:var(--t3);margin-top:2px">${proteinDays} gg</div></div>`);
 
     const recPills = recs.map(r => `<div style="background:rgba(255,255,255,0.05); border-left:3px solid var(--accent); border-radius:8px; padding:10px 12px; font-size:13px; font-weight:500; color:var(--t1); margin-top:8px">${r.replace(/^([💡💪🔥📉🥩👟]\s*)/, '')}</div>`);
 

@@ -3,7 +3,7 @@ import {
 } from './firebase-config.js';
 import { showToast, showModal, formatDateIT } from './app.js';
 import {
-  ref, uploadBytes, getDownloadURL
+  ref, uploadBytes, getDownloadURL, deleteObject
 } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js';
 
 let checks = [];
@@ -32,85 +32,78 @@ async function loadChecks() {
   checks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
   renderList();
-  try { await loadVolumeStats(); } catch(e) { console.warn('loadVolumeStats error:', e); }
+  try { renderWeightTrend(); } catch(e) { console.warn('renderWeightTrend error:', e); }
 }
 
-async function loadVolumeStats() {
+function renderWeightTrend() {
   const elChart = document.getElementById('vol-chart');
+  const elTotal = document.getElementById('vol-total');
+  const elTrend = document.getElementById('vol-trend');
   if (!elChart) return;
-  try {
-    const snap = await getDocs(query(collection(db, 'users', USER_ID, 'daily_logs'), orderBy('date', 'desc'), limit(14)));
-    const logs = snap.docs.map(d => d.data());
-    
-    // Calculate volumes per day
-    const vols = [];
-    let totThisWeek = 0;
-    let totLastWeek = 0;
-    
-    const todayObj = new Date();
-    // 7 days ago
-    for(let i=6; i>=0; i--) {
-      const d = new Date(todayObj);
-      d.setDate(d.getDate() - i);
-      const ds = d.toISOString().split('T')[0];
-      const log = logs.find(l => l.date === ds);
-      let v = 0;
-      if (log && log.workout && log.workout.exercises) {
-        v = log.workout.exercises.reduce((a, ex) => a + ex.sets.reduce((b, s) => b + (parseFloat(s.weight) || 0) * (parseFloat(s.reps) || 1), 0), 0);
-      }
-      vols.push({ date: ds, val: v });
-      totThisWeek += v;
-    }
 
-    // Last week total
-    for(let i=13; i>=7; i--) {
-      const d = new Date(todayObj);
-      d.setDate(d.getDate() - i);
-      const ds = d.toISOString().split('T')[0];
-      const log = logs.find(l => l.date === ds);
-      let v = 0;
-      if (log && log.workout && log.workout.exercises) {
-        v = log.workout.exercises.reduce((a, ex) => a + ex.sets.reduce((b, s) => b + (parseFloat(s.weight) || 0) * (parseFloat(s.reps) || 1), 0), 0);
-      }
-      totLastWeek += v;
-    }
+  const pts = checks.filter(c => c.weight != null).slice(0, 8).reverse();
 
-    document.getElementById('vol-total').textContent = totThisWeek.toLocaleString('it-IT');
-    const trendEl = document.getElementById('vol-trend');
-    if (totLastWeek > 0) {
-      const diff = Math.round(((totThisWeek - totLastWeek) / totLastWeek) * 100);
-      trendEl.textContent = `${diff >= 0 ? '+' : ''}${diff}% vs settimana scorsa`;
-      trendEl.style.color = diff >= 0 ? 'var(--green)' : 'var(--red)';
-    } else {
-      trendEl.textContent = '';
-    }
-
-    const maxV = Math.max(...vols.map(v => v.val), 100); 
-    elChart.innerHTML = vols.map((v, i) => {
-      const isToday = i === 6;
-      const hPct = Math.max(5, (v.val / maxV) * 100);
-      const lbl = new Date(v.date).toLocaleDateString('it-IT', { weekday: 'short' }).toUpperCase();
-      return `
-        <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:8px; z-index: 1">
-          <div style="width:100%;max-width:32px;height:100px;display:flex;align-items:flex-end; position:relative">
-            <div style="width:100%;background:${isToday ? 'var(--accent)' : 'rgba(255,255,255,0.08)'};height:${hPct}%;border-radius:100px;transition:all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)"></div>
-            ${isToday ? `<div style="position:absolute; bottom:${hPct}%; left:50%; transform:translate(-50%, -10px); background:#000; color:#fff; font-size:10px; font-weight:900; padding:4px 8px; border-radius:8px; white-space:nowrap; border:1px solid rgba(255,255,255,0.1); box-shadow: 0 4px 12px rgba(0,0,0,0.5)">${v.val}</div>` : ''}
-          </div>
-          <div style="font-size:10px;color:${isToday ? 'var(--t1)' : 'var(--t3)'};font-weight:700; letter-spacing:0.5px">${lbl}</div>
-        </div>
-      `;
-    }).join('') + `
-      <!-- Grid lines labels -->
-      <div style="position:absolute; right:-20px; height:100%; display:flex; flex-direction:column; justify-content:space-between; font-size:9px; color:var(--t3); padding-bottom:18px">
-        <span>${Math.round(maxV/1000)}k</span>
-        <span>${Math.round(maxV/2000)}k</span>
-        <span>0</span>
-      </div>
-    `;
+  if (pts.length === 0) {
+    elChart.innerHTML = '<div style="font-size:13px;color:var(--t3);text-align:center;padding-top:30px">Nessun check con peso registrato</div>';
+    if (elTotal) elTotal.textContent = '—';
     loadCheckStats();
-  } catch(e) {
-    elChart.innerHTML = '';
+    return;
   }
+
+  const latest = pts[pts.length - 1];
+  const prev   = pts.length > 1 ? pts[pts.length - 2] : null;
+  if (elTotal) elTotal.textContent = latest.weight;
+
+  if (prev && elTrend) {
+    const delta = (latest.weight - prev.weight).toFixed(1);
+    const col   = parseFloat(delta) < 0 ? 'var(--green)' : parseFloat(delta) > 0 ? 'var(--red)' : 'var(--t2)';
+    elTrend.innerHTML = `<span style="color:${col};font-weight:700">${parseFloat(delta) > 0 ? '+' : ''}${delta} kg</span> <span style="color:var(--t3)">vs check precedente</span>`;
+  } else {
+    if (elTrend) elTrend.textContent = 'Primo check registrato';
+  }
+
+  if (pts.length < 2) {
+    elChart.innerHTML = '<div style="font-size:12px;color:var(--t3);text-align:center;padding-top:30px">Aggiungi almeno 2 check per vedere il trend</div>';
+    loadCheckStats();
+    return;
+  }
+
+  const W = 300, H = 100, PAD = 14;
+  const weights = pts.map(p => p.weight);
+  const minW = Math.min(...weights) - 1;
+  const maxW = Math.max(...weights) + 1;
+  const range = maxW - minW || 1;
+
+  const toX = i => PAD + (i / (pts.length - 1)) * (W - PAD * 2);
+  const toY = w => H - PAD - ((w - minW) / range) * (H - PAD * 2);
+
+  const pathD = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${toX(i).toFixed(1)},${toY(p.weight).toFixed(1)}`).join(' ');
+  const areaD = pathD + ` L${toX(pts.length-1).toFixed(1)},${H} L${toX(0).toFixed(1)},${H} Z`;
+
+  const dots = pts.map((p, i) => {
+    const x = toX(i), y = toY(p.weight);
+    const lbl = new Date(p.date + 'T12:00:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'short' });
+    const isLast = i === pts.length - 1;
+    return `
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${isLast ? 4 : 3}" fill="${isLast ? 'var(--accent)' : 'rgba(255,255,255,0.5)'}" stroke="${isLast ? '#fff' : 'none'}" stroke-width="1.5"/>
+      ${isLast ? `<text x="${x.toFixed(1)}" y="${(y - 8).toFixed(1)}" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="9" font-weight="700">${p.weight}kg</text>` : ''}
+      <text x="${x.toFixed(1)}" y="${(H + 2).toFixed(1)}" text-anchor="middle" fill="rgba(255,255,255,0.3)" font-size="7">${lbl}</text>`;
+  }).join('');
+
+  elChart.innerHTML = `
+    <svg viewBox="0 0 ${W} ${H + 14}" xmlns="http://www.w3.org/2000/svg" style="width:100%;overflow:visible">
+      <defs>
+        <linearGradient id="wg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.25"/>
+          <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      <path d="${areaD}" fill="url(#wg)"/>
+      <path d="${pathD}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      ${dots}
+    </svg>`;
+
+  loadCheckStats();
 }
 
 async function loadCheckStats() {
@@ -168,7 +161,7 @@ async function loadCheckStats() {
   });
 
   // Highlight overlay zones that have data with dynamic intensity based on improvement
-  const ovHighlight = { chest: ['ov-chest','ov-back'], shoulders: ['ov-shoulders'], waist: ['ov-waist'], arms: ['ov-bicep_l','ov-bicep_r'], legs: ['ov-thigh_l','ov-thigh_r'] };
+  const ovHighlight = { chest: ['ov-chest'], shoulders: ['ov-shoulders'], waist: ['ov-waist'], arms: ['ov-bicep_l','ov-bicep_r'], legs: ['ov-thigh_l','ov-thigh_r'] };
   Object.keys(groups).forEach(key => {
     const vals = groups[key].keys.map(k => ms[k]).filter(v => v != null);
     const prevVals = groups[key].keys.map(k => pm[k]).filter(v => v != null);
@@ -252,12 +245,31 @@ function renderMeasureDeltas(c, prev) {
 
 window.deleteCheck = function(id) {
   showModal({
-    title: 'Elimina check-in', text: 'Vuoi eliminare questo check-in?',
+    title: 'Elimina check-in',
+    text: 'Vuoi eliminare questo check-in? Verranno cancellate anche le foto dal cloud.',
     confirmLabel: 'Elimina',
     onConfirm: async () => {
-      await deleteDoc(doc(db,'users',USER_ID,'checks',id));
-      showToast('Check eliminato');
-      await loadChecks();
+      try {
+        const checkData = checks.find(c => c.id === id);
+        if (checkData?.photos?.length) {
+          for (const photoUrl of checkData.photos) {
+            try {
+              const urlObj = new URL(photoUrl);
+              const pathEncoded = urlObj.pathname.split('/o/')[1];
+              if (pathEncoded) {
+                const photoPath = decodeURIComponent(pathEncoded.split('?')[0]);
+                await deleteObject(ref(storage, photoPath));
+              }
+            } catch(e) { console.warn('Errore eliminazione foto Storage:', e); }
+          }
+        }
+        await deleteDoc(doc(db, 'users', USER_ID, 'checks', id));
+        showToast('✅ Check eliminato');
+        await loadChecks();
+      } catch(e) {
+        showToast('Errore eliminazione', 'err');
+        console.error(e);
+      }
     }
   });
 };
