@@ -95,6 +95,13 @@ export async function analyzeCheckProgress({ prevCheck, newCheck }) {
   const key = await getKey();
   if (!key) return { success: false, error: 'API key mancante' };
 
+  const getMs = (ms, key) => {
+    if (ms[key] != null) return ms[key];
+    if (key === 'bicep') { const v = [ms.bicep_l, ms.bicep_r].filter(x => x != null); return v.length ? v.reduce((a,b)=>a+b)/v.length : null; }
+    if (key === 'thigh') { const v = [ms.thigh_l, ms.thigh_r].filter(x => x != null); return v.length ? v.reduce((a,b)=>a+b)/v.length : null; }
+    return null;
+  };
+
   const fmtMeasures = (check) => {
     const ms = check.measurements || {};
     const parts = [];
@@ -102,14 +109,8 @@ export async function analyzeCheckProgress({ prevCheck, newCheck }) {
     if (ms.shoulders) parts.push(`Spalle: ${ms.shoulders}cm`);
     if (ms.chest) parts.push(`Petto: ${ms.chest}cm`);
     if (ms.waist) parts.push(`Vita: ${ms.waist}cm`);
-    if (ms.bicep_l != null || ms.bicep_r != null) {
-      const avg = ((ms.bicep_l || 0) + (ms.bicep_r || 0)) / (ms.bicep_r != null && ms.bicep_l != null ? 2 : 1);
-      parts.push(`Braccia: ${avg.toFixed(1)}cm`);
-    }
-    if (ms.thigh_l != null || ms.thigh_r != null) {
-      const avg = ((ms.thigh_l || 0) + (ms.thigh_r || 0)) / (ms.thigh_r != null && ms.thigh_l != null ? 2 : 1);
-      parts.push(`Gambe: ${avg.toFixed(1)}cm`);
-    }
+    const arm = getMs(ms, 'bicep'); if (arm != null) parts.push(`Braccia: ${arm.toFixed(1)}cm`);
+    const leg = getMs(ms, 'thigh'); if (leg != null) parts.push(`Gambe: ${leg.toFixed(1)}cm`);
     return parts.join(', ') || 'nessuna misura';
   };
 
@@ -123,9 +124,12 @@ export async function analyzeCheckProgress({ prevCheck, newCheck }) {
   const parts = [{ text: promptText }];
 
   if (newCheck.photos?.length) {
-    for (const url of newCheck.photos.slice(0, 2)) {
+    for (const photo of newCheck.photos.slice(0, 3)) {
+      const u = typeof photo === 'string' ? photo : photo?.url;
+      const v = typeof photo === 'object' ? photo?.view : null;
+      if (!u) continue;
       try {
-        const resp = await fetch(url);
+        const resp = await fetch(u);
         if (resp.ok) {
           const blob = await resp.blob();
           const base64 = await new Promise(resolve => {
@@ -133,6 +137,7 @@ export async function analyzeCheckProgress({ prevCheck, newCheck }) {
             reader.onloadend = () => resolve(reader.result.split(',')[1]);
             reader.readAsDataURL(blob);
           });
+          if (v) parts.push({ text: `[Foto: ${v}]` });
           parts.push({ inlineData: { mimeType: blob.type || 'image/jpeg', data: base64 } });
         }
       } catch(e) { console.warn('Photo fetch for AI failed:', e); }

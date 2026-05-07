@@ -11,17 +11,32 @@ let checks = [];
 let formPhotos = [];
 
 const MEASURES = [
-  { key:'weight',   label:'Peso (kg)',        unit:'kg', icon:'⚖️' },
-  { key:'shoulders', label:'Spalle (cm)',      unit:'cm', icon:'🔴' },
-  { key:'waist',    label:'Vita (cm)',          unit:'cm', icon:'🔴' },
-  { key:'chest',    label:'Petto (cm)',          unit:'cm', icon:'🔴' },
-  { key:'bicep_l',  label:'Braccio SX (cm)',  unit:'cm', icon:'💪' },
-  { key:'bicep_r',  label:'Braccio DX (cm)',  unit:'cm', icon:'💪' },
-  { key:'thigh_l',  label:'Coscia SX (cm)',   unit:'cm', icon:'🦵' },
-  { key:'thigh_r',  label:'Coscia DX (cm)',   unit:'cm', icon:'🦵' },
-  { key:'calf_l',   label:'Polpaccio SX (cm)', unit:'cm', icon:'🦵' },
-  { key:'calf_r',   label:'Polpaccio DX (cm)', unit:'cm', icon:'🦵' }
+  { key:'weight',    label:'Peso',    unit:'kg', icon:'⚖️' },
+  { key:'shoulders', label:'Spalle',  unit:'cm', icon:'🔴' },
+  { key:'chest',     label:'Petto',   unit:'cm', icon:'🔴' },
+  { key:'waist',     label:'Vita',    unit:'cm', icon:'🔴' },
+  { key:'bicep',     label:'Braccia', unit:'cm', icon:'💪' },
+  { key:'thigh',     label:'Gambe',   unit:'cm', icon:'🦵' }
 ];
+
+// Backward-compat lookup: handles old bicep_l/r and thigh_l/r fields
+function getMeasure(ms, key) {
+  if (!ms) return null;
+  if (ms[key] != null) return ms[key];
+  if (key === 'bicep') {
+    const vals = [ms.bicep_l, ms.bicep_r].filter(v => v != null);
+    return vals.length ? vals.reduce((a, b) => a + b) / vals.length : null;
+  }
+  if (key === 'thigh') {
+    const vals = [ms.thigh_l, ms.thigh_r].filter(v => v != null);
+    return vals.length ? vals.reduce((a, b) => a + b) / vals.length : null;
+  }
+  return null;
+}
+
+// Photo helpers — supports both legacy string URLs and new { url, view } objects
+const photoUrl  = p => typeof p === 'string' ? p : p?.url;
+const photoView = p => typeof p === 'object' && p ? p.view : null;
 
 // ── Load & render ──────────────────────────────────────────
 async function loadChecks() {
@@ -114,29 +129,23 @@ async function loadCheckStats() {
   const ms = latest.measurements || {};
   const pm = prev?.measurements || {};
 
-  // Map: legend id -> { keys to average, label }
+  // Map: legend id -> { measureKey, label }
   const groups = {
-    chest:     { keys: ['chest'],              label: 'PETTO' },
-    shoulders: { keys: ['shoulders'],          label: 'SPALLE' },
-    waist:     { keys: ['waist'],              label: 'VITA' },
-    arms:      { keys: ['bicep_l','bicep_r'],  label: 'BRACCIA' },
-    legs:      { keys: ['thigh_l','thigh_r'],  label: 'GAMBE' }
+    chest:     { measureKey: 'chest',     label: 'PETTO' },
+    shoulders: { measureKey: 'shoulders', label: 'SPALLE' },
+    waist:     { measureKey: 'waist',     label: 'VITA' },
+    arms:      { measureKey: 'bicep',     label: 'BRACCIA' },
+    legs:      { measureKey: 'thigh',     label: 'GAMBE' }
   };
 
-  // Collect all measurement values to determine the max for bar scaling
-  const allVals = [];
-  Object.values(groups).forEach(g => {
-    g.keys.forEach(k => { if (ms[k] != null) allVals.push(ms[k]); });
-  });
+  // Collect values for bar scaling
+  const allVals = Object.values(groups).map(g => getMeasure(ms, g.measureKey)).filter(v => v != null);
   const maxVal = Math.max(...allVals, 1);
 
   Object.keys(groups).forEach(key => {
     const g = groups[key];
-    // Average of the relevant keys
-    const vals = g.keys.map(k => ms[k]).filter(v => v != null);
-    const prevVals = g.keys.map(k => pm[k]).filter(v => v != null);
-    const avg = vals.length ? vals.reduce((a,b) => a+b, 0) / vals.length : null;
-    const prevAvg = prevVals.length ? prevVals.reduce((a,b) => a+b, 0) / prevVals.length : null;
+    const avg = getMeasure(ms, g.measureKey);
+    const prevAvg = getMeasure(pm, g.measureKey);
 
     const valEl = document.getElementById(`val-${key}`);
     const barEl = document.getElementById(`bar-${key}`);
@@ -161,35 +170,21 @@ async function loadCheckStats() {
     }
   });
 
-  // Highlight overlay zones that have data with dynamic intensity based on improvement
+  // Highlight overlay zones based on improvement
   const ovHighlight = { chest: ['ov-chest'], shoulders: ['ov-shoulders'], waist: ['ov-waist'], arms: ['ov-bicep_l','ov-bicep_r'], legs: ['ov-thigh_l','ov-thigh_r'] };
   Object.keys(groups).forEach(key => {
-    const vals = groups[key].keys.map(k => ms[k]).filter(v => v != null);
-    const prevVals = groups[key].keys.map(k => pm[k]).filter(v => v != null);
-    
-    if (vals.length > 0 && ovHighlight[key]) {
-      const avg = vals.reduce((a,b) => a+b, 0) / vals.length;
-      const prevAvg = prevVals.length ? prevVals.reduce((a,b) => a+b, 0) / prevVals.length : null;
-      
-      let improved = false;
-      if (prevAvg != null) {
-        if (key === 'waist') improved = avg < prevAvg;
-        else improved = avg > prevAvg;
+    const avg = getMeasure(ms, groups[key].measureKey);
+    const prevAvg = getMeasure(pm, groups[key].measureKey);
+    if (avg == null || !ovHighlight[key]) return;
+    const improved = prevAvg != null && (key === 'waist' ? avg < prevAvg : avg > prevAvg);
+    ovHighlight[key].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.style.fill = `rgba(255,106,0,${improved ? 0.4 : 0.2})`;
+        el.style.stroke = `rgba(255,106,0,${improved ? 0.7 : 0.4})`;
+        if (improved) el.style.filter = 'drop-shadow(0 0 8px rgba(255,106,0,0.6))';
       }
-
-      ovHighlight[key].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) {
-          const baseOp = improved ? 0.4 : 0.2;
-          const strokeOp = improved ? 0.7 : 0.4;
-          el.style.fill = `rgba(255,106,0,${baseOp})`;
-          el.style.stroke = `rgba(255,106,0,${strokeOp})`;
-          if (improved) {
-            el.style.filter = 'drop-shadow(0 0 8px rgba(255,106,0,0.6))';
-          }
-        }
-      });
-    }
+    });
   });
 }
 
@@ -216,7 +211,13 @@ function renderList() {
         </div>
         ${renderMeasureDeltas(c, prev)}
         ${c.photos?.length ? `<div style="display:flex;gap:8px;overflow-x:auto;margin-top:10px">
-          ${c.photos.map(url => `<img src="${url}" style="width:80px;height:80px;object-fit:cover;border-radius:10px;flex-shrink:0">`).join('')}
+          ${c.photos.map(p => {
+            const u = photoUrl(p); const v = photoView(p);
+            return `<div style="display:flex;flex-direction:column;align-items:center;gap:3px;flex-shrink:0">
+              <img src="${u}" style="width:80px;height:80px;object-fit:cover;border-radius:10px">
+              ${v ? `<span style="font-size:9px;color:var(--t3);font-weight:700;text-transform:uppercase">${v}</span>` : ''}
+            </div>`;
+          }).join('')}
         </div>` : ''}
         ${c.ai_analysis ? `<div style="margin-top:10px;padding:10px 12px;background:rgba(124,111,255,0.08);border-radius:10px;border:1px solid rgba(124,111,255,0.2)">
           <div style="font-size:10px;font-weight:800;color:var(--purple);letter-spacing:0.5px;margin-bottom:5px">🤖 ANALISI AI</div>
@@ -232,16 +233,16 @@ function renderList() {
 function renderMeasureDeltas(c, prev) {
   const ms = c.measurements || {};
   const pm = prev?.measurements || {};
-  const rows = MEASURES.filter(m => m.key !== 'weight' && ms[m.key] != null);
+  const rows = MEASURES.filter(m => m.key !== 'weight' && getMeasure(ms, m.key) != null);
   if (!rows.length) return '';
   return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:10px">
     ${rows.map(m => {
-      const val  = ms[m.key];
-      const pval = pm[m.key];
-      const diff = pval != null ? (val - pval) : null;
+      const val  = getMeasure(ms, m.key);
+      const pval = getMeasure(pm, m.key);
+      const diff = pval != null ? parseFloat((val - pval).toFixed(1)) : null;
       const col  = diff === null ? 'var(--t2)' : diff > 0 ? 'var(--green)' : diff < 0 ? 'var(--red)' : 'var(--t2)';
-      return `<div style="font-size:12px;color:var(--t2)">${m.icon} ${m.label.split(' ')[0]}:
-        <span style="color:var(--t1);font-weight:700">${val} ${m.unit}</span>
+      return `<div style="font-size:12px;color:var(--t2)">${m.icon} ${m.label}:
+        <span style="color:var(--t1);font-weight:700">${val.toFixed(1)} ${m.unit}</span>
         ${diff !== null ? `<span style="color:${col}">${diff>0?'+':''}${diff}</span>` : ''}
       </div>`;
     }).join('')}
@@ -257,9 +258,10 @@ window.deleteCheck = function(id) {
       try {
         const checkData = checks.find(c => c.id === id);
         if (checkData?.photos?.length) {
-          for (const photoUrl of checkData.photos) {
+          for (const photo of checkData.photos) {
             try {
-              const urlObj = new URL(photoUrl);
+              const u = photoUrl(photo);
+              const urlObj = new URL(u);
               const pathEncoded = urlObj.pathname.split('/o/')[1];
               if (pathEncoded) {
                 const photoPath = decodeURIComponent(pathEncoded.split('?')[0]);
@@ -283,10 +285,11 @@ window.deleteCheck = function(id) {
 window.showZone = function(key, label) {
   document.querySelectorAll('.ov-zone').forEach(el => el.classList.remove('active'));
   // Highlight matching overlay zones
-  const ovMap = { chest: ['ov-chest'], shoulders: ['ov-shoulders'], waist: ['ov-waist'], bicep_l: ['ov-bicep_l','ov-bicep_r'], bicep_r: ['ov-bicep_l','ov-bicep_r'], thigh_l: ['ov-thigh_l','ov-thigh_r'], thigh_r: ['ov-thigh_l','ov-thigh_r'], weight: [] };
+  const ovMap = { chest: ['ov-chest'], shoulders: ['ov-shoulders'], waist: ['ov-waist'], bicep: ['ov-bicep_l','ov-bicep_r'], bicep_l: ['ov-bicep_l','ov-bicep_r'], bicep_r: ['ov-bicep_l','ov-bicep_r'], thigh: ['ov-thigh_l','ov-thigh_r'], thigh_l: ['ov-thigh_l','ov-thigh_r'], thigh_r: ['ov-thigh_l','ov-thigh_r'], weight: [] };
   (ovMap[key] || []).forEach(id => { const el = document.getElementById(id); if (el) el.classList.add('active'); });
 
-  const history = checks.filter(c => c.measurements?.[key] != null || (key === 'weight' && c.weight != null));
+  const getVal = (c) => key === 'weight' ? c.weight : getMeasure(c.measurements, key);
+  const history = checks.filter(c => getVal(c) != null);
   if (!history.length) {
     document.getElementById('zone-info').innerHTML = `
       <div style="font-size:16px;font-weight:800;color:var(--t1);margin-bottom:4px">${label}</div>
@@ -294,13 +297,13 @@ window.showZone = function(key, label) {
     return;
   }
 
-  const latest = key === 'weight' ? history[0].weight : history[0].measurements[key];
+  const latest = getVal(history[0]);
   const unit = key === 'weight' ? 'kg' : 'cm';
-  
+
   let listHtml = history.slice(0, 5).map((c, i) => {
-    const val = key === 'weight' ? c.weight : c.measurements[key];
+    const val = getVal(c);
     const prevC = history[i+1];
-    const pval = prevC ? (key === 'weight' ? prevC.weight : prevC.measurements[key]) : null;
+    const pval = prevC ? getVal(prevC) : null;
     const diff = pval != null ? (val - pval).toFixed(1) : null;
     const col = diff == null ? 'var(--t2)' : diff > 0 ? 'var(--green)' : diff < 0 ? 'var(--red)' : 'var(--t2)';
     
@@ -349,14 +352,15 @@ window.openNewCheck = function() {
       <span class="clabel">📐 Misure corporee</span>
       ${MEASURES.filter(m => m.key !== 'weight').map(m => `
         <div class="s-row">
-          <div><div class="s-lbl">${m.icon} ${m.label}</div></div>
-          <input type="number" class="fi-in" id="ck-${m.key}" step="0.5" placeholder="—"> ${m.unit}
+          <div><div class="s-lbl">${m.icon} ${m.label} (cm)</div></div>
+          <input type="number" class="fi-in" id="ck-${m.key}" step="0.5" placeholder="—"> cm
         </div>`).join('')}
     </div>
     <div class="card">
       <span class="clabel">📸 Foto</span>
-      <input type="file" id="ck-photos" multiple accept="image/*" capture class="fi" style="padding:8px">
-      <div id="photo-preview" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"></div>
+      <div style="font-size:11px;color:var(--t3);margin-bottom:8px">Seleziona le foto e indica la posa di ciascuna.</div>
+      <input type="file" id="ck-photos" multiple accept="image/*" class="fi" style="padding:8px">
+      <div id="photo-preview" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px"></div>
     </div>
     <div class="grid2" style="margin-bottom:30px">
       <button class="btn btn-flat" onclick="closeCheckForm()">Annulla</button>
@@ -366,11 +370,25 @@ window.openNewCheck = function() {
   document.getElementById('ck-photos').addEventListener('change', function() {
     const prev = document.getElementById('photo-preview');
     prev.innerHTML = '';
-    Array.from(this.files).forEach(f => {
+    formPhotos = [];
+    Array.from(this.files).forEach((f, i) => {
+      formPhotos.push({ file: f, view: 'frontale' });
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:5px';
       const img = document.createElement('img');
       img.style.cssText = 'width:80px;height:80px;object-fit:cover;border-radius:10px';
       img.src = URL.createObjectURL(f);
-      prev.appendChild(img);
+      const sel = document.createElement('select');
+      sel.style.cssText = 'font-size:10px;background:var(--bg3);color:var(--t2);border:1px solid var(--border2);border-radius:6px;padding:3px 5px;width:82px;text-align:center';
+      ['frontale','laterale','schiena'].forEach(v => {
+        const opt = document.createElement('option');
+        opt.value = v; opt.textContent = v.charAt(0).toUpperCase() + v.slice(1);
+        sel.appendChild(opt);
+      });
+      sel.addEventListener('change', () => { formPhotos[i].view = sel.value; });
+      wrap.appendChild(img);
+      wrap.appendChild(sel);
+      prev.appendChild(wrap);
     });
   });
 };
@@ -393,26 +411,16 @@ window.saveCheck = async function() {
     measurements[m.key] = v ? parseFloat(v) : null;
   });
 
-  if (measurements['bicep_l'] != null && measurements['bicep_r'] == null) measurements['bicep_r'] = measurements['bicep_l'];
-  if (measurements['bicep_r'] != null && measurements['bicep_l'] == null) measurements['bicep_l'] = measurements['bicep_r'];
-  if (measurements['thigh_l'] != null && measurements['thigh_r'] == null) measurements['thigh_r'] = measurements['thigh_l'];
-  if (measurements['thigh_r'] != null && measurements['thigh_l'] == null) measurements['thigh_l'] = measurements['thigh_r'];
-  if (measurements['calf_l'] != null && measurements['calf_r'] == null) measurements['calf_r'] = measurements['calf_l'];
-  if (measurements['calf_r'] != null && measurements['calf_l'] == null) measurements['calf_l'] = measurements['calf_r'];
-
   showToast('💾 Salvataggio...', 'info');
 
   const photoUrls = [];
-  const files = document.getElementById('ck-photos')?.files;
-  if (files?.length) {
-    for (const file of files) {
-      try {
-        const storRef = ref(storage, `users/${USER_ID}/checks/${date}_${Date.now()}_${file.name}`);
-        await uploadBytes(storRef, file);
-        const url = await getDownloadURL(storRef);
-        photoUrls.push(url);
-      } catch(e) { console.warn('Photo upload failed:', e); }
-    }
+  for (const { file, view } of formPhotos) {
+    try {
+      const storRef = ref(storage, `users/${USER_ID}/checks/${date}_${Date.now()}_${file.name}`);
+      await uploadBytes(storRef, file);
+      const url = await getDownloadURL(storRef);
+      photoUrls.push({ url, view });
+    } catch(e) { console.warn('Photo upload failed:', e); }
   }
 
   const id = `check_${date.replace(/-/g,'')}`;
