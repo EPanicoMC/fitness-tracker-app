@@ -277,7 +277,17 @@ function renderExCard(ex, ei) {
     </div>`;
 }
 
+function getProgArrow(actual, last) {
+  if (!last || last <= 0 || actual == null) return '';
+  const diff = parseFloat(actual) - last;
+  if (Math.abs(diff) < 0.05) return `<span style="font-size:11px;color:var(--t3);font-weight:700">= stessa</span>`;
+  const col = diff > 0 ? 'var(--green)' : 'var(--red)';
+  const sign = diff > 0 ? '+' : '';
+  return `<span style="font-size:11px;font-weight:800;color:${col}">${diff > 0 ? '↑' : '↓'} ${sign}${diff % 1 === 0 ? diff.toFixed(0) : diff.toFixed(1)}kg</span>`;
+}
+
 function renderSetRow(ex, ei, si, s) {
+  const progHtml = s.last_weight > 0 && s.actual_weight ? getProgArrow(s.actual_weight, s.last_weight) : '';
   return `
     <div class="set-row" id="srow-${ei}-${si}">
       <span class="set-n">S${si+1}</span>
@@ -287,6 +297,7 @@ function renderSetRow(ex, ei, si, s) {
             background:var(--bg3);border:1px solid var(--border2);border-radius:8px;color:var(--t1);outline:none"
           oninput="onWeight(${ei},${si},this.value)">
         ${s.last_weight > 0 ? `<div class="set-prev">↩${s.last_weight}kg × ${s.last_reps}</div>` : s.ref_weight > 0 ? `<div class="set-prev">↩${s.ref_weight}kg</div>` : ''}
+        <div id="prog-${ei}-${si}" style="min-height:14px">${progHtml}</div>
       </div>
       <input type="text" placeholder="${s.reps_target}" value="${s.actual_reps}"
         style="width:62px;padding:8px;text-align:center;font-size:15px;font-weight:700;
@@ -323,12 +334,18 @@ window.addSetToExercise = function(ei) {
 window.onWeight = function(ei, si, val) {
   const v = val === '' ? null : parseFloat(val);
   exState[ei].sets[si].actual_weight = v;
+
+  const progEl = document.getElementById(`prog-${ei}-${si}`);
+  if (progEl) progEl.innerHTML = getProgArrow(v, exState[ei].sets[si].last_weight);
+
   // Propagate only to sets that are still genuinely empty (null)
   for (let j = si + 1; j < exState[ei].sets.length; j++) {
     if (exState[ei].sets[j].actual_weight === null) {
       exState[ei].sets[j].actual_weight = v;
       const inp = document.querySelector(`#srow-${ei}-${j} input[type="number"]`);
       if (inp) inp.value = v ?? '';
+      const pEl = document.getElementById(`prog-${ei}-${j}`);
+      if (pEl) pEl.innerHTML = getProgArrow(v, exState[ei].sets[j].last_weight);
     }
   }
 };

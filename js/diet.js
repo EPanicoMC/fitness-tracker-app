@@ -79,11 +79,11 @@ function renderList() {
 function renderDietPreview(d) {
   const renderMeals = (meals, dayKey) => (meals||[]).map((m, mi) => {
     const detId = `dm-${d.id}-${dayKey}-${mi}`;
-    const hasDetails = m.items || m.variants?.length || m.protein || m.carbs || m.fats;
+    const hasDetails = m.items || m.variants?.length || m.kcal > 0 || m.protein > 0 || m.carbs > 0 || m.fats > 0;
     return `
       <div style="border-bottom:1px solid var(--border)">
         <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;font-size:13px${hasDetails ? ';cursor:pointer' : ''}"
-          ${hasDetails ? `onclick="toggleMealDetail('${detId}')"` : ''}>
+          ${hasDetails ? `onclick="toggleDietMealDetail('${detId}')"` : ''}>
           <span style="flex:1">${m.label||m.type} ${m.time ? `<span style="color:var(--t3)">${m.time}</span>` : ''}</span>
           <div style="display:flex;align-items:center;gap:6px">
             <span style="color:var(--green);font-weight:700">${m.kcal} kcal</span>
@@ -114,7 +114,7 @@ function renderDietPreview(d) {
     ${renderMeals(d.day_off?.meals, 'off')}`;
 }
 
-window.toggleMealDetail = function(id) {
+window.toggleDietMealDetail = function(id) {
   const el = document.getElementById(id);
   const chev = document.getElementById('chev-' + id);
   if (!el) return;

@@ -458,6 +458,19 @@ function buildFitScore() {
         <div class="pbb h4"><div class="pbf" style="width:${Math.round(b.score/b.max*100)}%;background:${b.ok ? 'var(--green)' : b.score > 0 ? 'var(--orange)' : 'rgba(255,255,255,0.1)'}"></div></div>
       </div>`).join('')}
     </div>
+    <div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.06)">
+      <div style="font-size:10px;font-weight:800;color:var(--t3);letter-spacing:0.5px;text-transform:uppercase;cursor:pointer;display:flex;justify-content:space-between;align-items:center"
+        onclick="const l=this.nextElementSibling;l.style.display=l.style.display==='none'?'block':'none'">
+        <span>Come si legge lo SmartScore</span><span>▼</span>
+      </div>
+      <div style="display:none;margin-top:8px;font-size:11px;color:var(--t3);line-height:1.7">
+        <div>🍽️ <b style="color:var(--t2)">Pasti (40pt)</b> — pasti consumati rispetto all'orario attuale</div>
+        <div>💪 <b style="color:var(--t2)">Allenamento (35pt)</b> — completato o programmato per oggi</div>
+        <div>👟 <b style="color:var(--t2)">Passi (15pt)</b> — progressi verso l'obiettivo passi</div>
+        <div>🥩 <b style="color:var(--t2)">Proteine (10pt)</b> — apporto proteico vs target</div>
+        <div style="margin-top:6px;padding:6px 8px;background:rgba(255,255,255,0.04);border-radius:6px">Il punteggio è calibrato sull'orario: valuti solo ciò che dovevi fare fino ad ora, non l'intera giornata.</div>
+      </div>
+    </div>
   </div>`;
 }
 

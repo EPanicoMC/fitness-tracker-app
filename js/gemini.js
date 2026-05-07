@@ -90,3 +90,76 @@ export async function calcMacrosFromText(text) {
     busy = false;
   }
 }
+
+export async function analyzeCheckProgress({ prevCheck, newCheck }) {
+  const key = await getKey();
+  if (!key) return { success: false, error: 'API key mancante' };
+
+  const fmtMeasures = (check) => {
+    const ms = check.measurements || {};
+    const parts = [];
+    if (check.weight) parts.push(`Peso: ${check.weight}kg`);
+    if (ms.shoulders) parts.push(`Spalle: ${ms.shoulders}cm`);
+    if (ms.chest) parts.push(`Petto: ${ms.chest}cm`);
+    if (ms.waist) parts.push(`Vita: ${ms.waist}cm`);
+    if (ms.bicep_l != null || ms.bicep_r != null) {
+      const avg = ((ms.bicep_l || 0) + (ms.bicep_r || 0)) / (ms.bicep_r != null && ms.bicep_l != null ? 2 : 1);
+      parts.push(`Braccia: ${avg.toFixed(1)}cm`);
+    }
+    if (ms.thigh_l != null || ms.thigh_r != null) {
+      const avg = ((ms.thigh_l || 0) + (ms.thigh_r || 0)) / (ms.thigh_r != null && ms.thigh_l != null ? 2 : 1);
+      parts.push(`Gambe: ${avg.toFixed(1)}cm`);
+    }
+    return parts.join(', ') || 'nessuna misura';
+  };
+
+  let promptText = `Sei un coach personale esperto. Analizza la progressione corporea in italiano, sii diretto e motivante.`;
+  if (prevCheck) {
+    promptText += `\n\nCheck PRECEDENTE (${prevCheck.date}): ${fmtMeasures(prevCheck)}`;
+  }
+  promptText += `\n\nCheck ATTUALE (${newCheck.date}): ${fmtMeasures(newCheck)}`;
+  promptText += `\n\nRispondi in max 120 parole con: 1) cosa è migliorato 2) cosa tenere d'occhio 3) un consiglio concreto. Usa un tono positivo e professionale.`;
+
+  const parts = [{ text: promptText }];
+
+  if (newCheck.photos?.length) {
+    for (const url of newCheck.photos.slice(0, 2)) {
+      try {
+        const resp = await fetch(url);
+        if (resp.ok) {
+          const blob = await resp.blob();
+          const base64 = await new Promise(resolve => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result.split(',')[1]);
+            reader.readAsDataURL(blob);
+          });
+          parts.push({ inlineData: { mimeType: blob.type || 'image/jpeg', data: base64 } });
+        }
+      } catch(e) { console.warn('Photo fetch for AI failed:', e); }
+    }
+  }
+
+  const models = ['gemini-3.1-flash-lite-preview', 'gemini-3-flash-preview', 'gemini-2.5-flash'];
+  for (const model of models) {
+    try {
+      const r = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts }],
+            generationConfig: { temperature: 0.7, maxOutputTokens: 512 }
+          })
+        }
+      );
+      if (r.status === 429) continue;
+      if (!r.ok) continue;
+      const d = await r.json();
+      const text = d.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) continue;
+      return { success: true, analysis: text.trim() };
+    } catch(e) { continue; }
+  }
+  return { success: false, error: 'Analisi non disponibile' };
+}

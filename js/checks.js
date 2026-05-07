@@ -5,6 +5,7 @@ import { showToast, showModal, formatDateIT } from './app.js';
 import {
   ref, uploadBytes, getDownloadURL, deleteObject
 } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js';
+import { analyzeCheckProgress } from './gemini.js';
 
 let checks = [];
 let formPhotos = [];
@@ -217,6 +218,10 @@ function renderList() {
         ${c.photos?.length ? `<div style="display:flex;gap:8px;overflow-x:auto;margin-top:10px">
           ${c.photos.map(url => `<img src="${url}" style="width:80px;height:80px;object-fit:cover;border-radius:10px;flex-shrink:0">`).join('')}
         </div>` : ''}
+        ${c.ai_analysis ? `<div style="margin-top:10px;padding:10px 12px;background:rgba(124,111,255,0.08);border-radius:10px;border:1px solid rgba(124,111,255,0.2)">
+          <div style="font-size:10px;font-weight:800;color:var(--purple);letter-spacing:0.5px;margin-bottom:5px">🤖 ANALISI AI</div>
+          <div style="font-size:12px;color:var(--t2);line-height:1.55">${c.ai_analysis}</div>
+        </div>` : ''}
         <div style="display:flex;gap:8px;margin-top:10px">
           <button class="btn btn-flat btn-sm" onclick="deleteCheck('${c.id}')">🗑️ Elimina</button>
         </div>
@@ -278,7 +283,7 @@ window.deleteCheck = function(id) {
 window.showZone = function(key, label) {
   document.querySelectorAll('.ov-zone').forEach(el => el.classList.remove('active'));
   // Highlight matching overlay zones
-  const ovMap = { chest: ['ov-chest','ov-back'], shoulders: ['ov-shoulders'], waist: ['ov-waist'], bicep_l: ['ov-bicep_l','ov-bicep_r'], bicep_r: ['ov-bicep_l','ov-bicep_r'], thigh_l: ['ov-thigh_l','ov-thigh_r'], thigh_r: ['ov-thigh_l','ov-thigh_r'], weight: [] };
+  const ovMap = { chest: ['ov-chest'], shoulders: ['ov-shoulders'], waist: ['ov-waist'], bicep_l: ['ov-bicep_l','ov-bicep_r'], bicep_r: ['ov-bicep_l','ov-bicep_r'], thigh_l: ['ov-thigh_l','ov-thigh_r'], thigh_r: ['ov-thigh_l','ov-thigh_r'], weight: [] };
   (ovMap[key] || []).forEach(id => { const el = document.getElementById(id); if (el) el.classList.add('active'); });
 
   const history = checks.filter(c => c.measurements?.[key] != null || (key === 'weight' && c.weight != null));
@@ -425,6 +430,20 @@ window.saveCheck = async function() {
     showToast('✅ Check salvato!');
     closeCheckForm();
     await loadChecks();
+
+    showToast('🤖 Analisi AI in corso...', 'info');
+    try {
+      const aiResult = await analyzeCheckProgress({
+        prevCheck: prev || null,
+        newCheck: { date, weight, measurements, photos: photoUrls }
+      });
+      if (aiResult.success) {
+        await setDoc(doc(db,'users',USER_ID,'checks',id), { ai_analysis: aiResult.analysis }, { merge: true });
+        checks = checks.map(c => c.id === id ? { ...c, ai_analysis: aiResult.analysis } : c);
+        renderList();
+        showToast('🤖 Analisi AI completata!');
+      }
+    } catch(e) { console.warn('AI analysis failed:', e); }
   } catch(e) {
     showToast('Errore salvataggio', 'err');
   }
