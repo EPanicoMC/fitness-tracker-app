@@ -24,28 +24,50 @@ const MODELS = [
 
 async function callGemini(messages, systemPrompt) {
   const key = await getApiKey();
-  if (!key) return { success: false, error: 'API key mancante' };
+  if (!key) return { success: false, error: 'API key mancante nelle impostazioni.' };
 
   for (const model of MODELS) {
     try {
-      const body = {
-        systemInstruction: { parts: [{ text: systemPrompt }] },
-        contents: messages,
-        generationConfig: { temperature: 0.7, maxOutputTokens: 4096 }
-      };
       const r = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: systemPrompt }] },
+            contents: messages,
+            generationConfig: { temperature: 0.7, maxOutputTokens: 8192 }
+          })
+        }
       );
-      if (r.status === 429) { console.warn(model, '429 rate limit, next...'); continue; }
-      if (!r.ok) { console.warn(model, r.status); continue; }
+      if (r.status === 429) { console.warn('[Coach]', model, '→ 429, next model...'); continue; }
+      if (r.status === 404) { console.warn('[Coach]', model, '→ 404, not found'); continue; }
+      if (!r.ok) { console.warn('[Coach]', model, '→', r.status); continue; }
       const d = await r.json();
       const text = d.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
-      if (!text) { console.warn(model, 'empty response'); continue; }
+      if (!text) { console.warn('[Coach]', model, '→ empty'); continue; }
+      console.log('[Coach]', model, '→ OK', text.length, 'chars');
       return { success: true, text, model };
-    } catch(e) { console.warn(model, e.message); continue; }
+    } catch(e) { console.warn('[Coach]', model, '→', e.message); continue; }
   }
   return { success: false, error: 'Tutti i modelli occupati. Riprova tra 1 minuto.' };
+}
+
+// ── Build API messages (strip binary data from history) ────
+function buildApiMessages(messages) {
+  return messages
+    .filter(m => !m._isError)  // never send error bubbles to API
+    .map((m, idx) => {
+      const role = m.role;
+      let parts = m.parts || [];
+      // Keep inlineData only in the first user message (reference image)
+      // — subsequent calls strip it to avoid huge payloads
+      if (idx > 0 && role === 'user') {
+        parts = parts.filter(p => p.text !== undefined);
+        if (!parts.length) parts = [{ text: '...' }];
+      }
+      return { role, parts };
+    });
 }
 
 // ── Context loader ─────────────────────────────────────────
@@ -79,9 +101,9 @@ function fmtCheck(c) {
   if (ms.shoulders) parts.push(`Spalle: ${ms.shoulders}cm`);
   if (ms.chest) parts.push(`Petto: ${ms.chest}cm`);
   if (ms.waist) parts.push(`Vita: ${ms.waist}cm`);
-  const bicep = ms.bicep ?? ((ms.bicep_l != null && ms.bicep_r != null) ? ((ms.bicep_l + ms.bicep_r) / 2) : null);
+  const bicep = ms.bicep ?? ((ms.bicep_l != null && ms.bicep_r != null) ? (ms.bicep_l + ms.bicep_r) / 2 : null);
   if (bicep != null) parts.push(`Braccia: ${parseFloat(bicep).toFixed(1)}cm`);
-  const thigh = ms.thigh ?? ((ms.thigh_l != null && ms.thigh_r != null) ? ((ms.thigh_l + ms.thigh_r) / 2) : null);
+  const thigh = ms.thigh ?? ((ms.thigh_l != null && ms.thigh_r != null) ? (ms.thigh_l + ms.thigh_r) / 2 : null);
   if (thigh != null) parts.push(`Gambe: ${parseFloat(thigh).toFixed(1)}cm`);
   return parts.join(', ') || 'nessuna misura';
 }
@@ -90,40 +112,49 @@ function fmtProgram(p) {
   if (!p) return 'nessuna scheda';
   const days = Object.keys(p.schedule || {});
   const exCount = days.reduce((t, d) => t + (p.schedule[d]?.exercises?.length || 0), 0);
-  return `"${p.name}" — ${days.length} giorni/sett. (${days.join(', ')}), ${exCount} esercizi totali`;
+  const since = p.created_at ? `· in uso da: ${new Date(p.created_at).toLocaleDateString('it-IT')}` : '';
+  return `"${p.name}" — ${days.length} giorni/sett. (${days.join(', ')}), ${exCount} esercizi ${since}`;
 }
 
 function fmtDiet(d) {
   if (!d) return 'nessuna dieta';
-  const on = d.day_on || {};
-  const off = d.day_off || {};
-  const meals = (on.meals || []).map(m => `${m.label || m.type} ${m.time ? `(${m.time})` : ''}: ${m.kcal}kcal`).join(', ');
-  return `"${d.name}" — ON: ${on.kcal||0}kcal / P${on.protein||0}g C${on.carbs||0}g F${on.fats||0}g | OFF: ${off.kcal||0}kcal${meals ? ` | Pasti ON: ${meals}` : ''}`;
+  const on = d.day_on || {}, off = d.day_off || {};
+  const since = d.updated_at ? `· aggiornata: ${new Date(d.updated_at).toLocaleDateString('it-IT')}` : '';
+  return `"${d.name}" — ON: ${on.kcal||0}kcal P${on.protein||0}g C${on.carbs||0}g F${on.fats||0}g | OFF: ${off.kcal||0}kcal ${since}`;
 }
 
 function buildSystemPrompt(type, ctx, goal) {
+  const todayFmt = new Date().toLocaleDateString('it-IT', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+  });
+
   const ctxBlock = `
-📊 DATI ATLETA AGGIORNATI:
+📅 DATA ODIERNA: ${todayFmt}
+📊 DATI ATLETA:
 • Ultimo check (${ctx.lastCheck?.date || 'n/d'}): ${fmtCheck(ctx.lastCheck)}
 • Scheda attuale: ${fmtProgram(ctx.activeProgram)}
 • Dieta attuale: ${fmtDiet(ctx.activeDiet)}
 • Obiettivo dichiarato: ${goal}
 `;
 
+  const jsonNote = `
+FORMATO JSON OBBLIGATORIO:
+Ogni volta che proponi o aggiorni il piano, DEVI includere sempre il JSON strutturato in fondo al messaggio, dentro i tag appropriati. Questo genera automaticamente una preview visiva per l'utente. Aggiorna il JSON ad ogni modifica.
+L'utente userà i bottoni "Salva" quando è soddisfatto — tu includi sempre il JSON aggiornato.`;
+
   if (type === 'workout') {
     return `Sei KOVA Coach, un personal trainer d'élite. Parli SEMPRE in italiano. Sei diretto, tecnico e motivante.
 ${ctxBlock}
-Il tuo compito è progettare un programma di allenamento personalizzato attraverso una conversazione.
+Il tuo compito è progettare un programma di allenamento personalizzato tramite conversazione.
 
 LINEE GUIDA:
-• Proponi subito un piano COMPLETO e DETTAGLIATO: giorni, esercizi, serie, ripetizioni, recuperi, note tecniche
-• Usa progressioni scientifiche (periodizzazione, sovraccarico progressivo)
-• Considera l'esperienza attuale dell'atleta dedotta dai dati
-• Sii specifico: angolazioni, prese, accorgimenti tecnici quando rilevante
-• Dopo la proposta, chiedi feedback e raffina il piano
-• Se l'utente invia un'immagine di riferimento fisico, analizzala e commenta come il piano si allinea a quell'obiettivo
-
-QUANDO L'UTENTE È SODDISFATTO E VUOLE SALVARE, inserisci il JSON in questo formato ESATTO:
+• Proponi subito un piano COMPLETO: giorni, esercizi, serie, ripetizioni, recuperi, note tecniche
+• Considera la data odierna per stabilire una data di inizio realistica (es. prossimo lunedì)
+• Tieni conto di quanto tempo l'atleta è sulla scheda attuale (se disponibile) per calibrare la difficoltà
+• Usa periodizzazione e sovraccarico progressivo
+• Dopo la proposta, ascolta il feedback e aggiorna il piano
+• Se l'utente invia un'immagine di riferimento fisico, analizzala
+${jsonNote}
 
 <SCHEDA_JSON>
 {
@@ -141,50 +172,43 @@ QUANDO L'UTENTE È SODDISFATTO E VUOLE SALVARE, inserisci il JSON in questo form
 }
 </SCHEDA_JSON>
 
-Giorni validi (in italiano minuscolo): lunedi, martedi, mercoledi, giovedi, venerdi, sabato, domenica.
-Il campo "cardio" è null o una stringa descrittiva (es. "20 min LISS 130bpm").
-Includi il JSON SOLO quando l'utente chiede esplicitamente di salvare/finalizzare.`;
+Giorni validi (minuscolo): lunedi, martedi, mercoledi, giovedi, venerdi, sabato, domenica.
+"cardio" è null oppure stringa (es. "20 min LISS 130bpm").
+"reps" è sempre stringa (es. "8-10", "12", "30 sec").`;
 
   } else {
     return `Sei KOVA Coach, un nutrizionista sportivo d'élite. Parli SEMPRE in italiano. Sei preciso, scientifico e motivante.
 ${ctxBlock}
-Il tuo compito è progettare un piano alimentare personalizzato attraverso una conversazione.
+Il tuo compito è progettare un piano alimentare personalizzato tramite conversazione.
 
 LINEE GUIDA:
-• Proponi subito un piano COMPLETO con macro giorno ON e OFF, e tutti i pasti dettagliati
-• Indica alimenti specifici con grammature, macro per pasto, timing ottimale
-• Considera l'obiettivo, il peso attuale, l'intensità degli allenamenti
-• Usa principi scientifici: timing proteico, carboidrati peri-workout, grassi sani
+• Proponi subito un piano COMPLETO con macro ON/OFF e tutti i pasti con alimenti e grammature specifiche
+• Considera la data odierna per suggerire quando iniziare il piano
+• Calcola i macro partendo da peso corporeo (se disponibile) e obiettivo
+• Timing proteico, carbo peri-workout, grassi sani — sii scientifico
 • Proponi varianti pratiche per ogni pasto
-• Dopo la proposta, chiedi feedback e raffina
-
-QUANDO L'UTENTE È SODDISFATTO E VUOLE SALVARE, inserisci il JSON in questo formato ESATTO:
+• Dopo la proposta, ascolta il feedback e aggiorna
+${jsonNote}
 
 <DIETA_JSON>
 {
   "name": "Nome del Piano",
   "day_on": {
-    "kcal": 0,
-    "protein": 0,
-    "carbs": 0,
-    "fats": 0,
+    "kcal": 0, "protein": 0, "carbs": 0, "fats": 0,
     "meals": [
-      { "type": "colazione", "label": "Colazione", "time": "07:30", "items": "Descrizione ingredienti", "kcal": 0, "protein": 0, "carbs": 0, "fats": 0, "variants": null }
+      { "type": "colazione", "label": "Colazione", "time": "07:30",
+        "items": "Descrizione ingredienti con grammature", "kcal": 0, "protein": 0, "carbs": 0, "fats": 0, "variants": null }
     ]
   },
   "day_off": {
-    "kcal": 0,
-    "protein": 0,
-    "carbs": 0,
-    "fats": 0,
-    "meals": []
+    "kcal": 0, "protein": 0, "carbs": 0, "fats": 0, "meals": []
   }
 }
 </DIETA_JSON>
 
 Tipi pasto validi: colazione, pre_workout, post_workout, spuntino, pranzo, merenda, cena.
 I macro totali (kcal/protein/carbs/fats) DEVONO essere la somma esatta dei singoli pasti.
-Includi il JSON SOLO quando l'utente chiede esplicitamente di salvare/finalizzare.`;
+"items" è una stringa descrittiva (es. "200g petto di pollo, 80g riso basmati, olio evo 10g").`;
   }
 }
 
@@ -194,12 +218,74 @@ function extractPlan(text, type) {
   const re = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`);
   const m = text.match(re);
   if (!m) return null;
-  try { return JSON.parse(m[1].trim()); } catch(e) { console.warn('Plan parse error:', e); return null; }
+  try { return JSON.parse(m[1].trim()); } catch(e) {
+    console.warn('[Coach] Plan JSON parse error:', e.message);
+    return null;
+  }
 }
 
 function cleanDisplayText(text, type) {
   const tag = type === 'workout' ? 'SCHEDA_JSON' : 'DIETA_JSON';
   return text.replace(new RegExp(`<${tag}>[\\s\\S]*?<\\/${tag}>`, 'g'), '').trim();
+}
+
+// ── Plan preview card ──────────────────────────────────────
+function renderPlanCard(plan, type) {
+  if (!plan) return '';
+
+  if (type === 'workout') {
+    const days = Object.keys(plan.schedule || {});
+    const totalEx = days.reduce((t, d) => t + (plan.schedule[d]?.exercises?.length || 0), 0);
+    const dayCols = days.map(d => {
+      const s = plan.schedule[d] || {};
+      return `<div style="background:rgba(255,255,255,0.05);padding:8px;border-radius:10px;min-width:0;flex:1">
+        <div style="font-size:11px;font-weight:800;color:var(--t1);text-transform:capitalize;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${d}</div>
+        <div style="font-size:10px;color:var(--t3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.name || ''}</div>
+        <div style="font-size:11px;color:var(--accent);margin-top:4px;font-weight:700">${(s.exercises||[]).length} es.</div>
+        ${s.time ? `<div style="font-size:10px;color:var(--t3)">⏰ ${s.time}</div>` : ''}
+      </div>`;
+    }).join('');
+    return `
+      <div style="border:1px solid rgba(124,111,255,0.35);border-radius:14px;padding:14px;background:rgba(124,111,255,0.07);margin-top:4px">
+        <div style="font-size:10px;font-weight:800;color:var(--accent);letter-spacing:1px;margin-bottom:8px">📋 PIANO PROPOSTO</div>
+        <div style="font-size:15px;font-weight:900;color:var(--t1);margin-bottom:10px">${plan.name}</div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap">${dayCols}</div>
+        <div style="font-size:11px;color:var(--t3);margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06)">
+          ${days.length} giorni/sett. · ${totalEx} esercizi totali
+        </div>
+      </div>`;
+
+  } else {
+    const on = plan.day_on || {}, off = plan.day_off || {};
+    const mealRows = (on.meals || []).map(m =>
+      `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:11px">
+        <span style="color:var(--t2)">${m.label || m.type}${m.time ? ` · ${m.time}` : ''}</span>
+        <span style="color:var(--green);font-weight:700">${m.kcal} kcal</span>
+      </div>`
+    ).join('');
+    return `
+      <div style="border:1px solid rgba(124,111,255,0.35);border-radius:14px;padding:14px;background:rgba(124,111,255,0.07);margin-top:4px">
+        <div style="font-size:10px;font-weight:800;color:var(--accent);letter-spacing:1px;margin-bottom:8px">📋 PIANO PROPOSTO</div>
+        <div style="font-size:15px;font-weight:900;color:var(--t1);margin-bottom:12px">${plan.name}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+          <div style="background:rgba(255,255,255,0.05);padding:10px;border-radius:10px;text-align:center">
+            <div style="font-size:10px;color:var(--accent);font-weight:800;margin-bottom:6px">💪 GIORNO ON</div>
+            <div style="font-size:22px;font-weight:900;color:var(--t1);line-height:1">${on.kcal||0}</div>
+            <div style="font-size:10px;color:var(--t3);margin-bottom:6px">kcal</div>
+            <div style="font-size:11px;color:var(--t2)">P <b>${on.protein||0}g</b></div>
+            <div style="font-size:11px;color:var(--t2)">C <b>${on.carbs||0}g</b> · F <b>${on.fats||0}g</b></div>
+          </div>
+          <div style="background:rgba(255,255,255,0.05);padding:10px;border-radius:10px;text-align:center">
+            <div style="font-size:10px;color:#60a5fa;font-weight:800;margin-bottom:6px">😴 GIORNO OFF</div>
+            <div style="font-size:22px;font-weight:900;color:var(--t1);line-height:1">${off.kcal||0}</div>
+            <div style="font-size:10px;color:var(--t3);margin-bottom:6px">kcal</div>
+            <div style="font-size:11px;color:var(--t2)">P <b>${off.protein||0}g</b></div>
+            <div style="font-size:11px;color:var(--t2)">C <b>${off.carbs||0}g</b> · F <b>${off.fats||0}g</b></div>
+          </div>
+        </div>
+        ${mealRows ? `<div style="font-size:11px;font-weight:800;color:var(--t3);margin-bottom:4px">Pasti giorno ON:</div>${mealRows}` : ''}
+      </div>`;
+  }
 }
 
 // ── Apply plan to Firestore ────────────────────────────────
@@ -218,9 +304,10 @@ async function applyPlanToFirestore(plan, type, isDraft) {
         if (!day) return { kcal: 0, protein: 0, carbs: 0, fats: 0, meals: [] };
         const meals = (day.meals || []).map(m => ({
           type: m.type || 'pranzo', label: m.label || '', time: m.time || '',
-          items: m.items || '', kcal: Number(m.kcal) || 0,
-          protein: Number(m.protein) || 0, carbs: Number(m.carbs) || 0,
-          fats: Number(m.fats) || 0, variants: m.variants || null
+          items: m.items || '',
+          kcal: Number(m.kcal) || 0, protein: Number(m.protein) || 0,
+          carbs: Number(m.carbs) || 0, fats: Number(m.fats) || 0,
+          variants: m.variants || null
         }));
         const sum = meals.reduce((a, m) => ({
           kcal: a.kcal + m.kcal, protein: a.protein + m.protein,
@@ -237,31 +324,32 @@ async function applyPlanToFirestore(plan, type, isDraft) {
       });
     }
     return true;
-  } catch(e) { console.error('Apply plan error:', e); return false; }
+  } catch(e) { console.error('[Coach] Apply plan error:', e); return false; }
 }
 
-// ── Inject styles once ─────────────────────────────────────
+// ── Styles ─────────────────────────────────────────────────
 function injectStyles() {
   if (document.getElementById('coach-style')) return;
-  const style = document.createElement('style');
-  style.id = 'coach-style';
-  style.textContent = `
-    @keyframes coachSlideUp { from { transform:translateY(100%); opacity:0; } to { transform:translateY(0); opacity:1; } }
-    @keyframes coachFadeIn  { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
-    @keyframes coachPulse   { 0%,100% { opacity:0.3; transform:scale(0.8); } 50% { opacity:1; transform:scale(1); } }
-    .coach-overlay { position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;flex-direction:column;animation:coachSlideUp 0.3s ease-out; }
-    .coach-msg { animation:coachFadeIn 0.25s ease-out; }
-    .coach-dots span { display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent);margin:0 2px;animation:coachPulse 1.2s infinite; }
-    .coach-dots span:nth-child(2) { animation-delay:0.2s; }
-    .coach-dots span:nth-child(3) { animation-delay:0.4s; }
-    .coach-bubble-user { background:var(--accent);color:#fff;border-radius:18px 18px 4px 18px; }
-    .coach-bubble-ai   { background:var(--card);color:var(--t1);border-radius:4px 18px 18px 18px; }
-    .coach-input-area  { display:flex;gap:8px;align-items:flex-end;padding:12px 16px;border-top:1px solid var(--border);background:var(--bg);flex-shrink:0; }
-    .coach-send-btn    { width:44px;height:44px;border-radius:12px;border:none;background:var(--accent);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:16px;transition:opacity 0.2s; }
-    .coach-send-btn:disabled { opacity:0.4;cursor:default; }
-    .coach-plan-banner { padding:14px 16px;border-top:1px solid rgba(124,111,255,0.4);background:linear-gradient(135deg,rgba(124,111,255,0.18),rgba(124,111,255,0.06));flex-shrink:0; }
+  const s = document.createElement('style');
+  s.id = 'coach-style';
+  s.textContent = `
+    @keyframes coachSlideUp { from { transform:translateY(100%);opacity:0 } to { transform:translateY(0);opacity:1 } }
+    @keyframes coachFadeIn  { from { opacity:0;transform:translateY(6px) } to { opacity:1;transform:translateY(0) } }
+    @keyframes coachPulse   { 0%,100% { opacity:0.3;transform:scale(0.8) } 50% { opacity:1;transform:scale(1) } }
+    .coach-overlay  { position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;flex-direction:column;animation:coachSlideUp 0.3s ease-out }
+    .coach-msg      { animation:coachFadeIn 0.25s ease-out }
+    .coach-dots span { display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent);margin:0 2px;animation:coachPulse 1.2s infinite }
+    .coach-dots span:nth-child(2) { animation-delay:.2s }
+    .coach-dots span:nth-child(3) { animation-delay:.4s }
+    .coach-bubble-u { background:var(--accent);color:#fff;border-radius:18px 18px 4px 18px;max-width:85%;padding:11px 14px;font-size:13px;line-height:1.6;word-break:break-word }
+    .coach-bubble-a { background:var(--card);color:var(--t1);border-radius:4px 18px 18px 18px;max-width:92%;padding:11px 14px;font-size:13px;line-height:1.6;word-break:break-word }
+    .coach-bubble-e { background:rgba(255,59,59,0.1);border:1px solid rgba(255,59,59,0.2);color:var(--red,#ff4444);border-radius:4px 14px 14px 14px;max-width:88%;padding:10px 14px;font-size:13px;line-height:1.5 }
+    .coach-input-area { display:flex;gap:8px;align-items:flex-end;padding:12px 16px;border-top:1px solid var(--border);background:var(--bg);flex-shrink:0 }
+    .coach-send-btn { width:44px;height:44px;border-radius:12px;border:none;background:var(--accent);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:16px;transition:opacity .2s }
+    .coach-send-btn:disabled { opacity:0.35;cursor:default }
+    .coach-plan-banner { padding:14px 16px;border-top:1px solid rgba(124,111,255,0.4);background:linear-gradient(135deg,rgba(124,111,255,0.18),rgba(124,111,255,0.05));flex-shrink:0 }
   `;
-  document.head.appendChild(style);
+  document.head.appendChild(s);
 }
 
 // ── Open panel ─────────────────────────────────────────────
@@ -269,15 +357,13 @@ export function openCoachPanel(type) {
   injectStyles();
   session = { type, messages: [], context: null, plan: null, busy: false, systemPrompt: '' };
 
-  let overlay = document.getElementById('coach-overlay');
-  if (overlay) overlay.remove();
-  overlay = document.createElement('div');
+  document.getElementById('coach-overlay')?.remove();
+  const overlay = document.createElement('div');
   overlay.id = 'coach-overlay';
   overlay.className = 'coach-overlay';
   document.body.appendChild(overlay);
 
   renderSetupPhase();
-
   loadContext().then(ctx => {
     session.context = ctx;
     const el = document.getElementById('coach-ctx-body');
@@ -290,11 +376,11 @@ window.openCoachPanel = openCoachPanel;
 function renderSetupPhase() {
   const overlay = document.getElementById('coach-overlay');
   if (!overlay) return;
-  const type = session.type;
-  const title = type === 'workout' ? '🏋️ AI Coach Schede' : '🥗 AI Coach Dieta';
-  const ph = type === 'workout'
-    ? 'Es: Voglio aumentare la massa muscolare, mi alleno 4 volte a settimana, ho buona esperienza con i pesi da 2 anni...'
-    : 'Es: Voglio fare un bulk lean, parto da 80kg, mi alleno 4 volte a settimana, lavoro d\'ufficio...';
+  const isWorkout = session.type === 'workout';
+  const title = isWorkout ? '🏋️ AI Coach Schede' : '🥗 AI Coach Dieta';
+  const ph = isWorkout
+    ? 'Es: Voglio aumentare la massa muscolare, mi alleno 4 volte/sett., ho esperienza con i pesi da 2 anni...'
+    : 'Es: Voglio un bulk lean, parto da 80kg, mi alleno 4 volte/sett., lavoro d\'ufficio...';
 
   overlay.innerHTML = `
     <div style="display:flex;flex-direction:column;height:100%;overflow:hidden">
@@ -308,17 +394,13 @@ function renderSetupPhase() {
       </div>
 
       <div style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px">
-
-        <div class="card" style="background:linear-gradient(135deg,rgba(124,111,255,0.15),rgba(124,111,255,0.04));border:1px solid rgba(124,111,255,0.25);margin:0">
+        <div class="card" style="background:linear-gradient(135deg,rgba(124,111,255,0.15),rgba(124,111,255,0.03));border:1px solid rgba(124,111,255,0.25);margin:0">
           <div style="font-size:13px;font-weight:800;color:var(--accent);margin-bottom:6px">✨ Come funziona</div>
-          <div style="font-size:12px;color:var(--t2);line-height:1.65">
-            Descrivi il tuo obiettivo. Il coach analizzerà i tuoi dati attuali (check, scheda, dieta) e creerà un piano personalizzato.
-            Puoi chattare per raffinarlo, poi salvarlo come bozza o definitivo.
-          </div>
+          <div style="font-size:12px;color:var(--t2);line-height:1.65">Descrivi il tuo obiettivo. Il coach legge i tuoi dati attuali (check, scheda, dieta) e crea un piano su misura. Chatti con lui per raffinarlo — ogni risposta include una preview del piano aggiornato. Salvi quando sei soddisfatto.</div>
         </div>
 
         <div class="card" style="margin:0">
-          <div style="font-size:11px;font-weight:800;color:var(--t3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Dati caricati</div>
+          <div style="font-size:11px;font-weight:800;color:var(--t3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Contesto caricato</div>
           <div id="coach-ctx-body" style="font-size:12px;color:var(--t2)"><div class="spin" style="width:20px;height:20px"></div></div>
         </div>
 
@@ -332,19 +414,16 @@ function renderSetupPhase() {
           <label style="font-size:12px;font-weight:800;color:var(--t2);display:block;margin-bottom:4px">
             Immagine di riferimento <span style="color:var(--t3);font-weight:400">(opzionale)</span>
           </label>
-          <div style="font-size:11px;color:var(--t3);margin-bottom:10px">Fisico obiettivo, atleta di riferimento — il coach lo analizzerà</div>
+          <div style="font-size:11px;color:var(--t3);margin-bottom:10px">Fisico obiettivo o atleta di riferimento — il coach lo analizzerà</div>
           <input type="file" id="coach-img" accept="image/*" style="display:none" onchange="window._coachImgPreview(this)">
-          <button onclick="document.getElementById('coach-img').click()" class="btn btn-ghost btn-sm" style="width:auto">
-            📷 Scegli immagine
-          </button>
+          <button onclick="document.getElementById('coach-img').click()" class="btn btn-ghost btn-sm" style="width:auto">📷 Scegli immagine</button>
           <div id="coach-img-preview" style="margin-top:10px"></div>
         </div>
-
       </div>
 
       <div style="padding:16px;border-top:1px solid var(--border);flex-shrink:0">
         <button class="btn btn-v" style="width:100%;font-size:15px;padding:14px;font-weight:800" onclick="window._coachStart()">
-          🚀 Inizia la sessione con il Coach
+          🚀 Inizia sessione con il Coach
         </button>
       </div>
     </div>`;
@@ -355,9 +434,10 @@ function renderContextSummary(ctx) {
   if (ctx.lastCheck) {
     lines.push(`⚖️ <b style="color:var(--t1)">Ultimo check</b> (${ctx.lastCheck.date}): ${ctx.lastCheck.weight || '?'}kg`);
     const ms = ctx.lastCheck.measurements || {};
-    if (ms.waist) lines.push(`📏 Vita: ${ms.waist}cm${ms.chest ? `, Petto: ${ms.chest}cm` : ''}${ms.shoulders ? `, Spalle: ${ms.shoulders}cm` : ''}`);
+    const details = [ms.waist && `Vita: ${ms.waist}cm`, ms.chest && `Petto: ${ms.chest}cm`, ms.shoulders && `Spalle: ${ms.shoulders}cm`].filter(Boolean).join(', ');
+    if (details) lines.push(`📏 ${details}`);
   } else {
-    lines.push('⚖️ <span style="color:var(--t3)">Nessun check trovato</span>');
+    lines.push('⚖️ <span style="color:var(--t3)">Nessun check registrato</span>');
   }
   if (ctx.activeProgram) lines.push(`💪 <b style="color:var(--t1)">Scheda</b>: ${ctx.activeProgram.name}`);
   else lines.push('💪 <span style="color:var(--t3)">Nessuna scheda attiva</span>');
@@ -382,28 +462,22 @@ function switchToChatPhase() {
           <div id="coach-model-lbl" style="font-size:10px;color:var(--accent);font-weight:600">Powered by Gemini</div>
         </div>
         <button onclick="window._coachRestart()"
-          style="background:none;border:1px solid var(--border);color:var(--t3);font-size:11px;cursor:pointer;padding:5px 10px;border-radius:8px;white-space:nowrap">
-          ↺ Ricomincia
-        </button>
+          style="background:none;border:1px solid var(--border);color:var(--t3);font-size:11px;cursor:pointer;padding:5px 10px;border-radius:8px;white-space:nowrap">↺ Ricomincia</button>
       </div>
 
       <div id="coach-messages" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px"></div>
 
       <div id="coach-plan-banner" style="display:none" class="coach-plan-banner">
-        <div style="font-size:13px;font-weight:900;color:var(--accent);margin-bottom:10px">📋 Piano pronto! Come vuoi salvarlo?</div>
+        <div style="font-size:13px;font-weight:900;color:var(--accent);margin-bottom:10px">📋 Piano pronto — come vuoi salvarlo?</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <button class="btn btn-ghost btn-sm" onclick="window._applyPlan(true)" style="font-size:12px;padding:10px">
-            🔬 Bozza (simulatore)
-          </button>
-          <button class="btn btn-v btn-sm" onclick="window._applyPlan(false)" style="font-size:12px;padding:10px">
-            ✅ Salva definitivo
-          </button>
+          <button class="btn btn-ghost btn-sm" onclick="window._applyPlan(true)" style="font-size:12px;padding:10px">🔬 Bozza (inattiva)</button>
+          <button class="btn btn-v btn-sm" onclick="window._applyPlan(false)" style="font-size:12px;padding:10px">✅ Salva (inattivo)</button>
         </div>
-        <div style="font-size:10px;color:var(--t3);margin-top:6px;text-align:center">La bozza non sostituisce il piano attivo</div>
+        <div style="font-size:10px;color:var(--t3);margin-top:6px;text-align:center">Entrambe le opzioni salvano come INATTIVO — attivi manualmente da Schede/Dieta</div>
       </div>
 
       <div class="coach-input-area">
-        <textarea id="coach-input" class="fi" rows="1" placeholder="Scrivi al coach... (Invio per inviare)"
+        <textarea id="coach-input" class="fi" rows="1" placeholder="Rispondi al coach... (Invio per inviare)"
           style="flex:1;resize:none;font-size:13px;max-height:100px;overflow-y:auto;line-height:1.4"
           onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();window._coachSend()}"
           oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,100)+'px'"></textarea>
@@ -416,30 +490,54 @@ function switchToChatPhase() {
   renderMessages();
 }
 
+// ── Render messages ────────────────────────────────────────
+function fmtMarkdown(raw) {
+  return raw
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
+    .replace(/\*(.*?)\*/g, '<i>$1</i>')
+    .replace(/`(.*?)`/g, '<code style="background:rgba(255,255,255,0.1);padding:1px 5px;border-radius:4px;font-size:11px">$1</code>')
+    .replace(/^#{1,3}\s+(.+)$/gm, '<b style="font-size:14px;color:var(--t1)">$1</b>')
+    .replace(/\n/g, '<br>');
+}
+
 function renderMessages() {
   const el = document.getElementById('coach-messages');
   if (!el) return;
 
-  el.innerHTML = session.messages.map(m => {
+  const html = [];
+  let lastModelIdx = -1;
+
+  session.messages.forEach((m, i) => {
+    if (m.role === 'model' && !m._isError) lastModelIdx = i;
+  });
+
+  session.messages.forEach((m, i) => {
     const isUser = m.role === 'user';
     const text = m._displayText || m.parts?.find(p => p.text)?.text || '';
-    if (!text.trim()) return '';
-    const formatted = text
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
-      .replace(/\*(.*?)\*/g, '<i>$1</i>')
-      .replace(/`(.*?)`/g, '<code style="background:rgba(255,255,255,0.1);padding:1px 4px;border-radius:4px;font-size:12px">$1</code>')
-      .replace(/\n/g, '<br>');
-    return `
-      <div class="coach-msg" style="display:flex;flex-direction:column;align-items:${isUser ? 'flex-end' : 'flex-start'};gap:3px">
-        <div class="${isUser ? 'coach-bubble-user' : 'coach-bubble-ai'}"
-          style="max-width:88%;padding:11px 14px;font-size:13px;line-height:1.6;word-break:break-word">
-          ${formatted}
-        </div>
-        ${!isUser && m._model ? `<div style="font-size:10px;color:var(--t3);padding:0 4px">${m._model}</div>` : ''}
-      </div>`;
-  }).join('');
+    if (!text.trim()) return;
 
+    if (m._isError) {
+      html.push(`
+        <div class="coach-msg" style="display:flex;align-items:flex-start">
+          <div class="coach-bubble-e">${fmtMarkdown(text)}</div>
+        </div>`);
+      return;
+    }
+
+    html.push(`
+      <div class="coach-msg" style="display:flex;flex-direction:column;align-items:${isUser ? 'flex-end' : 'flex-start'};gap:3px">
+        <div class="${isUser ? 'coach-bubble-u' : 'coach-bubble-a'}">${fmtMarkdown(text)}</div>
+        ${!isUser && m._model ? `<div style="font-size:10px;color:var(--t3);padding:0 4px">${m._model}</div>` : ''}
+      </div>`);
+
+    // Show plan preview card after the last AI message that has a plan
+    if (!isUser && session.plan && i === lastModelIdx) {
+      html.push(`<div class="coach-msg">${renderPlanCard(session.plan, session.type)}</div>`);
+    }
+  });
+
+  el.innerHTML = html.join('');
   el.scrollTop = el.scrollHeight;
 
   const banner = document.getElementById('coach-plan-banner');
@@ -453,19 +551,14 @@ function addTypingIndicator() {
   d.id = 'coach-typing';
   d.className = 'coach-msg';
   d.style.cssText = 'display:flex;align-items:flex-start';
-  d.innerHTML = `
-    <div class="coach-bubble-ai" style="padding:12px 16px">
-      <div class="coach-dots"><span></span><span></span><span></span></div>
-    </div>`;
+  d.innerHTML = `<div class="coach-bubble-a" style="padding:12px 16px"><div class="coach-dots"><span></span><span></span><span></span></div></div>`;
   el.appendChild(d);
   el.scrollTop = el.scrollHeight;
 }
 
-function removeTypingIndicator() {
-  document.getElementById('coach-typing')?.remove();
-}
+function removeTypingIndicator() { document.getElementById('coach-typing')?.remove(); }
 
-// ── Global handlers (accessible from inline onclick) ───────
+// ── Global handlers ────────────────────────────────────────
 window._coachImgPreview = function(input) {
   const file = input.files[0];
   if (!file) return;
@@ -497,7 +590,7 @@ window._coachStart = async function() {
 
   const firstParts = [{ text: goal }];
   if (imageData) {
-    firstParts.push({ text: '\n[Ho allegato un\'immagine di riferimento fisico — analizzala nel contesto del mio obiettivo]' });
+    firstParts.push({ text: '[Immagine di riferimento allegata — analizzala]' });
     firstParts.push({ inlineData: imageData });
   }
 
@@ -526,13 +619,13 @@ window._coachRestart = function() {
 window._applyPlan = async function(isDraft) {
   if (!session?.plan) return;
   const banner = document.getElementById('coach-plan-banner');
-  if (banner) banner.innerHTML = `<div style="text-align:center;padding:8px"><div class="spin" style="width:24px;height:24px;margin:0 auto"></div></div>`;
+  if (banner) banner.innerHTML = `<div style="text-align:center;padding:10px"><div class="spin" style="width:24px;height:24px;margin:0 auto"></div></div>`;
 
   const ok = await applyPlanToFirestore(session.plan, session.type, isDraft);
   if (ok) {
     const dest = session.type === 'workout' ? 'Schede' : 'Dieta';
     const label = isDraft ? 'Bozza salvata' : 'Piano salvato';
-    showToast(`✅ ${label}! Vai su ${dest} per vederlo.`);
+    showToast(`✅ ${label}! Vai su ${dest} per vederlo (è inattivo).`);
     document.getElementById('coach-overlay')?.remove();
   } else {
     showToast('❌ Errore nel salvataggio. Riprova.', 'err');
@@ -540,14 +633,16 @@ window._applyPlan = async function(isDraft) {
   }
 };
 
+// ── Send to Gemini ─────────────────────────────────────────
 async function _sendToGemini() {
   session.busy = true;
   const sendBtn = document.getElementById('coach-send-btn');
   if (sendBtn) sendBtn.disabled = true;
-
   addTypingIndicator();
 
-  const apiMessages = session.messages.map(m => ({ role: m.role, parts: m.parts }));
+  const apiMessages = buildApiMessages(session.messages);
+  console.log('[Coach] Sending', apiMessages.length, 'messages, turn', Math.ceil(apiMessages.length / 2));
+
   const r = await callGemini(apiMessages, session.systemPrompt);
 
   removeTypingIndicator();
@@ -555,14 +650,21 @@ async function _sendToGemini() {
   if (sendBtn) sendBtn.disabled = false;
 
   if (!r.success) {
-    showToast('❌ ' + r.error, 'err');
+    // Inline error bubble — NOT added to API history (filtered by _isError)
+    session.messages.push({
+      role: 'model',
+      parts: [{ text: r.error }],
+      _displayText: `❌ ${r.error}\n\nRiprova a inviare il messaggio.`,
+      _isError: true
+    });
+    renderMessages();
     return;
   }
 
   const plan = extractPlan(r.text, session.type);
   if (plan) session.plan = plan;
 
-  const displayText = plan ? cleanDisplayText(r.text, session.type) : r.text;
+  const displayText = cleanDisplayText(r.text, session.type);
 
   session.messages.push({
     role: 'model',
