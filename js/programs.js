@@ -11,12 +11,19 @@ let formSched = {};
 // ── Load & render ──────────────────────────────────────────
 async function loadPrograms() {
   const el = document.getElementById('prg-list');
+  if (!el) return;
   el.innerHTML = '<div class="spin"></div>';
-  const snap = await getDocs(collection(db, 'users', USER_ID, 'programs'));
-  programs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  programs.sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0));
-  renderList();
+  try {
+    const snap = await getDocs(collection(db, 'users', USER_ID, 'programs'));
+    programs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    programs.sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0));
+    renderList();
+  } catch(e) {
+    console.error('loadPrograms error:', e);
+    el.innerHTML = `<div class="empty"><span class="ei">⚠️</span><p>Errore caricamento schede.<br><button class="btn btn-ghost btn-sm" onclick="window.loadPrograms()">↺ Riprova</button></p></div>`;
+  }
 }
+window.loadPrograms = loadPrograms;
 
 function renderList() {
   const el = document.getElementById('prg-list');
