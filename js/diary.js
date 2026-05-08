@@ -1,7 +1,7 @@
 import {
   db, USER_ID, collection, doc, getDoc, getDocs, setDoc, deleteField, query, where, orderBy, limit
 } from './firebase-config.js';
-import { getTodayString, getDayOfWeek, formatDateIT, formatDateShort, showToast, DAYS_IT, DAY_ORDER, calcFitScore } from './app.js';
+import { getTodayString, getDayOfWeek, formatDateIT, formatDateShort, showToast, DAYS_IT, DAY_ORDER } from './app.js';
 
 const TODAY = getTodayString();
 let currentMonth = new Date(TODAY + 'T12:00:00');
@@ -300,37 +300,84 @@ async function getActiveDietPlan() {
 }
 
 function computeDayBadge(log, plan, isOn) {
-  const fakePlan = plan ? { kcal: plan.kcal || 0, macros: { protein: plan.protein || 0 } } : null;
-  const fakeLog = {
-    workout:   { completed: !!log.workout?.completed },
-    nutrition: { kcal: log.nutrition?.totals?.kcal || 0, protein: log.nutrition?.totals?.protein || 0 },
-    steps:     log.steps || 0
-  };
-  const objective = programData?.objective || 'recomposizione';
+  const kcal    = log.nutrition?.totals?.kcal    || 0;
+  const protein = log.nutrition?.totals?.protein || 0;
+  const steps   = log.steps || 0;
+  const workoutDone = !!log.workout?.completed;
+
+  // Pasti (40pt) — aderenza kcal ±10%
+  let pastiPt = 0;
+  if (plan?.kcal > 0 && kcal > 0) {
+    const r = kcal / plan.kcal;
+    if (r >= 0.9 && r <= 1.1) pastiPt = 40;
+    else if (r >= 0.8 && r <= 1.2) pastiPt = 25;
+    else pastiPt = 10;
+  } else if (kcal > 0) {
+    pastiPt = 20;
+  }
+
+  // Allenamento (35pt)
+  let allenamPt = 0;
+  if (!isOn) allenamPt = 35;
+  else if (workoutDone) allenamPt = 35;
+
+  // Passi (15pt)
   const stepsGoal = settingsData?.steps_goal || 0;
-  const result = calcFitScore({ log: fakeLog, plan: fakePlan, isOn, objective, stepsGoal });
-  if (!result) return '';
+  let passiPt = 0;
+  if (stepsGoal <= 0) {
+    passiPt = 15;
+  } else if (steps > 0) {
+    const r = steps / stepsGoal;
+    if (r >= 1) passiPt = 15;
+    else if (r >= 0.75) passiPt = 10;
+    else if (r >= 0.5) passiPt = 5;
+  }
 
-  const { score, label, breakdown } = result;
-  const scoreCol = score >= 75 ? 'var(--green)' : score >= 50 ? 'var(--yellow)' : 'var(--orange)';
+  // Proteine (10pt)
+  let protPt = 0;
+  const planPro = plan?.protein || 0;
+  if (planPro > 0 && protein > 0) {
+    if (protein >= planPro * 0.9) protPt = 10;
+    else if (protein >= planPro * 0.75) protPt = 6;
+    else protPt = 2;
+  } else if (protein > 0) {
+    protPt = 5;
+  }
 
+  const score = pastiPt + allenamPt + passiPt + protPt;
+  const col = score >= 90 ? '#00dc78' : score >= 75 ? '#4ade80' : score >= 55 ? '#fbbf24' : score >= 35 ? '#ff6a00' : '#ff3b3b';
+  const label = score >= 90 ? 'Eccellente' : score >= 75 ? 'Ottimo' : score >= 55 ? 'Nella media' : score >= 35 ? 'Da migliorare' : 'Critico';
+
+  const r = 22, cx = 27, cy = 27;
+  const circ = 2 * Math.PI * r;
+  const offset = circ * (1 - score / 100);
+
+  const breakdown = [
+    { label: 'Pasti', pts: pastiPt, max: 40, ok: pastiPt >= 30 },
+    { label: 'Gym',   pts: allenamPt, max: 35, ok: allenamPt >= 25 },
+    { label: 'Passi', pts: passiPt,   max: 15, ok: passiPt >= 10 },
+    { label: 'Pro',   pts: protPt,    max: 10, ok: protPt >= 7 }
+  ];
   const dots = breakdown.map(b =>
-    `<span style="color:${b.ok ? 'var(--green)' : 'var(--t3)'};font-size:11px">${b.label}: ${b.score}/${b.max}</span>`
+    `<span style="color:${b.ok ? '#4ade80' : 'var(--t3)'};font-size:11px">${b.label}: ${b.pts}/${b.max}</span>`
   ).join(' · ');
 
-  return `<div style="padding:10px 12px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;margin-bottom:12px">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-      <div style="font-size:28px;font-weight:900;color:${scoreCol};letter-spacing:-1px">${score}</div>
-      <div>
-        <div style="font-size:13px;font-weight:800;color:${scoreCol}">${label}</div>
-        <div style="font-size:10px;color:var(--t3)">FitScore / 100</div>
+  return `
+    <div style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;margin-bottom:12px">
+      <svg width="54" height="54" viewBox="0 0 54 54" style="flex-shrink:0">
+        <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="5"/>
+        <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${col}" stroke-width="5"
+          stroke-dasharray="${circ.toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}" stroke-linecap="round"
+          transform="rotate(-90 ${cx} ${cy})" style="filter:drop-shadow(0 0 4px ${col}80)"/>
+        <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central"
+          font-size="13" font-weight="900" fill="${col}">${score}</text>
+      </svg>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:800;color:${col};margin-bottom:2px">${label}</div>
+        <div style="font-size:10px;color:var(--t3);margin-bottom:6px">SmartScore / 100</div>
+        <div style="line-height:1.9">${dots}</div>
       </div>
-      <div style="flex:1;margin-left:4px">
-        <div class="pbb h4"><div class="pbf" style="width:${score}%;background:${scoreCol}"></div></div>
-      </div>
-    </div>
-    <div style="line-height:1.9">${dots}</div>
-  </div>`;
+    </div>`;
 }
 
 // ── Tab switcher ───────────────────────────────────────────

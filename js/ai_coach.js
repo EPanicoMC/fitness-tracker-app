@@ -627,6 +627,8 @@ window._applyPlan = async function(isDraft) {
     const label = isDraft ? 'Bozza salvata' : 'Piano salvato';
     showToast(`✅ ${label}! Vai su ${dest} per vederlo (è inattivo).`);
     document.getElementById('coach-overlay')?.remove();
+    if (session.type === 'diet' && typeof window.loadDiets === 'function') window.loadDiets();
+    if (session.type === 'workout' && typeof window.loadPrograms === 'function') window.loadPrograms();
   } else {
     showToast('❌ Errore nel salvataggio. Riprova.', 'err');
     renderMessages();
