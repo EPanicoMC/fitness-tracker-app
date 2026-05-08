@@ -401,11 +401,23 @@ function buildFitScore() {
   const plan   = activeDiet?.[dayKey] || null;
   const tots   = calcTotals();
 
+  // No plan: show neutral hero ring with setup prompt
   if (!plan) {
-    box.innerHTML = `<div class="fitscore-card">
-      <span class="clabel"><i class="ri-pulse-fill" style="color:var(--orange)"></i> SmartScore</span>
-      <div style="font-size:13px;color:var(--t2)">Nessun piano dieta attivo.</div>
-    </div>`;
+    const S = 180, R = 72, SW = 9;
+    const C = 2 * Math.PI * R;
+    box.innerHTML = `
+      <div style="display:flex;flex-direction:column;align-items:center;text-align:center">
+        <div style="position:relative;width:${S}px;height:${S}px">
+          <svg width="${S}" height="${S}" viewBox="0 0 ${S} ${S}" style="transform:rotate(-90deg)">
+            <circle cx="${S/2}" cy="${S/2}" r="${R}" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="${SW}"/>
+          </svg>
+          <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px">
+            <div style="font-size:36px;font-weight:700;color:var(--t3);letter-spacing:-1px">—</div>
+            <div style="font-size:8px;letter-spacing:2px;color:var(--t3);font-weight:800">SMARTSCORE</div>
+          </div>
+        </div>
+        <div style="font-size:13px;color:var(--t2);margin-top:12px">Configura un piano dieta per attivare lo SmartScore</div>
+      </div>`;
     return;
   }
 
@@ -425,53 +437,78 @@ function buildFitScore() {
   if (!result) { box.innerHTML = ''; return; }
 
   const { score, label, icon, breakdown } = result;
-  const col = score >= 90 ? 'var(--green)' : score >= 75 ? '#4ade80' : score >= 55 ? 'var(--yellow)' : score >= 35 ? 'var(--orange)' : 'var(--red)';
 
-  const R = 38, C = 2 * Math.PI * R;
+  // Color + glow by score band
+  let col, glowRGB;
+  if      (score >= 90) { col = '#00dc78'; glowRGB = '0,220,120'; }
+  else if (score >= 75) { col = '#4ade80'; glowRGB = '74,222,128'; }
+  else if (score >= 55) { col = '#fbbf24'; glowRGB = '251,191,36'; }
+  else if (score >= 35) { col = '#ff6a00'; glowRGB = '255,106,0'; }
+  else                  { col = '#ff3b3b'; glowRGB = '255,59,59'; }
+
+  const S = 180, R = 72, SW = 9;
+  const C = 2 * Math.PI * R;
   const dash = (score / 100) * C;
 
-  box.innerHTML = `<div class="fitscore-card">
-    <span class="clabel"><i class="ri-pulse-fill" style="color:var(--orange)"></i> SmartScore — andamento attuale</span>
-    <div class="fitscore-top" style="align-items:center;gap:14px">
-      <div style="position:relative;width:88px;height:88px;flex-shrink:0">
-        <svg width="88" height="88" viewBox="0 0 88 88" style="transform:rotate(-90deg)">
-          <circle cx="44" cy="44" r="${R}" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="8"/>
-          <circle cx="44" cy="44" r="${R}" fill="none" stroke="${col}" stroke-width="8"
-            stroke-dasharray="${dash.toFixed(1)} ${C.toFixed(1)}" stroke-linecap="round" style="transition:stroke-dasharray 0.6s ease"/>
+  box.innerHTML = `
+    <div style="display:flex;flex-direction:column;align-items:center;text-align:center">
+
+      <!-- Hero ring -->
+      <div style="position:relative;width:${S}px;height:${S}px">
+        <svg width="${S}" height="${S}" viewBox="0 0 ${S} ${S}"
+          style="transform:rotate(-90deg);filter:drop-shadow(0 0 14px rgba(${glowRGB},0.38))">
+          <circle cx="${S/2}" cy="${S/2}" r="${R}" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="${SW}"/>
+          <circle cx="${S/2}" cy="${S/2}" r="${R}" fill="none" stroke="${col}" stroke-width="${SW}"
+            stroke-dasharray="${dash.toFixed(1)} ${C.toFixed(1)}" stroke-linecap="round"
+            style="transition:stroke-dasharray 0.9s cubic-bezier(.4,0,.2,1)"/>
         </svg>
-        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px">
-          <div style="font-size:22px;font-weight:900;color:${col};line-height:1">${score}</div>
-          <div style="font-size:9px;color:var(--t3);font-weight:700">/100</div>
+        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px">
+          <div style="font-size:52px;font-weight:700;letter-spacing:-3px;color:${col};line-height:1">${score}</div>
+          <div style="font-size:8px;letter-spacing:2.5px;color:var(--t3);font-weight:800;text-transform:uppercase">SmartScore</div>
         </div>
       </div>
-      <div style="flex:1">
-        <div style="font-size:17px;font-weight:800;color:${col};margin-bottom:3px">${icon} ${label}</div>
-        <div style="font-size:11px;color:var(--t3);line-height:1.4">Rispetto a quello che dovevi fare fino ad ora</div>
+
+      <!-- Label + subtitle -->
+      <div style="margin-top:10px;font-size:16px;font-weight:900;color:${col};letter-spacing:-0.3px">${icon} ${label}</div>
+      <div style="font-size:11px;color:var(--t3);margin-top:4px;letter-spacing:0.2px">calcolato in tempo reale</div>
+
+      <!-- Breakdown bars -->
+      <div style="width:100%;margin-top:24px;display:flex;flex-direction:column;gap:10px">
+        ${breakdown.map(b => {
+          const pct = Math.round(b.score / b.max * 100);
+          const barCol = b.ok ? '#00dc78' : b.score > 0 ? '#fbbf24' : 'rgba(255,255,255,0.08)';
+          return `
+            <div>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+                <span style="font-size:12px;font-weight:700;color:var(--t1)">${b.label}</span>
+                <span style="font-size:11px;color:var(--t3);font-variant-numeric:tabular-nums">${b.score}/${b.max} — ${b.note}</span>
+              </div>
+              <div style="height:4px;background:rgba(255,255,255,0.06);border-radius:99px;overflow:hidden">
+                <div style="height:100%;width:${pct}%;background:${barCol};border-radius:99px;transition:width 0.7s ease;box-shadow:${b.ok ? `0 0 6px rgba(0,220,120,0.5)` : 'none'}"></div>
+              </div>
+            </div>`;
+        }).join('')}
       </div>
-    </div>
-    <div style="margin-top:12px;display:flex;flex-direction:column;gap:7px">
-      ${breakdown.map(b => `<div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
-          <span style="font-size:11px;font-weight:700;color:var(--t1)">${b.label}</span>
-          <span style="font-size:10px;color:var(--t3)">${b.note}</span>
+
+      <!-- Tips collapsible -->
+      <div style="width:100%;margin-top:20px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.06);text-align:left">
+        <div style="font-size:12px;font-weight:800;color:var(--t2);cursor:pointer;display:flex;justify-content:space-between;align-items:center;letter-spacing:0.3px"
+          onclick="const l=this.nextElementSibling;const a=this.querySelector('.tipchev');l.style.display=l.style.display==='none'?'block':'none';a.style.transform=l.style.display==='none'?'':'rotate(180deg)'">
+          <span>Come si legge lo SmartScore</span>
+          <span class="tipchev" style="transition:transform 0.2s;font-size:10px;color:var(--t3)">▼</span>
         </div>
-        <div class="pbb h4"><div class="pbf" style="width:${Math.round(b.score/b.max*100)}%;background:${b.ok ? 'var(--green)' : b.score > 0 ? 'var(--orange)' : 'rgba(255,255,255,0.1)'}"></div></div>
-      </div>`).join('')}
-    </div>
-    <div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.06)">
-      <div style="font-size:12px;font-weight:800;color:var(--t2);letter-spacing:0.5px;text-transform:uppercase;cursor:pointer;display:flex;justify-content:space-between;align-items:center"
-        onclick="const l=this.nextElementSibling;l.style.display=l.style.display==='none'?'block':'none'">
-        <span>Come si legge lo SmartScore</span><span>▼</span>
+        <div style="display:none;margin-top:10px;font-size:12px;color:var(--t2);line-height:1.75;text-align:left">
+          <div style="display:flex;gap:8px;margin-bottom:4px"><span>🍽️</span><span><b>Pasti (40pt)</b> — pasti spuntati rispetto all'orario attuale</span></div>
+          <div style="display:flex;gap:8px;margin-bottom:4px"><span>💪</span><span><b>Allenamento (35pt)</b> — sessione completata o programmata per oggi</span></div>
+          <div style="display:flex;gap:8px;margin-bottom:4px"><span>👟</span><span><b>Passi (15pt)</b> — progressi verso il tuo obiettivo passi</span></div>
+          <div style="display:flex;gap:8px;margin-bottom:10px"><span>🥩</span><span><b>Proteine (10pt)</b> — apporto proteico rispetto al target</span></div>
+          <div style="padding:8px 12px;background:rgba(255,255,255,0.04);border-radius:8px;font-size:11px;color:var(--t3);line-height:1.6">
+            Il punteggio è calibrato sull'orario attuale: valuta solo ciò che dovevi fare fino ad ora, non l'intera giornata.
+          </div>
+        </div>
       </div>
-      <div style="display:none;margin-top:8px;font-size:12px;color:var(--t2);line-height:1.7">
-        <div>🍽️ <b style="color:var(--t2)">Pasti (40pt)</b> — pasti consumati rispetto all'orario attuale</div>
-        <div>💪 <b style="color:var(--t2)">Allenamento (35pt)</b> — completato o programmato per oggi</div>
-        <div>👟 <b style="color:var(--t2)">Passi (15pt)</b> — progressi verso l'obiettivo passi</div>
-        <div>🥩 <b style="color:var(--t2)">Proteine (10pt)</b> — apporto proteico vs target</div>
-        <div style="margin-top:6px;padding:6px 8px;background:rgba(255,255,255,0.04);border-radius:6px">Il punteggio è calibrato sull'orario: valuti solo ciò che dovevi fare fino ad ora, non l'intera giornata.</div>
-      </div>
-    </div>
-  </div>`;
+
+    </div>`;
 }
 
 // ── Macro compare helper ───────────────────────────────────
