@@ -42,7 +42,10 @@
   <h2 style="font-size:24px;font-weight:900;color:var(--t1);margin:24px 0 16px;">Archivio Schede</h2>
   <div class="ph">
     <h1>💪 Schede</h1>
-    <button class="btn btn-v btn-sm" onclick="openNew()">＋ Nuova</button>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-ghost btn-sm" onclick="openCoachPanel('workout')">🤖 AI Coach</button>
+      <button class="btn btn-v btn-sm" onclick="openNew()">＋ Nuova</button>
+    </div>
   </div>
   <div id="prg-list"><div class="spin"></div></div>
   <div id="prg-form" style="display:none"></div>
@@ -57,6 +60,7 @@
 </nav>
 
 <script type="module" src="js/programs.js"></script>
+<script type="module" src="js/ai_coach.js"></script>
 <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/fitness-tracker-app/sw.js')</script>
 <script type="module" src="js/daily_state.js"></script>
 </body>

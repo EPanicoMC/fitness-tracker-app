@@ -69,7 +69,10 @@
   <h2 style="font-size:24px;font-weight:900;color:var(--t1);margin:24px 0 16px;">Archivio Piani</h2>
   <div class="ph">
     <h1>🥗 Dieta</h1>
-    <button class="btn btn-v btn-sm" onclick="openNewDiet()">＋ Nuovo</button>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-ghost btn-sm" onclick="openCoachPanel('diet')">🤖 AI Coach</button>
+      <button class="btn btn-v btn-sm" onclick="openNewDiet()">＋ Nuovo</button>
+    </div>
   </div>
   <div id="diet-list"><div class="spin"></div></div>
   <div id="diet-form" style="display:none"></div>
@@ -84,6 +87,7 @@
 </nav>
 
 <script type="module" src="js/diet.js"></script>
+<script type="module" src="js/ai_coach.js"></script>
 <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/fitness-tracker-app/sw.js')</script>
 <script type="module" src="js/daily_state.js"></script>
 </body>

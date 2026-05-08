@@ -459,11 +459,11 @@ function buildFitScore() {
       </div>`).join('')}
     </div>
     <div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.06)">
-      <div style="font-size:10px;font-weight:800;color:var(--t3);letter-spacing:0.5px;text-transform:uppercase;cursor:pointer;display:flex;justify-content:space-between;align-items:center"
+      <div style="font-size:12px;font-weight:800;color:var(--t2);letter-spacing:0.5px;text-transform:uppercase;cursor:pointer;display:flex;justify-content:space-between;align-items:center"
         onclick="const l=this.nextElementSibling;l.style.display=l.style.display==='none'?'block':'none'">
         <span>Come si legge lo SmartScore</span><span>▼</span>
       </div>
-      <div style="display:none;margin-top:8px;font-size:11px;color:var(--t3);line-height:1.7">
+      <div style="display:none;margin-top:8px;font-size:12px;color:var(--t2);line-height:1.7">
         <div>🍽️ <b style="color:var(--t2)">Pasti (40pt)</b> — pasti consumati rispetto all'orario attuale</div>
         <div>💪 <b style="color:var(--t2)">Allenamento (35pt)</b> — completato o programmato per oggi</div>
         <div>👟 <b style="color:var(--t2)">Passi (15pt)</b> — progressi verso l'obiettivo passi</div>

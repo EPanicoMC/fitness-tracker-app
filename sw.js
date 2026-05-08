@@ -1,4 +1,4 @@
-const CACHE = 'ft-v24';
+const CACHE = 'ft-v25';
 const FILES = [
   '/fitness-tracker-app/',
   '/fitness-tracker-app/index.html',
@@ -19,6 +19,7 @@ const FILES = [
   '/fitness-tracker-app/js/settings.js',
   '/fitness-tracker-app/js/gemini.js',
   '/fitness-tracker-app/js/autocomplete.js',
+  '/fitness-tracker-app/js/ai_coach.js',
   '/fitness-tracker-app/js/firebase-config.js',
   '/fitness-tracker-app/icon.svg',
   '/fitness-tracker-app/img/anatomy.png'
