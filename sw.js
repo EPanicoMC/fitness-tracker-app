@@ -1,4 +1,4 @@
-const CACHE = 'ft-v28';
+const CACHE = 'ft-v29';
 const FILES = [
   '/fitness-tracker-app/',
   '/fitness-tracker-app/index.html',

@@ -307,7 +307,8 @@ async function applyPlanToFirestore(plan, type, isDraft) {
           items: m.items || '',
           kcal: Number(m.kcal) || 0, protein: Number(m.protein) || 0,
           carbs: Number(m.carbs) || 0, fats: Number(m.fats) || 0,
-          variants: m.variants || null
+          variants: Array.isArray(m.variants) ? m.variants
+            : (typeof m.variants === 'string' && m.variants ? [m.variants] : null)
         }));
         const sum = meals.reduce((a, m) => ({
           kcal: a.kcal + m.kcal, protein: a.protein + m.protein,

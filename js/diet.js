@@ -104,7 +104,7 @@ function renderDietPreview(d) {
             <span style="background:rgba(255,255,255,0.06);padding:4px 10px;border-radius:8px">C: <b style="color:var(--t1)">${m.carbs||0}g</b></span>
             <span style="background:rgba(255,255,255,0.06);padding:4px 10px;border-radius:8px">G: <b style="color:var(--t1)">${m.fats||0}g</b></span>
           </div>` : ''}
-          ${m.variants?.length ? `<div style="font-size:11px;font-weight:800;color:var(--t3);letter-spacing:0.5px;margin-bottom:4px">VARIANTI</div>
+          ${Array.isArray(m.variants) && m.variants.length ? `<div style="font-size:11px;font-weight:800;color:var(--t3);letter-spacing:0.5px;margin-bottom:4px">VARIANTI</div>
             ${m.variants.map(v => {
               const vl = typeof v === 'string' ? v : v.label;
               const vd = typeof v === 'string' ? '' : v.detail;
@@ -233,7 +233,7 @@ function renderDayForm(dk, title, day) {
 }
 
 function renderMealForm(dk, mi, m) {
-  const varsText = (m.variants||[]).map(v =>
+  const varsText = (Array.isArray(m.variants) ? m.variants : []).map(v =>
     typeof v === 'object' ? `${v.label}: ${v.detail}` : v
   ).join('\n');
   return `
