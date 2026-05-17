@@ -1,3 +1,4 @@
+import { requireAuth } from './app.js';
 import {
   db, USER_ID, collection, doc, getDoc, getDocs, setDoc, deleteField, query, where, orderBy, limit
 } from './firebase-config.js';
@@ -389,147 +390,346 @@ window.showTab = function(tab) {
   });
 };
 
+// ── WeeklySmartScore algorithm ─────────────────────────────
+function calcWeeklySmartScore(dates, logs, programData, dietPlan, settings) {
+  const today = getTodayString();
+
+  // ── Workout pillar (40%) ───────────────────────────────────
+  const workoutDays = [];
+  let wPoints = 0, wMax = 0;
+
+  for (let i = 0; i < dates.length; i++) {
+    const dateStr = dates[i];
+    if (dateStr > today) continue;
+
+    const log = logs[dateStr];
+    const dow = getDayOfWeek(dateStr);
+    let isTraining = !!(programData?.schedule?.[dow]);
+    if (log?.is_training_day != null) isTraining = log.is_training_day;
+
+    if (!isTraining) {
+      workoutDays.push({ date: dateStr, status: 'rest', label: 'Riposo', pct: 100 });
+      wPoints += 100; wMax += 100;
+      continue;
+    }
+
+    if (log?.workout?.completed) {
+      const isRecov = log.workout.recovered;
+      workoutDays.push({ date: dateStr, status: isRecov ? 'recovered-logged' : 'done', label: log.workout.session_name || 'Allenamento', pct: 100 });
+      wPoints += 100; wMax += 100;
+    } else {
+      // Cerca recupero nei 2 giorni successivi
+      let recovered = false, recoveredLate = false;
+      for (let j = 1; j <= 2; j++) {
+        const nextDate = dates[i + j];
+        if (!nextDate || nextDate > today) break;
+        const nextLog = logs[nextDate];
+        if (!nextLog?.workout?.completed) continue;
+        // Conta come recupero solo se il giorno successivo era riposo o l'allenamento è esplicitamente marked
+        const nextDow = getDayOfWeek(nextDate);
+        let nextIsTraining = !!(programData?.schedule?.[nextDow]);
+        if (nextLog.is_training_day != null) nextIsTraining = nextLog.is_training_day;
+        if (nextLog.workout.recovered || !nextIsTraining) {
+          if (j === 1) recovered = true;
+          else recoveredLate = true;
+          break;
+        }
+      }
+      if (recovered) {
+        workoutDays.push({ date: dateStr, status: 'recovered', label: 'Recuperato', pct: 80 });
+        wPoints += 80; wMax += 100;
+      } else if (recoveredLate) {
+        workoutDays.push({ date: dateStr, status: 'recovered-late', label: 'Rec. tardivo', pct: 65 });
+        wPoints += 65; wMax += 100;
+      } else {
+        workoutDays.push({ date: dateStr, status: 'missed', label: 'Saltato', pct: 0 });
+        wPoints += 0; wMax += 100;
+      }
+    }
+  }
+  const workoutScore = wMax > 0 ? Math.round((wPoints / wMax) * 100) : null;
+
+  // ── Nutrition pillar (40%) ─────────────────────────────────
+  const nutritionDays = [];
+  let nScoreSum = 0, nDays = 0;
+
+  for (const dateStr of dates) {
+    if (dateStr > today) continue;
+    const log = logs[dateStr];
+    if (!log) continue;
+    const kcal    = log.nutrition?.totals?.kcal    || 0;
+    const protein = log.nutrition?.totals?.protein || 0;
+    if (kcal <= 0 && protein <= 0) continue;
+
+    const isOn = log.is_training_day != null
+      ? log.is_training_day
+      : !!(programData?.schedule?.[getDayOfWeek(dateStr)]);
+    const plan = isOn ? dietPlan?.day_on : dietPlan?.day_off;
+
+    let kcalScore = 50, proteinScore = 50;
+    let kcalRatio = null, proteinRatio = null;
+
+    if (plan?.kcal > 0 && kcal > 0) {
+      kcalRatio = kcal / plan.kcal;
+      if      (kcalRatio >= 0.90 && kcalRatio <= 1.10) kcalScore = 100;
+      else if (kcalRatio >= 0.80 && kcalRatio <= 1.20) kcalScore = 70;
+      else if (kcalRatio >= 0.70 && kcalRatio <= 1.30) kcalScore = 40;
+      else                                               kcalScore = 10;
+    }
+    if (plan?.protein > 0 && protein > 0) {
+      proteinRatio = protein / plan.protein;
+      if      (proteinRatio >= 0.90) proteinScore = 100;
+      else if (proteinRatio >= 0.75) proteinScore = 70;
+      else if (proteinRatio >= 0.60) proteinScore = 40;
+      else                           proteinScore = 10;
+    }
+
+    const dayScore = kcal > 0 ? (kcalScore * 0.6 + proteinScore * 0.4) : proteinScore;
+    nutritionDays.push({ date: dateStr, kcal, protein, kcalTarget: plan?.kcal || 0, proteinTarget: plan?.protein || 0, kcalRatio, proteinRatio, dayScore });
+    nScoreSum += dayScore; nDays++;
+  }
+  const nutritionScore = nDays > 0 ? Math.round(nScoreSum / nDays) : null;
+
+  // ── Consistency pillar (20%) ───────────────────────────────
+  const pastDates = dates.filter(d => d <= today);
+  const daysWithData = pastDates.filter(d => {
+    const l = logs[d];
+    return l && (l.nutrition?.totals?.kcal > 0 || l.workout?.completed || l.steps > 0);
+  });
+  const consistencyScore = pastDates.length > 0
+    ? Math.round((daysWithData.length / pastDates.length) * 100)
+    : null;
+
+  // ── Final weighted score ──────────────────────────────────
+  let finalScore = null;
+  const components = [];
+  if (workoutScore !== null)     components.push({ score: workoutScore, weight: 0.40 });
+  if (nutritionScore !== null)   components.push({ score: nutritionScore, weight: 0.40 });
+  if (consistencyScore !== null) components.push({ score: consistencyScore, weight: 0.20 });
+  if (components.length > 0) {
+    const totalWeight = components.reduce((s, c) => s + c.weight, 0);
+    finalScore = Math.round(components.reduce((s, c) => s + c.score * c.weight, 0) / totalWeight);
+  }
+
+  const tips = generateWeeklyTips({ workoutDays, nutritionDays, dates, today, workoutScore, nutritionScore, consistencyScore, pastDates });
+  return { finalScore, workoutScore, nutritionScore, consistencyScore, workoutDays, nutritionDays, tips };
+}
+
+function generateWeeklyTips({ workoutDays, nutritionDays, dates, today, workoutScore, nutritionScore, consistencyScore, pastDates }) {
+  const tips = [];
+
+  // Workout tips
+  const missedWorkouts = workoutDays.filter(d => d.status === 'missed');
+  const recoveredWorkouts = workoutDays.filter(d => d.status === 'recovered' || d.status === 'recovered-late');
+
+  if (recoveredWorkouts.length > 0 && missedWorkouts.length === 0) {
+    tips.push({ type: 'positive', icon: '💪', title: 'Recupero perfetto!', text: `Hai recuperato ${recoveredWorkouts.length} session${recoveredWorkouts.length > 1 ? 'i' : 'e'} saltata. Questa flessibilità è la chiave della consistenza a lungo termine.` });
+  } else if (missedWorkouts.length > 0) {
+    const remainingDays = dates.filter(d => d > today).length;
+    if (remainingDays > 0) {
+      tips.push({ type: 'warning', icon: '⏰', title: `${missedWorkouts.length} session${missedWorkouts.length > 1 ? 'i' : 'e'} da recuperare`, text: `Hai ancora ${remainingDays} giorn${remainingDays > 1 ? 'i' : 'o'} questa settimana. Aggiungila ai giorni liberi per chiudere in parità.` });
+    } else {
+      tips.push({ type: 'alert', icon: '❌', title: 'Settimana di allenamento incompleta', text: `Hai saltato ${missedWorkouts.length} allenament${missedWorkouts.length > 1 ? 'i' : 'o'} senza recupero. Inizia la prossima con più margine nei giorni liberi.` });
+    }
+  }
+
+  // Nutrition tips (per singolo giorno, non media)
+  if (nutritionDays.length > 0) {
+    const overDays  = nutritionDays.filter(d => d.kcalRatio && d.kcalRatio > 1.15);
+    const underDays = nutritionDays.filter(d => d.kcalRatio && d.kcalRatio < 0.85);
+    if (overDays.length >= 2) {
+      const maxOver = overDays.reduce((m, d) => d.kcalRatio > m.kcalRatio ? d : m, overDays[0]);
+      tips.push({ type: 'warning', icon: '🔥', title: `Calorie in eccesso per ${overDays.length} giorni`, text: `Picco massimo: +${Math.round((maxOver.kcalRatio - 1) * 100)}% sopra il target. Identifica i pasti extra e sostituiscili con opzioni più leggere.` });
+    } else if (underDays.length >= 2) {
+      tips.push({ type: 'warning', icon: '📉', title: `Apporto calorico basso per ${underDays.length} giorni`, text: `Mangiare stabilmente sotto l'85% del target rallenta metabolismo e recupero muscolare. Aggiungi uno spuntino nutriente.` });
+    }
+    const lowProteinDays = nutritionDays.filter(d => d.proteinTarget > 0 && d.proteinRatio && d.proteinRatio < 0.80);
+    if (lowProteinDays.length >= 2) {
+      const avgPro = Math.round(nutritionDays.reduce((s, d) => s + d.protein, 0) / nutritionDays.length);
+      const target = nutritionDays.find(d => d.proteinTarget > 0)?.proteinTarget || 0;
+      tips.push({ type: 'alert', icon: '🥩', title: `Proteine sotto target per ${lowProteinDays.length} giorni`, text: `Media settimanale: ${avgPro}g${target > 0 ? ` / ${target}g obiettivo` : ''}. Aggiungi ricotta, uova o petto di pollo come spuntino pomeridiano.` });
+    }
+  }
+
+  // Consistency tip
+  if (consistencyScore !== null && consistencyScore < 70) {
+    const loggedDays = Math.round(consistencyScore / 100 * pastDates.length);
+    tips.push({ type: 'alert', icon: '📋', title: 'Tracciamento da migliorare', text: `Dati registrati per ${loggedDays} giorn${loggedDays !== 1 ? 'i' : 'o'} su ${pastDates.length}. Trackare ogni giorno ti aiuta a capire cosa funziona per te.` });
+  }
+
+  // Positive tip se tutto va bene
+  if (tips.length === 0 || (workoutScore >= 90 && nutritionScore !== null && nutritionScore >= 80)) {
+    if (!tips.find(t => t.type === 'positive')) {
+      tips.push({ type: 'positive', icon: '🚀', title: 'Settimana eccellente!', text: 'Allenamenti e alimentazione in linea con gli obiettivi. La costanza porta risultati concreti!' });
+    }
+  }
+
+  const order = { alert: 0, warning: 1, positive: 2 };
+  return tips.sort((a, b) => (order[a.type] || 0) - (order[b.type] || 0)).slice(0, 3);
+}
+
 // ── 2-Week view ────────────────────────────────────────────
 function buildWeekView() {
   const el = document.getElementById('week-view');
   if (!el) return;
 
-  // Find past 7 days up to today
+  // Calcola ultimi 7 giorni (da 6 giorni fa ad oggi)
   const todayDate = new Date(TODAY + 'T12:00:00');
-  const lastMonday = new Date(todayDate);
-  lastMonday.setDate(todayDate.getDate() - 6);
+  const startDate = new Date(todayDate);
+  startDate.setDate(todayDate.getDate() - 6);
 
   const dates = [];
   for (let i = 0; i < 7; i++) {
-    const d = new Date(lastMonday);
-    d.setDate(d.getDate() + i);
+    const d = new Date(startDate);
+    d.setDate(startDate.getDate() + i);
     dates.push(d.toISOString().split('T')[0]);
   }
 
-  const objective = programData?.objective || 'recomposizione';
-  const stepsGoal = settingsData?.steps_goal || 0;
+  const wss = calcWeeklySmartScore(dates, allRecentLogs, programData, _dietPlanCache, settingsData);
 
-  // Aggregate stats — solo giorni con dati effettivi influenzano le medie
-  let totalKcal = 0, totalProtein = 0, totalSteps = 0;
-  let trainingDaysCount = 0, trainingDone = 0;
-  let kcalDays = 0, proteinDays = 0, stepsDays = 0;
-  const kcalWarnings = [], proteinWarnings = [];
+  // ── #recent-recap: Weekly Score Hero ──────────────────────
+  const recapEl = document.getElementById('recent-recap');
+  if (recapEl) {
+    if (wss.finalScore !== null) {
+      const score = wss.finalScore;
+      const col   = score >= 85 ? '#1ce370' : score >= 70 ? '#4ade80' : score >= 55 ? '#fbbf24' : score >= 35 ? '#ff6a00' : '#ff453a';
+      const label = score >= 85 ? 'Eccellente' : score >= 70 ? 'Ottimo' : score >= 55 ? 'Nella media' : score >= 35 ? 'Da migliorare' : 'Critico';
 
-  const weekSep = ['', ''];
-  const rowsHtml = dates.map((dateStr, idx) => {
-    const isWeekSep = false;
-    const log = allRecentLogs[dateStr];
-    const dayDow = getDayOfWeek(dateStr);
-    let isOn  = !!(programData?.schedule?.[dayDow]);
-    if (log && log.is_training_day != null) isOn = log.is_training_day;
-    const isFut = dateStr > TODAY;
+      const r = 28, cx = 34, cy = 34;
+      const circ  = 2 * Math.PI * r;
+      const offset = circ * (1 - score / 100);
 
-    // Day status
-    let icon, statusColor = 'var(--t2)';
-    if (isFut) {
-      icon = isOn ? '📅' : '😴';
-    } else if (log?.workout?.completed) {
-      icon = '✅'; statusColor = 'var(--green)';
-    } else if (!isOn) {
-      icon = '😴'; statusColor = 'var(--t3)';
-    } else if (log) {
-      icon = '⚠️'; statusColor = 'var(--orange)';
+      const pCol = (s) => s >= 80 ? 'var(--green)' : s >= 60 ? 'var(--yellow)' : 'var(--orange)';
+      const pillars = [
+        { label: '💪 Workout',   score: wss.workoutScore },
+        { label: '🍽 Nutrizione', score: wss.nutritionScore },
+        { label: '📋 Costanza',   score: wss.consistencyScore },
+      ].filter(p => p.score !== null);
+
+      const pillarsHtml = pillars.map(p => `
+        <div class="wss-pillar">
+          <span class="wss-pillar-label">${p.label}</span>
+          <div class="wss-pillar-bar">
+            <div class="pbb h6"><div class="pbf" style="width:${p.score}%;background:${pCol(p.score)}"></div></div>
+          </div>
+          <span class="wss-pillar-val" style="color:${pCol(p.score)}">${p.score}%</span>
+        </div>`).join('');
+
+      recapEl.innerHTML = `
+        <div class="card" style="margin-bottom:16px">
+          <div class="clabel" style="margin-bottom:12px"><i class="ri-bar-chart-box-line"></i> Weekly Performance</div>
+          <div style="display:flex;align-items:center;gap:16px">
+            <div style="flex-shrink:0;text-align:center">
+              <svg width="68" height="68" viewBox="0 0 68 68">
+                <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="5"/>
+                <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${col}" stroke-width="5"
+                  stroke-dasharray="${circ.toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}" stroke-linecap="round"
+                  transform="rotate(-90 ${cx} ${cy})" style="filter:drop-shadow(0 0 6px ${col}80)"/>
+                <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central"
+                  font-size="15" font-weight="900" fill="${col}">${score}</text>
+              </svg>
+              <div style="margin-top:2px;font-size:10px;font-weight:800;color:${col}">${label}</div>
+            </div>
+            <div style="flex:1;min-width:0">${pillarsHtml}</div>
+          </div>
+        </div>`;
     } else {
-      icon = '❌'; statusColor = 'var(--red)';
+      recapEl.innerHTML = '';
     }
+  }
 
-    // Accumulators
-    if (!isFut && isOn) {
-      trainingDaysCount++;
-      if (log?.workout?.completed) trainingDone++;
-    }
-    const kcal    = log?.nutrition?.totals?.kcal    || 0;
-    const protein = log?.nutrition?.totals?.protein || 0;
-    if (!isFut && kcal > 0)    { totalKcal    += kcal;    kcalDays++; }
-    if (!isFut && protein > 0) { totalProtein += protein; proteinDays++; }
-    if (!isFut && log?.steps)  { totalSteps   += log.steps; stepsDays++; }
-
-    const dayLabel = new Date(dateStr + 'T12:00:00')
-      .toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric' });
+  // ── #week-view: 7-Day Heatmap + Smart Tips ────────────────
+  const heatCards = dates.map(dateStr => {
+    const log    = allRecentLogs[dateStr];
+    const isFut  = dateStr > TODAY;
     const isToday = dateStr === TODAY;
+    const dayDow = getDayOfWeek(dateStr);
+    let isOn = !!(programData?.schedule?.[dayDow]);
+    if (log?.is_training_day != null) isOn = log.is_training_day;
 
-    const kcalHtml    = kcal    > 0 ? `${Math.round(kcal)} kcal` : isFut ? '' : '—';
-    const proteinHtml = protein > 0 ? `· P:${Math.round(protein)}g` : '';
+    let ico;
+    if (isFut)                        ico = isOn ? '📅' : '😴';
+    else if (log?.workout?.completed) ico = '✅';
+    else if (!isOn)                   ico = '😴';
+    else if (log)                     ico = '⚠️';
+    else                              ico = '❌';
+
+    const kcal = log?.nutrition?.totals?.kcal || 0;
+    const isOn2 = log?.is_training_day != null ? log.is_training_day : isOn;
+    const dayPlan = isOn2 ? _dietPlanCache?.day_on : _dietPlanCache?.day_off;
+    const targetKcal = dayPlan?.kcal || 0;
+    const kcalPct = targetKcal > 0 && kcal > 0 ? Math.min(130, Math.round(kcal / targetKcal * 100)) : 0;
+
+    let barCol = 'var(--accent)';
+    if (kcalPct > 115)        barCol = 'var(--red)';
+    else if (kcalPct >= 90)   barCol = 'var(--green)';
+    else if (kcalPct >= 70)   barCol = 'var(--yellow)';
+    else if (kcalPct > 0)     barCol = 'var(--orange)';
+
+    const dayShort = new Date(dateStr + 'T12:00:00').toLocaleDateString('it-IT', { weekday: 'short' }).replace('.', '');
+    const dayNum   = new Date(dateStr + 'T12:00:00').getDate();
+
+    const miniR = 11, miniCx = 14, miniCy = 14;
+    const miniCirc   = 2 * Math.PI * miniR;
+    const miniOffset = miniCirc * (1 - Math.min(1, kcalPct / 100));
+    const kcalMini = kcalPct > 0
+      ? `<svg width="28" height="28" viewBox="0 0 28 28">
+          <circle cx="${miniCx}" cy="${miniCy}" r="${miniR}" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="3"/>
+          <circle cx="${miniCx}" cy="${miniCy}" r="${miniR}" fill="none" stroke="${barCol}" stroke-width="3"
+            stroke-dasharray="${miniCirc.toFixed(2)}" stroke-dashoffset="${miniOffset.toFixed(2)}" stroke-linecap="round"
+            transform="rotate(-90 ${miniCx} ${miniCy})"/>
+          <text x="${miniCx}" y="${miniCy}" text-anchor="middle" dominant-baseline="central" font-size="7" font-weight="800" fill="${barCol}">${kcalPct}%</text>
+        </svg>`
+      : `<div style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--t3)">—</div>`;
 
     return `
-      ${idx === 0 ? '<p class="sdiv">Ultimi 7 giorni</p>' : ''}
-      <div class="week-row" style="${isToday ? 'background:rgba(124,111,255,.07);border-radius:8px;padding:10px 8px;margin:0 -8px;' : ''}">
-        <div class="week-row-date" style="color:${isToday ? 'var(--accent)' : 'var(--t3)'}">${dayLabel}</div>
-        <div class="week-row-ico">${icon}</div>
-        <div class="week-row-body">
-          <div class="week-row-name" style="color:${statusColor}">${log?.workout?.session_name || (isOn ? (programData?.schedule?.[dayDow]?.name || 'Training') : 'Riposo')}</div>
-          <div class="week-row-meta">${kcalHtml} ${proteinHtml}</div>
-        </div>
-        ${log?.steps ? `<div style="font-size:11px;color:var(--t3)">👟${(log.steps/1000).toFixed(1)}k</div>` : ''}
+      <div class="day-heat-card${isToday ? ' day-today' : ''}" onclick="selectWeekDay('${dateStr}')">
+        <div class="day-heat-label" style="${isToday ? 'color:var(--accent)' : ''}">${dayShort}</div>
+        <div style="font-size:9px;color:var(--t3);font-weight:600;margin-top:-1px">${dayNum}</div>
+        <div class="day-heat-ico">${ico}</div>
+        ${kcalMini}
       </div>`;
   }).join('');
 
-  // Recommendations
-  const recs = [];
-  const avgKcal    = kcalDays    > 0 ? Math.round(totalKcal    / kcalDays)    : 0;
-  const avgProtein = proteinDays > 0 ? Math.round(totalProtein / proteinDays) : 0;
-  const planKcal   = _dietPlanCache?.day_on?.kcal || 0;
-  const planPro    = _dietPlanCache?.day_on?.protein || 0;
+  const tipsHtml = wss.tips.length > 0 ? `
+    <p class="sdiv" style="margin-top:18px">Consigli</p>
+    ${wss.tips.map(tip => `
+      <div class="tip-card tip-${tip.type}">
+        <div class="tip-card-icon">${tip.icon}</div>
+        <div>
+          <div class="tip-card-title">${tip.title}</div>
+          <div class="tip-card-text">${tip.text}</div>
+        </div>
+      </div>`).join('')}` : '';
 
-  if (trainingDaysCount > 0 && trainingDone < trainingDaysCount) {
-    const missed = trainingDaysCount - trainingDone;
-    recs.push(`💪 Hai saltato ${missed} allenament${missed > 1 ? 'i' : 'o'} su ${trainingDaysCount} — cerca di mantenerla costante!`);
-  }
-  if (planKcal > 0 && avgKcal > 0) {
-    const diff = Math.round(((avgKcal - planKcal) / planKcal) * 100);
-    if (diff > 10)  recs.push(`🔥 Kcal medie +${diff}% sopra il piano — considera di ridurre i pasti extra.`);
-    if (diff < -10) recs.push(`📉 Kcal medie ${diff}% sotto il piano — assicurati di mangiare abbastanza.`);
-  }
-  if (planPro > 0 && avgProtein > 0 && avgProtein < planPro * 0.85) {
-    recs.push(`🥩 Proteine medie (${avgProtein}g) sotto l'obiettivo (${planPro}g) — priorità alta!`);
-  }
-  if (stepsGoal > 0 && stepsDays > 0) {
-    const avgSteps = Math.round(totalSteps / stepsDays);
-    if (avgSteps < stepsGoal * 0.7) recs.push(`👟 Media passi bassa (${avgSteps.toLocaleString('it-IT')} / ${stepsGoal.toLocaleString('it-IT')} obiettivo, su ${stepsDays} giorni con dati) — aggiungi una camminata!`);
-  }
+  const s = new Date(dates[0] + 'T12:00:00');
+  const e = new Date(dates[6] + 'T12:00:00');
+  const dateRangeLabel = `${s.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} – ${e.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}`;
 
-    const adherence = trainingDaysCount > 0 ? Math.round((trainingDone / trainingDaysCount) * 100) : null;
-
-  el.innerHTML = rowsHtml;
-
-  let recapHtml = '';
-  if (recs.length || adherence !== null || avgKcal > 0) {
-    let statusText = 'IN CORSO';
-    let statusColor = 'var(--t2)';
-    if (adherence !== null) {
-      if (adherence === 100) { statusText = 'PERFETTO'; statusColor = 'var(--green)'; }
-      else if (adherence >= 75) { statusText = 'IN TARGET'; statusColor = 'var(--green)'; }
-      else if (adherence >= 50) { statusText = 'NELLA MEDIA'; statusColor = 'var(--yellow)'; }
-      else { statusText = 'DA MIGLIORARE'; statusColor = 'var(--orange)'; }
-    }
-
-    const pills = [];
-    if (adherence !== null) pills.push(`<div style="background:rgba(255,255,255,0.03); border-radius:12px; padding:12px; flex:1; text-align:center"><div style="font-size:11px;color:var(--t3);margin-bottom:4px;text-transform:uppercase;font-weight:700">Aderenza</div><div style="font-size:22px;font-weight:900;color:${statusColor}">${adherence}%</div></div>`);
-    if (avgKcal > 0) pills.push(`<div style="background:rgba(255,255,255,0.03); border-radius:12px; padding:12px; flex:1; text-align:center"><div style="font-size:11px;color:var(--t3);margin-bottom:4px;text-transform:uppercase;font-weight:700">Kcal Medie</div><div style="font-size:20px;font-weight:900;color:var(--t1)">${avgKcal}</div><div style="font-size:9px;color:var(--t3);margin-top:2px">${kcalDays} gg</div></div>`);
-    if (avgProtein > 0) pills.push(`<div style="background:rgba(255,255,255,0.03); border-radius:12px; padding:12px; flex:1; text-align:center"><div style="font-size:11px;color:var(--t3);margin-bottom:4px;text-transform:uppercase;font-weight:700">Pro Medie</div><div style="font-size:20px;font-weight:900;color:var(--blue)">${avgProtein}g</div><div style="font-size:9px;color:var(--t3);margin-top:2px">${proteinDays} gg</div></div>`);
-
-    const recPills = recs.map(r => `<div style="background:rgba(255,255,255,0.05); border-left:3px solid var(--accent); border-radius:8px; padding:10px 12px; font-size:13px; font-weight:500; color:var(--t1); margin-top:8px">${r.replace(/^([💡💪🔥📉🥩👟]\s*)/, '')}</div>`);
-
-    recapHtml = `
-      <div class="clabel" style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center">
-        <span><i class="ri-bar-chart-box-line"></i> Performance (7 gg)</span>
-        <span style="font-size:11px;padding:4px 10px;background:rgba(255,255,255,0.1);border-radius:100px;color:${statusColor};font-weight:800">${statusText}</span>
-      </div>
-      <div style="display:flex; gap:8px; margin-bottom:12px;">
-        ${pills.join('')}
-      </div>
-      ${recPills.join('')}
-    `;
-  }
-  
-  const recapEl = document.getElementById('recent-recap');
-  if (recapEl) recapEl.innerHTML = recapHtml;
+  el.innerHTML = `
+    <p class="sdiv" style="margin-bottom:10px">Ultimi 7 giorni · ${dateRangeLabel}</p>
+    <div class="day-heat-wrap">
+      <div class="day-heat-row">${heatCards}</div>
+    </div>
+    <div style="margin-top:5px;font-size:10px;color:var(--t3);text-align:center">Tocca un giorno per i dettagli</div>
+    ${tipsHtml}`;
 }
+
+// Naviga al giorno selezionato nella heatmap: switcha al calendario e apre il detail
+window.selectWeekDay = function(dateStr) {
+  const [y, m] = dateStr.split('-').map(Number);
+  const target = new Date(y, m - 1, 1);
+  const needsMonthChange = target.getFullYear() !== currentMonth.getFullYear() || target.getMonth() !== currentMonth.getMonth();
+
+  showTab('cal');
+
+  if (needsMonthChange) {
+    currentMonth = new Date(target);
+    loadCalendar().then(() => showDay(dateStr));
+  } else {
+    showDay(dateStr);
+  }
+};
 
 window.changeMonth = function(delta) {
   currentMonth.setMonth(currentMonth.getMonth() + delta);

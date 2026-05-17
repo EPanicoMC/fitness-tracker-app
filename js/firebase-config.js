@@ -1,5 +1,12 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import {
+  getAuth,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+import {
   getFirestore,
   collection,
   doc,
@@ -28,12 +35,21 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
-const USER_ID = "user_default";
+const auth = getAuth(app);
 const storage = getStorage(app);
 
+let USER_ID = null;
+
+function setUserId(id) {
+  USER_ID = id;
+}
+
 export {
+  app,
   db,
+  auth,
   USER_ID,
+  setUserId,
   storage,
   collection,
   doc,
@@ -47,5 +63,9 @@ export {
   where,
   orderBy,
   limit,
-  serverTimestamp
+  serverTimestamp,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut
 };

@@ -287,6 +287,30 @@ textarea.fi{resize:vertical;min-height:70px;line-height:1.5}
 .week-summary{background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:var(--rs);padding:14px 16px;margin-top:12px}
 .week-rec{background:rgba(124,111,255,.08);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;margin-top:8px;font-size:12px;line-height:1.5;color:var(--t1)}
 
+/* WEEKLY SMART SCORE */
+.wss-pillar{display:flex;align-items:center;gap:8px;margin-bottom:7px}.wss-pillar:last-child{margin-bottom:0}
+.wss-pillar-label{font-size:11px;color:var(--t2);font-weight:700;width:82px;flex-shrink:0}
+.wss-pillar-bar{flex:1}
+.wss-pillar-val{font-size:12px;font-weight:800;width:34px;text-align:right;flex-shrink:0}
+
+/* DAY HEATMAP */
+.day-heat-wrap{overflow-x:auto;margin:0 -2px;padding-bottom:4px}
+.day-heat-row{display:flex;gap:5px;min-width:max-content}
+.day-heat-card{width:44px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;padding:8px 4px;border-radius:10px;border:1px solid transparent;transition:all .2s}
+.day-heat-card:active{background:rgba(255,255,255,.07)}
+.day-heat-card.day-today{background:rgba(124,111,255,.1);border-color:rgba(124,111,255,.3)}
+.day-heat-label{font-size:10px;font-weight:700;color:var(--t3);text-transform:capitalize}
+.day-heat-ico{font-size:17px;line-height:1.2}
+
+/* SMART TIPS */
+.tip-card{display:flex;gap:10px;align-items:flex-start;padding:12px;border-radius:var(--rs);margin-top:8px;border-left:3px solid}
+.tip-card-icon{font-size:18px;flex-shrink:0;line-height:1.2}
+.tip-card-title{font-size:13px;font-weight:800;margin-bottom:3px}
+.tip-card-text{font-size:12px;color:var(--t2);line-height:1.5}
+.tip-positive{background:rgba(28,227,112,.06);border-color:var(--green)}
+.tip-warning{background:rgba(255,106,0,.06);border-color:var(--orange)}
+.tip-alert{background:rgba(255,69,58,.06);border-color:var(--red)}
+
 /* FITSCORE */
 .fitscore-card{background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:24px 20px;margin-bottom:16px;box-shadow:var(--shadow)}
 .fitscore-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}

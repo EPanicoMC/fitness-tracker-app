@@ -1,3 +1,4 @@
+import { requireAuth } from './app.js';
 import {
   db, USER_ID, doc, getDoc, setDoc, getDocs, collection, query, orderBy, limit
 } from './firebase-config.js';

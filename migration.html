@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <title>Data Migration</title>
+</head>
+<body>
+  <h1>Data Migration Tool</h1>
+  <button id="start-btn">Start Migration</button>
+  <div id="log" style="white-space: pre-wrap; font-family: monospace; margin-top: 20px;"></div>
+
+  <script type="module">
+    import { db, getDocs, collection, setDoc, doc } from './js/firebase-config.js';
+
+    const logDiv = document.getElementById('log');
+    function log(msg) {
+      logDiv.textContent += msg + '\n';
+      console.log(msg);
+    }
+
+    const OLD_USER = 'user_default';
+    const NEW_USER = 'enricopanico@gmail.com';
+
+    const collectionsToMigrate = [
+      'checks',
+      'daily_logs',
+      'diary',
+      'diet_plans',
+      'last_sessions',
+      'programs',
+      'settings'
+    ];
+
+    document.getElementById('start-btn').addEventListener('click', async () => {
+      document.getElementById('start-btn').disabled = true;
+      log('Starting migration...');
+
+      for (const coll of collectionsToMigrate) {
+        log(`Migrating collection: ${coll}...`);
+        try {
+          const snap = await getDocs(collection(db, 'users', OLD_USER, coll));
+          let count = 0;
+          for (const docSnap of snap.docs) {
+            const data = docSnap.data();
+            
+            // Fix specific check date
+            if (coll === 'checks' && data.date === '2025-04-20') {
+              log(`Found check for 2025-04-20. Updating to 2026-04-20.`);
+              data.date = '2026-04-20';
+            }
+            
+            await setDoc(doc(db, 'users', NEW_USER, coll, docSnap.id), data);
+            count++;
+          }
+          log(`  -> Migrated ${count} documents for ${coll}.`);
+        } catch (e) {
+          log(`  -> Error migrating ${coll}: ${e.message}`);
+        }
+      }
+
+      log('Migration completed successfully!');
+    });
+  </script>
+</body>
+</html>

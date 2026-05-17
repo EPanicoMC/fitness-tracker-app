@@ -1,4 +1,5 @@
-import { db, USER_ID, doc, getDoc, setDoc } from './firebase-config.js';
+import { requireAuth } from './app.js';
+import { db, USER_ID, doc, getDoc, setDoc, auth, signOut } from './firebase-config.js';
 import { showToast } from './app.js';
 
 async function loadSettings() {
@@ -66,4 +67,20 @@ window.saveGeminiKey = async function() {
   }
 };
 
-loadSettings();
+
+  const logoutBtn = document.getElementById('logout-btn');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', async () => {
+      try {
+        await signOut(auth);
+        window.location.href = 'auth.html';
+      } catch (error) {
+        showToast('Errore durante il logout', 'err');
+      }
+    });
+  }
+
+(async function() {
+  await requireAuth();
+  loadSettings();
+})();

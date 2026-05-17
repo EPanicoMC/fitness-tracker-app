@@ -1,3 +1,19 @@
+import { auth, setUserId, onAuthStateChanged } from './firebase-config.js';
+
+export function requireAuth() {
+  return new Promise((resolve) => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      unsubscribe();
+      if (user) {
+        setUserId(user.email);
+        resolve(user);
+      } else {
+        window.location.href = 'auth.html';
+      }
+    });
+  });
+}
+
 export function getTodayString() {
   return new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });
 }
