@@ -251,15 +251,15 @@ export function calcSmartScore({
   return { score, label, icon, breakdown };
 }
 
-export async function cleanOldLogs(db, getUserId(), monthsToKeep=12) {
+export async function cleanOldLogs(db, userId, monthsToKeep=12) {
   try {
     const { collection, getDocs, deleteDoc, doc } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
     const cutoff = new Date();
     cutoff.setMonth(cutoff.getMonth() - monthsToKeep);
     const cutoffStr = cutoff.toISOString().split('T')[0];
-    const snap = await getDocs(collection(db, 'users', getUserId(), 'daily_logs'));
+    const snap = await getDocs(collection(db, 'users', userId, 'daily_logs'));
     const toDelete = snap.docs.filter(d => d.id < cutoffStr);
-    await Promise.all(toDelete.map(d => deleteDoc(doc(db, 'users', getUserId(), 'daily_logs', d.id))));
+    await Promise.all(toDelete.map(d => deleteDoc(doc(db, 'users', userId, 'daily_logs', d.id))));
     if (toDelete.length) console.log(`cleanOldLogs: deleted ${toDelete.length} logs older than ${cutoffStr}`);
   } catch(e) {
     console.warn('cleanOldLogs error:', e);

@@ -272,19 +272,52 @@ window.showDay = async function(dateStr) {
         </div>
       </div>
       ${badgeHtml}
-      ${tots.kcal ? `
-        <div class="mrow">
-          <span class="mlabel">🔥 Kcal</span>
-          <span class="mval">${Math.round(tots.kcal)} ${plan?.kcal ? '/ ' + plan.kcal : ''}</span>
-        </div>
-        <div class="pbb h4" style="margin-bottom:8px">
-          <div class="pbf pb-v" style="width:${plan?.kcal ? Math.min(100, (tots.kcal / plan.kcal * 100)) : 0}%"></div>
-        </div>
-        <div style="display:flex;gap:12px;font-size:13px;color:var(--t2)">
-          <span>🥩 ${Math.round(tots.protein || 0)}g</span>
-          <span>🌾 ${Math.round(tots.carbs || 0)}g</span>
-          <span>🧈 ${Math.round(tots.fats || 0)}g</span>
-        </div>` : '<p style="color:var(--t3);font-size:13px">Nessun dato nutrizionale</p>'}
+      ${tots.kcal ? (() => {
+        const diffKcal = plan?.kcal ? Math.round(tots.kcal - plan.kcal) : null;
+        const diffPro  = plan?.protein ? Math.round((tots.protein || 0) - plan.protein) : null;
+        const diffCarb = plan?.carbs ? Math.round((tots.carbs || 0) - plan.carbs) : null;
+        const diffFat  = plan?.fats ? Math.round((tots.fats || 0) - plan.fats) : null;
+
+        const fmtDiff = (val, unit='') => {
+          if (val === null) return '';
+          const sign = val > 0 ? '+' : '';
+          const col = val > 0 ? '#ff453a' : val < 0 ? '#0a84ff' : 'var(--t3)';
+          return ` <span style="color:${col};font-weight:700;font-size:11px">(${sign}${val}${unit})</span>`;
+        };
+
+        const fmtDiffPro = (val) => {
+          if (val === null) return '';
+          const sign = val > 0 ? '+' : '';
+          const col = val >= 0 ? '#30d158' : '#ff453a';
+          return ` <span style="color:${col};font-weight:700;font-size:11px">(${sign}${val}g)</span>`;
+        };
+
+        const fmtDiffCarbFat = (val) => {
+          if (val === null) return '';
+          const sign = val > 0 ? '+' : '';
+          const col = val > 0 ? '#ff9f0a' : val < 0 ? '#0a84ff' : 'var(--t3)';
+          return ` <span style="color:${col};font-weight:700;font-size:11px">(${sign}${val}g)</span>`;
+        };
+
+        const kcalDiffStr = diffKcal !== null ? fmtDiff(diffKcal, ' kcal') : '';
+        const proDiffStr  = diffPro !== null ? fmtDiffPro(diffPro) : '';
+        const carbDiffStr = diffCarb !== null ? fmtDiffCarbFat(diffCarb) : '';
+        const fatDiffStr  = diffFat !== null ? fmtDiffCarbFat(diffFat) : '';
+
+        return `
+          <div class="mrow">
+            <span class="mlabel">🔥 Kcal</span>
+            <span class="mval">${Math.round(tots.kcal)} ${plan?.kcal ? '/ ' + plan.kcal : ''}${kcalDiffStr}</span>
+          </div>
+          <div class="pbb h4" style="margin-bottom:8px">
+            <div class="pbf pb-v" style="width:${plan?.kcal ? Math.min(100, (tots.kcal / plan.kcal * 100)) : 0}%"></div>
+          </div>
+          <div style="display:flex;gap:12px;font-size:13px;color:var(--t2);flex-wrap:wrap">
+            <span>🥩 ${Math.round(tots.protein || 0)}g${proDiffStr}</span>
+            <span>🌾 ${Math.round(tots.carbs || 0)}g${carbDiffStr}</span>
+            <span>🧈 ${Math.round(tots.fats || 0)}g${fatDiffStr}</span>
+          </div>`;
+      })() : '<p style="color:var(--t3);font-size:13px">Nessun dato nutrizionale</p>'}
       ${log.steps       ? `<div style="margin-top:8px;font-size:13px;color:var(--t2)">👟 ${log.steps.toLocaleString('it-IT')} passi</div>` : ''}
       ${log.burned_kcal ? `<div style="font-size:13px;color:var(--t2)">🔥 ${log.burned_kcal} kcal bruciate</div>` : ''}
       ${log.daily_note  ? `<div style="margin-top:10px;font-size:13px;color:var(--t2);font-style:italic">"${log.daily_note}"</div>` : ''}
