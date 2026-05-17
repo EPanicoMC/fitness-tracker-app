@@ -1,9 +1,9 @@
 import { requireAuth } from './app.js';
-import { db, USER_ID, doc, getDoc, setDoc, auth, signOut } from './firebase-config.js';
+import { db, getUserId, doc, getDoc, setDoc, auth, signOut } from './firebase-config.js';
 import { showToast } from './app.js';
 
 async function loadSettings() {
-  const snap = await getDoc(doc(db, 'users', USER_ID, 'settings', 'app'));
+  const snap = await getDoc(doc(db, 'users', getUserId(), 'settings', 'app'));
   if (!snap.exists()) return;
   const s = snap.data();
   if (s.profile?.name)          document.getElementById('s-name').value       = s.profile.name;
@@ -15,7 +15,7 @@ async function loadSettings() {
 
 async function loadGeminiKey() {
   try {
-    const snap = await getDoc(doc(db, 'users', USER_ID, 'settings', 'gemini'));
+    const snap = await getDoc(doc(db, 'users', getUserId(), 'settings', 'gemini'));
     if (snap.exists() && snap.data().api_key) {
       const el = document.getElementById('gemini-key-status');
       if (el) el.textContent = '✅ Key configurata';
@@ -35,7 +35,7 @@ window.saveSettings = async function() {
     steps_goal: parseInt(document.getElementById('s-steps-goal').value) || null
   };
   try {
-    await setDoc(doc(db, 'users', USER_ID, 'settings', 'app'), data, { merge: true });
+    await setDoc(doc(db, 'users', getUserId(), 'settings', 'app'), data, { merge: true });
     showToast('✅ Impostazioni salvate!');
   } catch(e) {
     showToast('Errore salvataggio', 'err');
@@ -54,7 +54,7 @@ window.saveGeminiKey = async function() {
 
   try {
     await setDoc(
-      doc(db, 'users', USER_ID, 'settings', 'gemini'),
+      doc(db, 'users', getUserId(), 'settings', 'gemini'),
       { api_key: key },
       { merge: true }
     );

@@ -1,6 +1,6 @@
 import { requireAuth } from './app.js';
 import {
-  db, USER_ID, collection, doc, getDoc, getDocs, setDoc, deleteField, query, where, orderBy, limit
+  db, getUserId, collection, doc, getDoc, getDocs, setDoc, deleteField, query, where, orderBy, limit
 } from './firebase-config.js';
 import { getTodayString, getDayOfWeek, formatDateIT, formatDateShort, showToast, DAYS_IT, DAY_ORDER } from './app.js';
 
@@ -15,14 +15,14 @@ let settingsData = null;
 
 async function init() {
   const [progSnap, logsSnap, settSnap, dietSnap] = await Promise.all([
-    getDocs(collection(db, 'users', USER_ID, 'programs')),
+    getDocs(collection(db, 'users', getUserId(), 'programs')),
     getDocs(query(
-      collection(db, 'users', USER_ID, 'daily_logs'),
+      collection(db, 'users', getUserId(), 'daily_logs'),
       orderBy('date', 'desc'),
       limit(60)
     )),
-    getDoc(doc(db, 'users', USER_ID, 'settings', 'app')),
-    getDocs(collection(db, 'users', USER_ID, 'diet_plans'))
+    getDoc(doc(db, 'users', getUserId(), 'settings', 'app')),
+    getDocs(collection(db, 'users', getUserId(), 'diet_plans'))
   ]);
 
   const activeDoc = progSnap.docs.find(d => d.data().active);
@@ -97,7 +97,7 @@ async function loadCalendar() {
   monthLogs = {};
   try {
     const snap = await getDocs(query(
-      collection(db, 'users', USER_ID, 'daily_logs'),
+      collection(db, 'users', getUserId(), 'daily_logs'),
       where('date', '>=', `${monthStr}-01`),
       where('date', '<=', `${monthStr}-31`),
       orderBy('date')
@@ -295,7 +295,7 @@ window.showDay = async function(dateStr) {
 let _dietPlanCache = null;
 async function getActiveDietPlan() {
   if (_dietPlanCache) return _dietPlanCache;
-  const snap = await getDocs(collection(db, 'users', USER_ID, 'diet_plans'));
+  const snap = await getDocs(collection(db, 'users', getUserId(), 'diet_plans'));
   _dietPlanCache = snap.docs.find(d => d.data().active)?.data() || null;
   return _dietPlanCache;
 }
@@ -823,7 +823,7 @@ window.saveRecoveredDay = async function(dateStr) {
   }
 
   try {
-    await setDoc(doc(db, 'users', USER_ID, 'daily_logs', dateStr), data, { merge: false });
+    await setDoc(doc(db, 'users', getUserId(), 'daily_logs', dateStr), data, { merge: false });
     document.getElementById('recover-modal')?.remove();
     monthLogs[dateStr] = data;
     renderGrid(currentMonth.getFullYear(), currentMonth.getMonth());
@@ -887,7 +887,7 @@ window.saveEditDay = async function(dateStr) {
   const fats       = parseFloat(document.getElementById('ed-fat')?.value)   || 0;
 
   try {
-    await setDoc(doc(db, 'users', USER_ID, 'daily_logs', dateStr), {
+    await setDoc(doc(db, 'users', getUserId(), 'daily_logs', dateStr), {
       steps,
       burned_kcal: burned,
       daily_note: note,
@@ -929,7 +929,7 @@ window.confirmDeleteWorkout = function(dateStr) {
 
 window.deleteWorkout = async function(dateStr, modalBg) {
   try {
-    await setDoc(doc(db, 'users', USER_ID, 'daily_logs', dateStr),
+    await setDoc(doc(db, 'users', getUserId(), 'daily_logs', dateStr),
       { workout: deleteField() }, { merge: true });
     if (monthLogs[dateStr]) delete monthLogs[dateStr].workout;
     modalBg?.remove();
@@ -941,4 +941,7 @@ window.deleteWorkout = async function(dateStr, modalBg) {
   }
 };
 
-init();
+(async function() {
+  await requireAuth();
+  init();
+})();

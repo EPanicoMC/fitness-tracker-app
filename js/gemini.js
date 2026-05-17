@@ -1,4 +1,4 @@
-import { db, USER_ID } from './firebase-config.js';
+import { db, getUserId } from './firebase-config.js';
 import { doc, getDoc } from './firebase-config.js';
 
 let cachedKey = null;
@@ -7,7 +7,7 @@ let busy = false;
 async function getKey() {
   if (cachedKey) return cachedKey;
   try {
-    const s = await getDoc(doc(db, 'users', USER_ID, 'settings', 'gemini'));
+    const s = await getDoc(doc(db, 'users', getUserId(), 'settings', 'gemini'));
     if (s.exists()) cachedKey = s.data().api_key;
   } catch(e) {}
   return cachedKey;

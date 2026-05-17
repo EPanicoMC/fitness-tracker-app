@@ -1,6 +1,6 @@
 import { requireAuth } from './app.js';
 import {
-  db, USER_ID, collection, doc, getDocs, addDoc, setDoc, deleteDoc
+  db, getUserId, collection, doc, getDocs, addDoc, setDoc, deleteDoc
 } from './firebase-config.js';
 import { showToast, showModal } from './app.js';
 import { AutoComplete, saveToLibrary } from './autocomplete.js';
@@ -21,7 +21,7 @@ async function loadDiets() {
   if (!el) return;
   el.innerHTML = '<div class="spin"></div>';
   try {
-    const snap = await getDocs(collection(db, 'users', USER_ID, 'diet_plans'));
+    const snap = await getDocs(collection(db, 'users', getUserId(), 'diet_plans'));
     diets = await Promise.all(snap.docs.map(async d => {
       const data = d.data();
       let updated = false;
@@ -39,7 +39,7 @@ async function loadDiets() {
         }
       });
       if (updated) {
-        try { await setDoc(doc(db, 'users', USER_ID, 'diet_plans', d.id), data); } catch(e){}
+        try { await setDoc(doc(db, 'users', getUserId(), 'diet_plans', d.id), data); } catch(e){}
       }
       return { id: d.id, ...data };
     }));
@@ -139,8 +139,8 @@ window.toggleDietDetail = function(id) {
 window.activateDiet = async function(id) {
   try {
     for (const d of diets.filter(d => d.active))
-      await setDoc(doc(db,'users',USER_ID,'diet_plans',d.id), { active: false }, { merge: true });
-    await setDoc(doc(db,'users',USER_ID,'diet_plans',id), { active: true }, { merge: true });
+      await setDoc(doc(db,'users',getUserId(),'diet_plans',d.id), { active: false }, { merge: true });
+    await setDoc(doc(db,'users',getUserId(),'diet_plans',id), { active: true }, { merge: true });
     showToast('✅ Piano attivato!');
     await loadDiets();
   } catch(e) { showToast('Errore', 'err'); }
@@ -151,7 +151,7 @@ window.deleteDiet = function(id) {
     title: 'Elimina piano', text: 'Vuoi eliminare questo piano alimentare?',
     confirmLabel: 'Elimina',
     onConfirm: async () => {
-      await deleteDoc(doc(db,'users',USER_ID,'diet_plans',id));
+      await deleteDoc(doc(db,'users',getUserId(),'diet_plans',id));
       showToast('Piano eliminato');
       await loadDiets();
     }
@@ -166,7 +166,7 @@ window.cloneDiet = async function(id) {
     delete clone.id;
     clone.name = `${clone.name} (copia)`;
     clone.active = false;
-    await addDoc(collection(db, 'users', USER_ID, 'diet_plans'), clone);
+    await addDoc(collection(db, 'users', getUserId(), 'diet_plans'), clone);
     showToast('✅ Piano clonato!');
     await loadDiets();
   } catch(e) { showToast('Errore clonazione', 'err'); }
@@ -405,9 +405,9 @@ window.saveDiet = async function() {
     };
     console.log('Salvataggio dieta:', JSON.stringify(dataToSave).slice(0, 500));
     if (editingId) {
-      await setDoc(doc(db,'users',USER_ID,'diet_plans',editingId), dataToSave);
+      await setDoc(doc(db,'users',getUserId(),'diet_plans',editingId), dataToSave);
     } else {
-      await addDoc(collection(db,'users',USER_ID,'diet_plans'), dataToSave);
+      await addDoc(collection(db,'users',getUserId(),'diet_plans'), dataToSave);
     }
     showToast('✅ Piano salvato!');
     closeDietForm();
@@ -419,4 +419,7 @@ window.saveDiet = async function() {
   }
 };
 
-loadDiets();
+(async function() {
+  await requireAuth();
+  loadDiets();
+})();

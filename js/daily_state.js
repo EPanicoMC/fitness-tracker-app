@@ -1,6 +1,6 @@
 import { requireAuth } from './app.js';
 import {
-  db, USER_ID, doc, getDoc, setDoc, getDocs, collection, query, orderBy, limit
+  db, getUserId, doc, getDoc, setDoc, getDocs, collection, query, orderBy, limit
 } from './firebase-config.js';
 import {
   getTodayString, getYesterdayString, getDayOfWeek, formatDateIT, formatDateShort, addDays, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER, cleanOldLogs, calcFitScore, calcSmartScore
@@ -53,9 +53,9 @@ async function checkDayRollover() {
   if (!yesterdayLS) return;
   try {
     const data = JSON.parse(yesterdayLS);
-    const snap = await getDoc(doc(db, 'users', USER_ID, 'daily_logs', yesterday));
+    const snap = await getDoc(doc(db, 'users', getUserId(), 'daily_logs', yesterday));
     if (!snap.exists()) {
-      await setDoc(doc(db, 'users', USER_ID, 'daily_logs', yesterday), {
+      await setDoc(doc(db, 'users', getUserId(), 'daily_logs', yesterday), {
         date: yesterday,
         is_training_day: data.is_training_day || false,
         steps: data.steps || null,
@@ -67,7 +67,7 @@ async function checkDayRollover() {
       console.log('Auto-salvato giorno precedente:', yesterday);
     } else if (data.daily_note) {
       // Doc esiste ma la nota in localStorage potrebbe non essere stata sincronizzata
-      await setDoc(doc(db, 'users', USER_ID, 'daily_logs', yesterday), { daily_note: data.daily_note }, { merge: true });
+      await setDoc(doc(db, 'users', getUserId(), 'daily_logs', yesterday), { daily_note: data.daily_note }, { merge: true });
     }
     localStorage.removeItem('fittracker_today_' + yesterday);
   } catch(e) {
@@ -83,10 +83,10 @@ async function init() {
 
   try {
     const [logSnap, progSnap, dietSnap, settSnap] = await Promise.all([
-      getDoc(doc(db, 'users', USER_ID, 'daily_logs', TODAY)),
-      getDocs(collection(db, 'users', USER_ID, 'programs')),
-      getDocs(collection(db, 'users', USER_ID, 'diet_plans')),
-      getDoc(doc(db, 'users', USER_ID, 'settings', 'app'))
+      getDoc(doc(db, 'users', getUserId(), 'daily_logs', TODAY)),
+      getDocs(collection(db, 'users', getUserId(), 'programs')),
+      getDocs(collection(db, 'users', getUserId(), 'diet_plans')),
+      getDoc(doc(db, 'users', getUserId(), 'settings', 'app'))
     ]);
 
     logData = logSnap.exists() ? logSnap.data() : {};
@@ -157,7 +157,7 @@ async function init() {
   buildFitScore();
 
   if (new Date().getDate() === 1) {
-    cleanOldLogs(db, USER_ID);
+    cleanOldLogs(db, getUserId());
   }
 
   checkYesterdayLog();
@@ -201,7 +201,7 @@ async function buildStreak() {
   if (!box) return;
   try {
     const snap = await getDocs(query(
-      collection(db, 'users', USER_ID, 'daily_logs'),
+      collection(db, 'users', getUserId(), 'daily_logs'),
       orderBy('date', 'desc'),
       limit(14)
     ));
@@ -842,7 +842,7 @@ window.openAddMealFromAI = function(kcal, protein, carbs, fats, text) {
 
 // ── Cloud Sync (called by saveToLocal debouncer + manual saveDay) ───
 async function syncToFirebase() {
-  if (!USER_ID) return;
+  if (!getUserId()) return;
 
   const sf = document.getElementById('steps-in');
   if(sf) logData.steps = parseInt(sf.value) || null;
@@ -873,7 +873,7 @@ async function syncToFirebase() {
   if (logData.workout) data.workout = logData.workout;
 
   try {
-    await setDoc(doc(db, 'users', USER_ID, 'daily_logs', TODAY), data, { merge: true });
+    await setDoc(doc(db, 'users', getUserId(), 'daily_logs', TODAY), data, { merge: true });
     console.log('✅ Auto-synced to Firebase');
   } catch(e) {
     console.error('Errore Auto-Sync:', e);
@@ -889,7 +889,7 @@ window.saveDay = async function() {
 // ── Recupero giorni passati ────────────────────────────────
 async function checkYesterdayLog() {
   const yesterday = getYesterdayString();
-  const snap = await getDoc(doc(db, 'users', USER_ID, 'daily_logs', yesterday));
+  const snap = await getDoc(doc(db, 'users', getUserId(), 'daily_logs', yesterday));
   if (snap.exists()) return;
 
   const banner = document.createElement('div');
@@ -996,7 +996,7 @@ window.saveRecoveredDay = async function(dateStr) {
   }
 
   try {
-    await setDoc(doc(db, 'users', USER_ID, 'daily_logs', dateStr), data, { merge: false });
+    await setDoc(doc(db, 'users', getUserId(), 'daily_logs', dateStr), data, { merge: false });
     document.getElementById('recover-modal')?.remove();
     document.querySelector('[data-yesterday-banner]')?.remove();
     showToast('✅ Giornata recuperata!');
@@ -1167,4 +1167,7 @@ window.saveManualMacro = function(mealIndex) {
 };
 
 
-init();
+(async function() {
+  await requireAuth();
+  init();
+})();

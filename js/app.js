@@ -1,11 +1,11 @@
-import { auth, setUserId, onAuthStateChanged } from './firebase-config.js';
+import { auth, onAuthStateChanged } from './firebase-config.js';
 
 export function requireAuth() {
   return new Promise((resolve) => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       unsubscribe();
       if (user) {
-        setUserId(user.email);
+        
         resolve(user);
       } else {
         window.location.href = 'auth.html';
@@ -251,15 +251,15 @@ export function calcSmartScore({
   return { score, label, icon, breakdown };
 }
 
-export async function cleanOldLogs(db, USER_ID, monthsToKeep=12) {
+export async function cleanOldLogs(db, getUserId(), monthsToKeep=12) {
   try {
     const { collection, getDocs, deleteDoc, doc } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
     const cutoff = new Date();
     cutoff.setMonth(cutoff.getMonth() - monthsToKeep);
     const cutoffStr = cutoff.toISOString().split('T')[0];
-    const snap = await getDocs(collection(db, 'users', USER_ID, 'daily_logs'));
+    const snap = await getDocs(collection(db, 'users', getUserId(), 'daily_logs'));
     const toDelete = snap.docs.filter(d => d.id < cutoffStr);
-    await Promise.all(toDelete.map(d => deleteDoc(doc(db, 'users', USER_ID, 'daily_logs', d.id))));
+    await Promise.all(toDelete.map(d => deleteDoc(doc(db, 'users', getUserId(), 'daily_logs', d.id))));
     if (toDelete.length) console.log(`cleanOldLogs: deleted ${toDelete.length} logs older than ${cutoffStr}`);
   } catch(e) {
     console.warn('cleanOldLogs error:', e);

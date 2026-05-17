@@ -1,6 +1,6 @@
 import { requireAuth } from './app.js';
 import {
-  db, USER_ID, collection, doc, getDoc, getDocs, setDoc, query, orderBy, limit
+  db, getUserId, collection, doc, getDoc, getDocs, setDoc, query, orderBy, limit
 } from './firebase-config.js';
 import { getTodayString, getDayOfWeek, showToast, showModal, fmtTimer, DAYS_IT, DAY_ORDER } from './app.js';
 
@@ -68,8 +68,8 @@ async function requestNotifPermission() {
 // ── Load select screen ─────────────────────────────────────
 async function loadSessionSelect() {
   const [progSnap, logsSnap] = await Promise.all([
-    getDocs(collection(db, 'users', USER_ID, 'programs')),
-    getDocs(query(collection(db, 'users', USER_ID, 'daily_logs'), orderBy('date', 'desc'), limit(30)))
+    getDocs(collection(db, 'users', getUserId(), 'programs')),
+    getDocs(query(collection(db, 'users', getUserId(), 'daily_logs'), orderBy('date', 'desc'), limit(30)))
   ]);
 
   const activeDoc = progSnap.docs.find(d => d.data().active);
@@ -127,12 +127,12 @@ window.startWithSession = async function(dayKey) {
   // Load last session for weight pre-fill (from last_sessions first, then daily_logs)
   let prevLog = null;
   try {
-    const lastSnap = await getDoc(doc(db, 'users', USER_ID, 'last_sessions', dayKey));
+    const lastSnap = await getDoc(doc(db, 'users', getUserId(), 'last_sessions', dayKey));
     if (lastSnap.exists()) {
       prevLog = { workout: { exercises: lastSnap.data().exercises } };
     } else {
       const snap = await getDocs(
-        query(collection(db, 'users', USER_ID, 'daily_logs'), orderBy('date', 'desc'), limit(20))
+        query(collection(db, 'users', getUserId(), 'daily_logs'), orderBy('date', 'desc'), limit(20))
       );
       for (const d of snap.docs) {
         const ld = d.data();
@@ -526,11 +526,11 @@ window.finishSession = async function() {
   };
 
   try {
-    await setDoc(doc(db, 'users', USER_ID, 'daily_logs', TODAY),
+    await setDoc(doc(db, 'users', getUserId(), 'daily_logs', TODAY),
       { workout: workoutLog, date: TODAY }, { merge: true });
 
     // Salva ultima sessione per pre-compilazione pesi
-    await setDoc(doc(db, 'users', USER_ID, 'last_sessions', sessionData.dayKey), {
+    await setDoc(doc(db, 'users', getUserId(), 'last_sessions', sessionData.dayKey), {
       session_day:      sessionData.dayKey,
       session_name:     sessionData.name,
       completed_date:   TODAY,
@@ -560,4 +560,7 @@ window.finishSession = async function() {
   }
 };
 
-loadSessionSelect();
+(async function() {
+  await requireAuth();
+  loadSessionSelect();
+})();

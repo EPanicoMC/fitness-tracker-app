@@ -1,4 +1,4 @@
-import { db, USER_ID, collection, doc, getDoc, getDocs, addDoc, query, orderBy, limit } from './firebase-config.js';
+import { db, getUserId, collection, doc, getDoc, getDocs, addDoc, query, orderBy, limit } from './firebase-config.js';
 import { showToast } from './app.js';
 
 // ── State ──────────────────────────────────────────────────
@@ -9,7 +9,7 @@ let _cachedKey = null;
 async function getApiKey() {
   if (_cachedKey) return _cachedKey;
   try {
-    const s = await getDoc(doc(db, 'users', USER_ID, 'settings', 'gemini'));
+    const s = await getDoc(doc(db, 'users', getUserId(), 'settings', 'gemini'));
     if (s.exists()) _cachedKey = s.data().api_key;
   } catch(e) {}
   return _cachedKey;
@@ -74,17 +74,17 @@ function buildApiMessages(messages) {
 async function loadContext() {
   const ctx = {};
   try {
-    const snap = await getDocs(query(collection(db, 'users', USER_ID, 'checks'), orderBy('date', 'desc'), limit(1)));
+    const snap = await getDocs(query(collection(db, 'users', getUserId(), 'checks'), orderBy('date', 'desc'), limit(1)));
     if (!snap.empty) ctx.lastCheck = snap.docs[0].data();
   } catch(e) {}
   try {
-    const snap = await getDocs(collection(db, 'users', USER_ID, 'programs'));
+    const snap = await getDocs(collection(db, 'users', getUserId(), 'programs'));
     const active = snap.docs.find(d => d.data().active);
     if (active) ctx.activeProgram = { id: active.id, ...active.data() };
     else if (!snap.empty) ctx.activeProgram = { id: snap.docs[0].id, ...snap.docs[0].data() };
   } catch(e) {}
   try {
-    const snap = await getDocs(collection(db, 'users', USER_ID, 'diet_plans'));
+    const snap = await getDocs(collection(db, 'users', getUserId(), 'diet_plans'));
     const active = snap.docs.find(d => d.data().active);
     if (active) ctx.activeDiet = { id: active.id, ...active.data() };
     else if (!snap.empty) ctx.activeDiet = { id: snap.docs[0].id, ...snap.docs[0].data() };
@@ -293,7 +293,7 @@ async function applyPlanToFirestore(plan, type, isDraft) {
   const prefix = isDraft ? '🔬 Bozza AI — ' : '';
   try {
     if (type === 'workout') {
-      await addDoc(collection(db, 'users', USER_ID, 'programs'), {
+      await addDoc(collection(db, 'users', getUserId(), 'programs'), {
         ...plan,
         name: prefix + plan.name,
         active: false,
@@ -316,7 +316,7 @@ async function applyPlanToFirestore(plan, type, isDraft) {
         }), { kcal: 0, protein: 0, carbs: 0, fats: 0 });
         return { ...sum, meals };
       };
-      await addDoc(collection(db, 'users', USER_ID, 'diet_plans'), {
+      await addDoc(collection(db, 'users', getUserId(), 'diet_plans'), {
         name: prefix + plan.name,
         active: false,
         updated_at: new Date().toISOString(),

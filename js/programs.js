@@ -1,6 +1,6 @@
 import { requireAuth } from './app.js';
 import {
-  db, USER_ID, collection, doc, getDocs, addDoc, setDoc, deleteDoc
+  db, getUserId, collection, doc, getDocs, addDoc, setDoc, deleteDoc
 } from './firebase-config.js';
 import { showToast, showModal, DAYS_IT, DAY_ORDER } from './app.js';
 import { AutoComplete, saveToLibrary } from './autocomplete.js';
@@ -15,7 +15,7 @@ async function loadPrograms() {
   if (!el) return;
   el.innerHTML = '<div class="spin"></div>';
   try {
-    const snap = await getDocs(collection(db, 'users', USER_ID, 'programs'));
+    const snap = await getDocs(collection(db, 'users', getUserId(), 'programs'));
     programs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     programs.sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0));
     renderList();
@@ -82,8 +82,8 @@ window.toggleDetail = function(id) {
 window.activateProgram = async function(id) {
   try {
     for (const p of programs.filter(p => p.active))
-      await setDoc(doc(db,'users',USER_ID,'programs',p.id), { active: false }, { merge: true });
-    await setDoc(doc(db,'users',USER_ID,'programs',id), { active: true }, { merge: true });
+      await setDoc(doc(db,'users',getUserId(),'programs',p.id), { active: false }, { merge: true });
+    await setDoc(doc(db,'users',getUserId(),'programs',id), { active: true }, { merge: true });
     showToast('✅ Scheda attivata!');
     await loadPrograms();
   } catch(e) { showToast('Errore', 'err'); }
@@ -94,7 +94,7 @@ window.deleteProgram = function(id) {
     title: 'Elimina scheda', text: 'Vuoi eliminare questa scheda?',
     confirmLabel: 'Elimina',
     onConfirm: async () => {
-      await deleteDoc(doc(db,'users',USER_ID,'programs',id));
+      await deleteDoc(doc(db,'users',getUserId(),'programs',id));
       showToast('Scheda eliminata');
       await loadPrograms();
     }
@@ -109,7 +109,7 @@ window.cloneProgram = async function(id) {
     delete clone.id;
     clone.name = `${clone.name} (copia)`;
     clone.active = false;
-    await addDoc(collection(db, 'users', USER_ID, 'programs'), clone);
+    await addDoc(collection(db, 'users', getUserId(), 'programs'), clone);
     showToast('✅ Scheda clonata!');
     await loadPrograms();
   } catch(e) { showToast('Errore clonazione', 'err'); }
@@ -339,9 +339,9 @@ window.saveProgram = async function() {
   try {
     delete data.id;
     if (editingId) {
-      await setDoc(doc(db,'users',USER_ID,'programs',editingId), data);
+      await setDoc(doc(db,'users',getUserId(),'programs',editingId), data);
     } else {
-      await addDoc(collection(db,'users',USER_ID,'programs'), data);
+      await addDoc(collection(db,'users',getUserId(),'programs'), data);
     }
     showToast('✅ Scheda salvata!');
     closeForm();
@@ -352,4 +352,7 @@ window.saveProgram = async function() {
   }
 };
 
-loadPrograms();
+(async function() {
+  await requireAuth();
+  loadPrograms();
+})();

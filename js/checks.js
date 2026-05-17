@@ -1,6 +1,6 @@
 import { requireAuth } from './app.js';
 import {
-  db, USER_ID, collection, doc, getDocs, setDoc, deleteDoc, query, orderBy, limit, storage
+  db, getUserId, collection, doc, getDocs, setDoc, deleteDoc, query, orderBy, limit, storage
 } from './firebase-config.js';
 import { showToast, showModal, formatDateIT } from './app.js';
 import {
@@ -44,7 +44,7 @@ async function loadChecks() {
   const el = document.getElementById('checks-list');
   el.innerHTML = '<div class="spin"></div>';
   const snap = await getDocs(
-    query(collection(db, 'users', USER_ID, 'checks'), orderBy('date', 'desc'))
+    query(collection(db, 'users', getUserId(), 'checks'), orderBy('date', 'desc'))
   );
   checks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
@@ -271,7 +271,7 @@ window.deleteCheck = function(id) {
             } catch(e) { console.warn('Errore eliminazione foto Storage:', e); }
           }
         }
-        await deleteDoc(doc(db, 'users', USER_ID, 'checks', id));
+        await deleteDoc(doc(db, 'users', getUserId(), 'checks', id));
         showToast('✅ Check eliminato');
         await loadChecks();
       } catch(e) {
@@ -417,7 +417,7 @@ window.saveCheck = async function() {
   const photoUrls = [];
   for (const { file, view } of formPhotos) {
     try {
-      const storRef = ref(storage, `users/${USER_ID}/checks/${date}_${Date.now()}_${file.name}`);
+      const storRef = ref(storage, `users/${getUserId()}/checks/${date}_${Date.now()}_${file.name}`);
       await uploadBytes(storRef, file);
       const url = await getDownloadURL(storRef);
       photoUrls.push({ url, view });
@@ -435,7 +435,7 @@ window.saveCheck = async function() {
   };
 
   try {
-    await setDoc(doc(db,'users',USER_ID,'checks',id), data);
+    await setDoc(doc(db,'users',getUserId(),'checks',id), data);
     showToast('✅ Check salvato!');
     closeCheckForm();
     await loadChecks();
@@ -447,7 +447,7 @@ window.saveCheck = async function() {
         newCheck: { date, weight, measurements, photos: photoUrls }
       });
       if (aiResult.success) {
-        await setDoc(doc(db,'users',USER_ID,'checks',id), { ai_analysis: aiResult.analysis }, { merge: true });
+        await setDoc(doc(db,'users',getUserId(),'checks',id), { ai_analysis: aiResult.analysis }, { merge: true });
         checks = checks.map(c => c.id === id ? { ...c, ai_analysis: aiResult.analysis } : c);
         renderList();
         showToast('🤖 Analisi AI completata!');
@@ -458,4 +458,7 @@ window.saveCheck = async function() {
   }
 };
 
-loadChecks();
+(async function() {
+  await requireAuth();
+  loadChecks();
+})();

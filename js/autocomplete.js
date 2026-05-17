@@ -1,4 +1,4 @@
-import { db, USER_ID, getDocs, collection, doc, setDoc } from './firebase-config.js';
+import { db, getUserId, getDocs, collection, doc, setDoc } from './firebase-config.js';
 
 export class AutoComplete {
   constructor(inputEl, collName, opts={}) {
@@ -23,7 +23,7 @@ export class AutoComplete {
 
   async loadCache() {
     if (this.cache) return this.cache;
-    const snap = await getDocs(collection(db, 'users', USER_ID, this.coll));
+    const snap = await getDocs(collection(db, 'users', getUserId(), this.coll));
     this.cache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     return this.cache;
   }
@@ -68,7 +68,7 @@ export class AutoComplete {
 
 export async function saveToLibrary(collName, data) {
   const id = data.name.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_àèéìòù]/g,'');
-  await setDoc(doc(db, 'users', USER_ID, collName, id),
+  await setDoc(doc(db, 'users', getUserId(), collName, id),
     { ...data, last_used: new Date().toISOString().split('T')[0] },
     { merge: true }
   );

@@ -1,4 +1,4 @@
-const CACHE = 'ft-v30';
+const CACHE = 'ft-v32';
 const FILES = [
   '/fitness-tracker-app/',
   '/fitness-tracker-app/index.html',
@@ -8,8 +8,10 @@ const FILES = [
   '/fitness-tracker-app/diary.html',
   '/fitness-tracker-app/checks.html',
   '/fitness-tracker-app/settings.html',
+  '/fitness-tracker-app/auth.html',
   '/fitness-tracker-app/css/style.css',
   '/fitness-tracker-app/js/app.js',
+  '/fitness-tracker-app/js/auth.js',
   '/fitness-tracker-app/js/daily_state.js',
   '/fitness-tracker-app/js/session.js',
   '/fitness-tracker-app/js/programs.js',

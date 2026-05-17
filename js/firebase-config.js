@@ -4,7 +4,9 @@ import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  signOut
+  signOut,
+  setPersistence,
+  browserLocalPersistence
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import {
   getFirestore,
@@ -38,18 +40,13 @@ const db = getFirestore(app);
 const auth = getAuth(app);
 const storage = getStorage(app);
 
-let USER_ID = null;
 
-function setUserId(id) {
-  USER_ID = id;
-}
 
+export function getUserId() { return auth?.currentUser?.email; }
 export {
   app,
   db,
   auth,
-  USER_ID,
-  setUserId,
   storage,
   collection,
   doc,
@@ -67,5 +64,7 @@ export {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  signOut
+  signOut,
+  setPersistence,
+  browserLocalPersistence
 };

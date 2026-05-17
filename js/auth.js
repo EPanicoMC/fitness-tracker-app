@@ -1,4 +1,6 @@
-import { auth, signInWithEmailAndPassword, createUserWithEmailAndPassword } from './firebase-config.js';
+import { auth, signInWithEmailAndPassword, createUserWithEmailAndPassword, setPersistence, browserLocalPersistence } from './firebase-config.js';
+
+setPersistence(auth, browserLocalPersistence).catch(console.error);
 
 const loginForm = document.getElementById('login-form');
 const registerForm = document.getElementById('register-form');
