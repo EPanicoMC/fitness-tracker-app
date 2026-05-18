@@ -8,15 +8,14 @@ async function loadSettings() {
   // Populate users list
   try {
     const usersSnap = await getDocs(collection(db, 'users'));
-    const friendSelect = document.getElementById('s-friend-email');
-    if (friendSelect) {
+    const friendList = document.getElementById('friend-list');
+    if (friendList) {
       usersSnap.docs.forEach(d => {
         const email = d.id;
         if (email && email !== getUserId()) {
           const opt = document.createElement('option');
           opt.value = email;
-          opt.textContent = email;
-          friendSelect.appendChild(opt);
+          friendList.appendChild(opt);
         }
       });
     }
