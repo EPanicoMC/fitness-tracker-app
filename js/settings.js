@@ -1,8 +1,29 @@
 import { requireAuth } from './app.js';
-import { db, getUserId, doc, getDoc, setDoc, auth, signOut } from './firebase-config.js';
+import { db, getUserId, doc, getDoc, getDocs, collection, setDoc, auth, signOut } from './firebase-config.js';
 import { showToast } from './app.js';
 
+let initialFriendEmail = '';
+
 async function loadSettings() {
+  // Populate users list
+  try {
+    const usersSnap = await getDocs(collection(db, 'users'));
+    const friendSelect = document.getElementById('s-friend-email');
+    if (friendSelect) {
+      usersSnap.docs.forEach(d => {
+        const email = d.id;
+        if (email && email !== getUserId()) {
+          const opt = document.createElement('option');
+          opt.value = email;
+          opt.textContent = email;
+          friendSelect.appendChild(opt);
+        }
+      });
+    }
+  } catch (e) {
+    console.warn('Errore caricamento utenti:', e);
+  }
+
   const snap = await getDoc(doc(db, 'users', getUserId(), 'settings', 'app'));
   if (!snap.exists()) return;
   const s = snap.data();
@@ -15,7 +36,12 @@ async function loadSettings() {
   if (s.profile?.height)        document.getElementById('s-height').value     = s.profile.height;
   if (s.profile?.weight_target) document.getElementById('s-wtarget').value    = s.profile.weight_target;
   if (s.steps_goal)             document.getElementById('s-steps-goal').value = s.steps_goal;
-  if (s.friend_email)           document.getElementById('s-friend-email').value = s.friend_email;
+  
+  if (s.friend_email) {
+    initialFriendEmail = s.friend_email;
+    document.getElementById('s-friend-email').value = s.friend_email;
+  }
+  
   await loadGeminiKey();
 }
 
@@ -59,10 +85,29 @@ window.saveSettings = async function() {
       weight_target: parseFloat(document.getElementById('s-wtarget').value) || null
     },
     steps_goal: parseInt(document.getElementById('s-steps-goal').value) || null,
-    friend_email: document.getElementById('s-friend-email').value.trim()
+    friend_email: document.getElementById('s-friend-email').value || null
   };
   try {
     await setDoc(doc(db, 'users', getUserId(), 'settings', 'app'), data, { merge: true });
+    
+    // Mutual save: if a new friend is selected, set us as their friend too
+    const newFriendEmail = data.friend_email;
+    if (newFriendEmail && newFriendEmail !== initialFriendEmail) {
+      await setDoc(doc(db, 'users', newFriendEmail, 'settings', 'app'), { friend_email: getUserId() }, { merge: true });
+    }
+    // If friend was removed or changed, we might optionally clear ourselves from the old friend's settings
+    if (initialFriendEmail && initialFriendEmail !== newFriendEmail) {
+       // We only clear if they still have us set, to avoid removing their active friend if they changed it
+       try {
+         const oldFriendSnap = await getDoc(doc(db, 'users', initialFriendEmail, 'settings', 'app'));
+         if (oldFriendSnap.exists() && oldFriendSnap.data().friend_email === getUserId()) {
+           await setDoc(doc(db, 'users', initialFriendEmail, 'settings', 'app'), { friend_email: null }, { merge: true });
+         }
+       } catch (e) {}
+    }
+    
+    initialFriendEmail = newFriendEmail;
+    
     showToast('✅ Impostazioni salvate!');
   } catch(e) {
     showToast('Errore salvataggio', 'err');

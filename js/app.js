@@ -1,11 +1,15 @@
-import { auth, onAuthStateChanged } from './firebase-config.js';
+import { auth, onAuthStateChanged, db, doc, setDoc } from './firebase-config.js';
 
 export function requireAuth() {
   return new Promise((resolve) => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       unsubscribe();
       if (user) {
-        
+        if (user.email) {
+          try {
+            await setDoc(doc(db, 'users', user.email), { email: user.email }, { merge: true });
+          } catch(e) { console.warn('Poteva non essere possibile salvare il doc utente:', e); }
+        }
         resolve(user);
       } else {
         window.location.href = 'auth.html';
