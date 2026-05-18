@@ -15,6 +15,7 @@ let appSettings = null;
 let isTrainingDay = false;
 let mealStates = [];
 let friendLogData = null;
+let friendActiveDiet = null;
 
 let cloudSyncTimer = null;
 function saveToLocal() {
@@ -108,6 +109,9 @@ async function init() {
     try {
       const fSnap = await getDoc(doc(db, 'users', appSettings.friend_email, 'daily_logs', TODAY));
       if (fSnap.exists()) friendLogData = fSnap.data();
+
+      const fDietSnap = await getDocs(collection(db, 'users', appSettings.friend_email, 'diet_plans'));
+      friendActiveDiet = fDietSnap.docs.find(d => d.data().active)?.data() || null;
     } catch(e) { console.warn('Errore friend log:', e); }
   }
 
@@ -571,18 +575,52 @@ function buildMeals() {
   }
 
   let friendBannerHtml = '';
-  if (friendLogData && Object.keys(friendLogData.meals_state || {}).length > 0) {
-    friendBannerHtml = `
-      <div class="card" style="margin-bottom:12px;background:rgba(124,111,255,0.1);border:1px solid var(--accent)">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <div>
-            <div style="font-size:12px;font-weight:800;color:var(--accent)">🤝 Pasti condivisi disponibili</div>
-            <div style="font-size:11px;color:var(--t2);margin-top:2px">${appSettings.friend_email} ha registrato dei pasti oggi.</div>
+  if (friendLogData && friendActiveDiet) {
+    const fDayKey = friendLogData.is_training_day ? 'day_on' : 'day_off';
+    const fMeals = friendActiveDiet[fDayKey]?.meals || [];
+    
+    let friendList = [];
+    fMeals.forEach((fm, fi) => {
+       if (friendLogData.meals_state?.[fi]?.eaten) {
+          const ov = friendLogData.meals_overrides?.[fi];
+          friendList.push({
+             name: fm.label || fm.type,
+             kcal: ov?.kcal ?? fm.kcal,
+             protein: ov?.protein ?? fm.protein,
+             carbs: ov?.carbs ?? fm.carbs,
+             fats: ov?.fats ?? fm.fats
+          });
+       }
+    });
+    
+    (friendLogData.extra_meals || []).forEach(em => {
+       friendList.push({
+           name: em.name,
+           kcal: em.kcal,
+           protein: em.protein,
+           carbs: em.carbs,
+           fats: em.fats
+       });
+    });
+    
+    if (friendList.length > 0) {
+      friendBannerHtml = `
+        <div class="card" style="margin-bottom:12px;background:rgba(124,111,255,0.05);border:1px solid rgba(124,111,255,0.3)">
+          <div style="font-size:12px;font-weight:800;color:var(--accent);margin-bottom:8px">🤝 Pasti mangiati da ${appSettings.friend_email.split('@')[0]}</div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            ${friendList.map((fm, idx) => `
+              <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.05)">
+                 <div>
+                   <div style="font-size:13px;font-weight:700;color:var(--t1)">${fm.name}</div>
+                   <div style="font-size:11px;color:var(--t2)">${fm.kcal} kcal · P:${fm.protein}g C:${fm.carbs}g F:${fm.fats}g</div>
+                 </div>
+                 <button class="btn btn-ghost btn-sm" onclick='window.openAddMeal(${JSON.stringify(fm)})'>Copia</button>
+              </div>
+            `).join('')}
           </div>
-          <button class="btn btn-ghost btn-sm" onclick="copyFriendMeals()">Copia</button>
         </div>
-      </div>
-    `;
+      `;
+    }
   }
   const extraHtml = (logData.extra_meals || []).map((m, xi) => `
     <div class="meal-item eaten" style="border-left:3px solid var(--orange)">
@@ -740,26 +778,6 @@ window.applyMealAI = function(mi, kcal, protein, carbs, fats) {
   const box = document.getElementById(`meal-ai-${mi}`);
   if (box) box.style.display = 'none';
   showToast('✅ Macro applicati! Pasto segnato ✓');
-};
-
-window.copyFriendMeals = function() {
-  if (!friendLogData) return;
-  if (confirm('Vuoi sovrascrivere i tuoi pasti attuali con quelli del tuo amico per oggi?')) {
-    logData.meals_overrides = JSON.parse(JSON.stringify(friendLogData.meals_overrides || {}));
-    logData.extra_meals = JSON.parse(JSON.stringify(friendLogData.extra_meals || []));
-    
-    // Auto-mark as eaten if they copied it
-    mealsCache.forEach((_, i) => {
-      if (!mealStates[i]) mealStates[i] = { eaten: true, active_variant: 0 };
-      else mealStates[i].eaten = true;
-    });
-
-    saveToLocal();
-    buildMeals();
-    buildNutrition();
-    buildFitScore();
-    showToast('Pasti copiati con successo! ✅');
-  }
 };
 
 // ── Workout ────────────────────────────────────────────────
@@ -1050,18 +1068,18 @@ window.saveRecoveredDay = async function(dateStr) {
 };
 
 // ── Aggiungi pasto extra ───────────────────────────────────
-window.openAddMeal = function() {
+window.openAddMeal = function(prefillData) {
   const bg = document.createElement('div');
   bg.className = 'modal-bg';
   bg.id = 'add-meal-modal';
   bg.innerHTML = `
     <div class="modal" style="max-height:85vh;overflow-y:auto">
       <div class="modal-handle"></div>
-      <h3>+ Aggiungi Pasto</h3>
+      <h3>${prefillData ? 'Copia Pasto Amico' : '+ Aggiungi Pasto'}</h3>
 
       <div class="fg">
         <label class="fl">Nome pasto</label>
-        <input type="text" class="fi" id="am-name" placeholder="Es. Snack, Extra proteine...">
+        <input type="text" class="fi" id="am-name" placeholder="Es. Snack, Extra proteine..." value="${prefillData?.name || ''}">
       </div>
 
       <div class="fg">
@@ -1076,19 +1094,19 @@ window.openAddMeal = function() {
 
       <div class="fmp" id="am-macro-preview" style="margin-bottom:16px">
         <div class="fmp-item">
-          <input type="number" class="fi" id="am-kcal" placeholder="Kcal" min="0">
+          <input type="number" class="fi" id="am-kcal" placeholder="Kcal" min="0" value="${prefillData?.kcal || ''}">
           <div class="fmp-l">Kcal</div>
         </div>
         <div class="fmp-item">
-          <input type="number" class="fi" id="am-protein" placeholder="0" min="0" step="0.1">
+          <input type="number" class="fi" id="am-protein" placeholder="0" min="0" step="0.1" value="${prefillData?.protein || ''}">
           <div class="fmp-l">Proteine g</div>
         </div>
         <div class="fmp-item">
-          <input type="number" class="fi" id="am-carbs" placeholder="0" min="0" step="0.1">
+          <input type="number" class="fi" id="am-carbs" placeholder="0" min="0" step="0.1" value="${prefillData?.carbs || ''}">
           <div class="fmp-l">Carbo g</div>
         </div>
         <div class="fmp-item">
-          <input type="number" class="fi" id="am-fats" placeholder="0" min="0" step="0.1">
+          <input type="number" class="fi" id="am-fats" placeholder="0" min="0" step="0.1" value="${prefillData?.fats || ''}">
           <div class="fmp-l">Grassi g</div>
         </div>
       </div>
