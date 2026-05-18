@@ -596,7 +596,7 @@ function buildMeals() {
         <div class="meal-kcal">${m.kcal}</div>
       </div>
     </div>`).join('');
-  el.innerHTML = mealStates.map((m, mi) => renderMealRow(m, mi)).join('') + extraHtml;
+  el.innerHTML = friendBannerHtml + mealStates.map((m, mi) => renderMealRow(m, mi)).join('') + extraHtml;
   updateNutritionTotals();
 }
 
