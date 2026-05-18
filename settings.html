@@ -27,6 +27,21 @@
       <input class="fi" id="s-name" style="width:150px;text-align:right;background:transparent;border:none;border-bottom:1px solid var(--border);border-radius:0;padding:4px 8px">
     </div>
     <div class="s-row">
+      <div><div class="s-lbl">Sesso</div></div>
+      <select class="fi" id="s-sex" style="width:100px;text-align:right;background:transparent;border:none;border-bottom:1px solid var(--border);border-radius:0;padding:4px 8px;color:var(--t1)">
+        <option value="">--</option>
+        <option value="M">Uomo</option>
+        <option value="F">Donna</option>
+      </select>
+    </div>
+    <div class="s-row">
+      <div>
+        <div class="s-lbl">Data di nascita</div>
+        <div class="s-sub" id="s-age" style="display:none;color:var(--accent)"></div>
+      </div>
+      <input type="date" class="fi" id="s-dob" style="width:130px;text-align:right;background:transparent;border:none;border-bottom:1px solid var(--border);border-radius:0;padding:4px 8px;color:var(--t1)">
+    </div>
+    <div class="s-row">
       <div><div class="s-lbl">Altezza</div></div>
       <div style="display:flex;align-items:center;gap:4px">
         <input type="number" class="fi-in" id="s-height" style="width:60px"> <span style="color:var(--t2);font-size:13px">cm</span>
@@ -43,6 +58,19 @@
       <div style="display:flex;align-items:center;gap:4px">
         <input type="number" class="fi-in" id="s-steps-goal" style="width:80px" placeholder="10000"> <span style="color:var(--t2);font-size:13px">passi/giorno</span>
       </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <span class="clabel">🤝 Condivisione</span>
+    <div class="s-row">
+      <div>
+        <div class="s-lbl">Email Amico/Familiare</div>
+        <div class="s-sub">Copia rapidamente i pasti condivisi</div>
+      </div>
+    </div>
+    <div class="fg" style="margin-top:12px">
+      <input type="email" class="fi" id="s-friend-email" placeholder="amico@email.com">
     </div>
   </div>
 

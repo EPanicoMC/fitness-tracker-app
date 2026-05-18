@@ -7,11 +7,35 @@ async function loadSettings() {
   if (!snap.exists()) return;
   const s = snap.data();
   if (s.profile?.name)          document.getElementById('s-name').value       = s.profile.name;
+  if (s.profile?.sex)           document.getElementById('s-sex').value        = s.profile.sex;
+  if (s.profile?.dob) {
+    document.getElementById('s-dob').value = s.profile.dob;
+    calcAndShowAge(s.profile.dob);
+  }
   if (s.profile?.height)        document.getElementById('s-height').value     = s.profile.height;
   if (s.profile?.weight_target) document.getElementById('s-wtarget').value    = s.profile.weight_target;
   if (s.steps_goal)             document.getElementById('s-steps-goal').value = s.steps_goal;
+  if (s.friend_email)           document.getElementById('s-friend-email').value = s.friend_email;
   await loadGeminiKey();
 }
+
+function calcAndShowAge(dobStr) {
+  if (!dobStr) return;
+  const dob = new Date(dobStr);
+  const now = new Date();
+  let age = now.getFullYear() - dob.getFullYear();
+  const m = now.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) {
+    age--;
+  }
+  const el = document.getElementById('s-age');
+  if (el) {
+    el.textContent = `${age} anni`;
+    el.style.display = 'block';
+  }
+}
+
+document.getElementById('s-dob')?.addEventListener('change', (e) => calcAndShowAge(e.target.value));
 
 async function loadGeminiKey() {
   try {
@@ -29,10 +53,13 @@ window.saveSettings = async function() {
   const data = {
     profile: {
       name:          document.getElementById('s-name').value.trim(),
+      sex:           document.getElementById('s-sex').value,
+      dob:           document.getElementById('s-dob').value,
       height:        parseInt(document.getElementById('s-height').value)  || null,
       weight_target: parseFloat(document.getElementById('s-wtarget').value) || null
     },
-    steps_goal: parseInt(document.getElementById('s-steps-goal').value) || null
+    steps_goal: parseInt(document.getElementById('s-steps-goal').value) || null,
+    friend_email: document.getElementById('s-friend-email').value.trim()
   };
   try {
     await setDoc(doc(db, 'users', getUserId(), 'settings', 'app'), data, { merge: true });

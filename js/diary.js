@@ -339,13 +339,34 @@ function computeDayBadge(log, plan, isOn) {
   const steps   = log.steps || 0;
   const workoutDone = !!log.workout?.completed;
 
-  // Pasti (40pt) — aderenza kcal ±10%
+  // Pasti (40pt) — FitScore 2.0
   let pastiPt = 0;
   if (plan?.kcal > 0 && kcal > 0) {
-    const r = kcal / plan.kcal;
-    if (r >= 0.9 && r <= 1.1) pastiPt = 40;
-    else if (r >= 0.8 && r <= 1.2) pastiPt = 25;
-    else pastiPt = 10;
+    let scoreKcal = 0, scoreFats = 0, scoreCarbs = 0;
+    
+    // Kcal (max 20)
+    const ratioKcal = kcal / plan.kcal;
+    if (ratioKcal >= 0.95 && ratioKcal <= 1.05) scoreKcal = 20;
+    else if (ratioKcal < 0.95) scoreKcal = Math.max(0, 20 - (1 - ratioKcal) * 40);
+    else scoreKcal = Math.max(0, 20 - (ratioKcal - 1) * 50); // Penalty for overeating
+    
+    // Fats (max 10) - Heavy penalty for overeating
+    const fats = log.nutrition?.totals?.fats || 0;
+    if (plan.fats > 0) {
+      const ratioFats = fats / plan.fats;
+      if (ratioFats <= 1.05) scoreFats = 10;
+      else scoreFats = Math.max(0, 10 - (ratioFats - 1) * 30); // Steep penalty
+    } else scoreFats = 10;
+    
+    // Carbs (max 10) - Moderate penalty
+    const carbs = log.nutrition?.totals?.carbs || 0;
+    if (plan.carbs > 0) {
+      const ratioCarbs = carbs / plan.carbs;
+      if (ratioCarbs <= 1.10) scoreCarbs = 10;
+      else scoreCarbs = Math.max(0, 10 - (ratioCarbs - 1) * 15);
+    } else scoreCarbs = 10;
+    
+    pastiPt = Math.round(scoreKcal + scoreFats + scoreCarbs);
   } else if (kcal > 0) {
     pastiPt = 20;
   }
@@ -367,16 +388,17 @@ function computeDayBadge(log, plan, isOn) {
     else if (r >= 0.5) passiPt = 5;
   }
 
-  // Proteine (10pt)
+  // Proteine (10pt) - Heavy penalty for under-eating
   let protPt = 0;
   const planPro = plan?.protein || 0;
   if (planPro > 0 && protein > 0) {
-    if (protein >= planPro * 0.9) protPt = 10;
-    else if (protein >= planPro * 0.75) protPt = 6;
-    else protPt = 2;
+    const ratioPro = protein / planPro;
+    if (ratioPro >= 0.9) protPt = 10;
+    else protPt = Math.max(0, 10 - (1 - ratioPro) * 20);
   } else if (protein > 0) {
     protPt = 5;
   }
+  protPt = Math.round(protPt);
 
   const score = pastiPt + allenamPt + passiPt + protPt;
   const col = score >= 90 ? '#00dc78' : score >= 75 ? '#4ade80' : score >= 55 ? '#fbbf24' : score >= 35 ? '#ff6a00' : '#ff3b3b';
@@ -499,25 +521,37 @@ function calcWeeklySmartScore(dates, logs, programData, dietPlan, settings) {
       : !!(programData?.schedule?.[getDayOfWeek(dateStr)]);
     const plan = isOn ? dietPlan?.day_on : dietPlan?.day_off;
 
-    let kcalScore = 50, proteinScore = 50;
+    let kcalScore = 25, proteinScore = 25, fatsScore = 25, carbsScore = 25;
     let kcalRatio = null, proteinRatio = null;
 
     if (plan?.kcal > 0 && kcal > 0) {
       kcalRatio = kcal / plan.kcal;
-      if      (kcalRatio >= 0.90 && kcalRatio <= 1.10) kcalScore = 100;
-      else if (kcalRatio >= 0.80 && kcalRatio <= 1.20) kcalScore = 70;
-      else if (kcalRatio >= 0.70 && kcalRatio <= 1.30) kcalScore = 40;
-      else                                               kcalScore = 10;
+      if (kcalRatio >= 0.95 && kcalRatio <= 1.05) kcalScore = 100;
+      else if (kcalRatio < 0.95) kcalScore = Math.max(0, 100 - (1 - kcalRatio) * 200);
+      else kcalScore = Math.max(0, 100 - (kcalRatio - 1) * 250);
     }
+    
     if (plan?.protein > 0 && protein > 0) {
       proteinRatio = protein / plan.protein;
-      if      (proteinRatio >= 0.90) proteinScore = 100;
-      else if (proteinRatio >= 0.75) proteinScore = 70;
-      else if (proteinRatio >= 0.60) proteinScore = 40;
-      else                           proteinScore = 10;
+      if (proteinRatio >= 0.90) proteinScore = 100;
+      else proteinScore = Math.max(0, 100 - (1 - proteinRatio) * 200);
     }
 
-    const dayScore = kcal > 0 ? (kcalScore * 0.6 + proteinScore * 0.4) : proteinScore;
+    const fats = log.nutrition?.totals?.fats || 0;
+    if (plan?.fats > 0 && fats > 0) {
+      const ratioFats = fats / plan.fats;
+      if (ratioFats <= 1.05) fatsScore = 100;
+      else fatsScore = Math.max(0, 100 - (ratioFats - 1) * 300); // Steep penalty for fats
+    }
+
+    const carbs = log.nutrition?.totals?.carbs || 0;
+    if (plan?.carbs > 0 && carbs > 0) {
+      const ratioCarbs = carbs / plan.carbs;
+      if (ratioCarbs <= 1.10) carbsScore = 100;
+      else carbsScore = Math.max(0, 100 - (ratioCarbs - 1) * 150); // Moderate penalty for carbs
+    }
+
+    const dayScore = kcal > 0 ? (kcalScore * 0.4 + proteinScore * 0.3 + fatsScore * 0.2 + carbsScore * 0.1) : proteinScore;
     nutritionDays.push({ date: dateStr, kcal, protein, kcalTarget: plan?.kcal || 0, proteinTarget: plan?.protein || 0, kcalRatio, proteinRatio, dayScore });
     nScoreSum += dayScore; nDays++;
   }

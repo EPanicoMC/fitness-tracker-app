@@ -14,6 +14,7 @@ let activeProgram = null;
 let appSettings = null;
 let isTrainingDay = false;
 let mealStates = [];
+let friendLogData = null;
 
 let cloudSyncTimer = null;
 function saveToLocal() {
@@ -101,6 +102,13 @@ async function init() {
     activeProgram = null;
     activeDiet = null;
     appSettings = {};
+  }
+
+  if (appSettings?.friend_email) {
+    try {
+      const fSnap = await getDoc(doc(db, 'users', appSettings.friend_email, 'daily_logs', TODAY));
+      if (fSnap.exists()) friendLogData = fSnap.data();
+    } catch(e) { console.warn('Errore friend log:', e); }
   }
 
   // Merge localStorage (higher priority for today's working state)
@@ -561,6 +569,21 @@ function buildMeals() {
     updateNutritionTotals();
     return;
   }
+
+  let friendBannerHtml = '';
+  if (friendLogData && Object.keys(friendLogData.meals_state || {}).length > 0) {
+    friendBannerHtml = `
+      <div class="card" style="margin-bottom:12px;background:rgba(124,111,255,0.1);border:1px solid var(--accent)">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-size:12px;font-weight:800;color:var(--accent)">🤝 Pasti condivisi disponibili</div>
+            <div style="font-size:11px;color:var(--t2);margin-top:2px">${appSettings.friend_email} ha registrato dei pasti oggi.</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="copyFriendMeals()">Copia</button>
+        </div>
+      </div>
+    `;
+  }
   const extraHtml = (logData.extra_meals || []).map((m, xi) => `
     <div class="meal-item eaten" style="border-left:3px solid var(--orange)">
       <div class="meal-top">
@@ -717,6 +740,26 @@ window.applyMealAI = function(mi, kcal, protein, carbs, fats) {
   const box = document.getElementById(`meal-ai-${mi}`);
   if (box) box.style.display = 'none';
   showToast('✅ Macro applicati! Pasto segnato ✓');
+};
+
+window.copyFriendMeals = function() {
+  if (!friendLogData) return;
+  if (confirm('Vuoi sovrascrivere i tuoi pasti attuali con quelli del tuo amico per oggi?')) {
+    logData.meals_overrides = JSON.parse(JSON.stringify(friendLogData.meals_overrides || {}));
+    logData.extra_meals = JSON.parse(JSON.stringify(friendLogData.extra_meals || []));
+    
+    // Auto-mark as eaten if they copied it
+    mealsCache.forEach((_, i) => {
+      if (!mealStates[i]) mealStates[i] = { eaten: true, active_variant: 0 };
+      else mealStates[i].eaten = true;
+    });
+
+    saveToLocal();
+    buildMeals();
+    buildNutrition();
+    buildFitScore();
+    showToast('Pasti copiati con successo! ✅');
+  }
 };
 
 // ── Workout ────────────────────────────────────────────────
@@ -877,6 +920,7 @@ async function syncToFirebase() {
     console.log('✅ Auto-synced to Firebase');
   } catch(e) {
     console.error('Errore Auto-Sync:', e);
+    showToast('⚠️ Errore salvataggio: ritenta o controlla connessione', 'err');
   }
 };
 

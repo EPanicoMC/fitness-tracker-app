@@ -89,6 +89,10 @@ async function loadContext() {
     if (active) ctx.activeDiet = { id: active.id, ...active.data() };
     else if (!snap.empty) ctx.activeDiet = { id: snap.docs[0].id, ...snap.docs[0].data() };
   } catch(e) {}
+  try {
+    const snap = await getDoc(doc(db, 'users', getUserId(), 'settings', 'app'));
+    if (snap.exists()) ctx.profile = snap.data().profile;
+  } catch(e) {}
   return ctx;
 }
 
@@ -128,9 +132,23 @@ function buildSystemPrompt(type, ctx, goal) {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
   });
 
+  const p = ctx.profile || {};
+  let pStr = '';
+  if (p.name) pStr += `Nome: ${p.name}. `;
+  if (p.sex) pStr += `Sesso: ${p.sex === 'M' ? 'Uomo' : 'Donna'}. `;
+  if (p.dob) {
+    let age = new Date().getFullYear() - new Date(p.dob).getFullYear();
+    const m = new Date().getMonth() - new Date(p.dob).getMonth();
+    if (m < 0 || (m === 0 && new Date().getDate() < new Date(p.dob).getDate())) age--;
+    pStr += `Età: ${age} anni. `;
+  }
+  if (p.height) pStr += `Altezza: ${p.height}cm. `;
+  if (p.weight_target) pStr += `Obiettivo peso: ${p.weight_target}kg. `;
+
   const ctxBlock = `
 📅 DATA ODIERNA: ${todayFmt}
 📊 DATI ATLETA:
+• Profilo: ${pStr || 'Non specificato'}
 • Ultimo check (${ctx.lastCheck?.date || 'n/d'}): ${fmtCheck(ctx.lastCheck)}
 • Scheda attuale: ${fmtProgram(ctx.activeProgram)}
 • Dieta attuale: ${fmtDiet(ctx.activeDiet)}
@@ -160,7 +178,7 @@ ${jsonNote}
 {
   "name": "Nome del Piano",
   "schedule": {
-    "lunedi": {
+    "monday": {
       "name": "Nome Sessione",
       "time": "18:00",
       "exercises": [
@@ -172,7 +190,7 @@ ${jsonNote}
 }
 </SCHEDA_JSON>
 
-Giorni validi (minuscolo): lunedi, martedi, mercoledi, giovedi, venerdi, sabato, domenica.
+Giorni validi come chiavi (in inglese minuscolo): monday, tuesday, wednesday, thursday, friday, saturday, sunday.
 "cardio" è null oppure stringa (es. "20 min LISS 130bpm").
 "reps" è sempre stringa (es. "8-10", "12", "30 sec").`;
 
@@ -342,8 +360,9 @@ function injectStyles() {
     .coach-dots span { display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent);margin:0 2px;animation:coachPulse 1.2s infinite }
     .coach-dots span:nth-child(2) { animation-delay:.2s }
     .coach-dots span:nth-child(3) { animation-delay:.4s }
-    .coach-bubble-u { background:var(--accent);color:#fff;border-radius:18px 18px 4px 18px;max-width:85%;padding:11px 14px;font-size:13px;line-height:1.6;word-break:break-word }
-    .coach-bubble-a { background:var(--card);color:var(--t1);border-radius:4px 18px 18px 18px;max-width:92%;padding:11px 14px;font-size:13px;line-height:1.6;word-break:break-word }
+    .coach-dots span:nth-child(3) { animation-delay:.4s }
+    .coach-bubble-u { background:var(--accent);color:#fff;border-radius:18px 18px 4px 18px;max-width:85%;padding:11px 14px;font-size:13px;line-height:1.6;word-break:break-word;overflow-wrap:break-word }
+    .coach-bubble-a { background:var(--card);color:var(--t1);border-radius:4px 18px 18px 18px;max-width:92%;padding:11px 14px;font-size:13px;line-height:1.6;word-break:break-word;overflow-wrap:break-word }
     .coach-bubble-e { background:rgba(255,59,59,0.1);border:1px solid rgba(255,59,59,0.2);color:var(--red,#ff4444);border-radius:4px 14px 14px 14px;max-width:88%;padding:10px 14px;font-size:13px;line-height:1.5 }
     .coach-input-area { display:flex;gap:8px;align-items:flex-end;padding:12px 16px;border-top:1px solid var(--border);background:var(--bg);flex-shrink:0 }
     .coach-send-btn { width:44px;height:44px;border-radius:12px;border:none;background:var(--accent);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:16px;transition:opacity .2s }
@@ -477,14 +496,15 @@ function switchToChatPhase() {
         <div style="font-size:10px;color:var(--t3);margin-top:6px;text-align:center">Entrambe le opzioni salvano come INATTIVO — attivi manualmente da Schede/Dieta</div>
       </div>
 
-      <div class="coach-input-area">
+      <div class="coach-input-area" style="flex-wrap:wrap">
         <textarea id="coach-input" class="fi" rows="1" placeholder="Rispondi al coach... (Invio per inviare)"
-          style="flex:1;resize:none;font-size:13px;max-height:100px;overflow-y:auto;line-height:1.4"
+          style="flex:1;min-width:200px;resize:none;font-size:13px;max-height:100px;overflow-y:auto;line-height:1.4"
           onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();window._coachSend()}"
           oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,100)+'px'"></textarea>
         <button id="coach-send-btn" class="coach-send-btn" onclick="window._coachSend()">
           <i class="ri-send-plane-fill"></i>
         </button>
+        <button onclick="window._coachFinalize()" class="btn btn-ghost btn-sm" style="width:100%;font-size:11px;margin-top:4px">🏁 Finalizza e Genera Piano Json</button>
       </div>
     </div>`;
 
@@ -608,6 +628,14 @@ window._coachSend = async function() {
   input.value = '';
   input.style.height = 'auto';
   session.messages.push({ role: 'user', parts: [{ text }], _displayText: text });
+  renderMessages();
+  await _sendToGemini();
+};
+
+window._coachFinalize = async function() {
+  if (session?.busy) return;
+  const text = "Perfetto, procediamo. Mostrami il JSON finale strutturato della scheda/dieta senza aggiungere altro, assicurati che i nodi del json e la struttura siano esatti come ti è stato richiesto.";
+  session.messages.push({ role: 'user', parts: [{ text }], _displayText: "🏁 Finalizza e Genera Piano" });
   renderMessages();
   await _sendToGemini();
 };
