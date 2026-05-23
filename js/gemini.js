@@ -54,9 +54,13 @@ Struttura JSON richiesta:
 }`;
 
     const models = [
+      'gemini-3.1-flash-lite-preview',
+      'gemini-3.5-flash',
       'gemini-2.5-flash',
-      'gemini-1.5-flash',
-      'gemini-1.5-pro'
+      'gemini-3-flash-preview',
+      'gemini-3-flash',
+      'gemini-2.5-flash-lite',
+      'gemini-1.5-flash'
     ];
 
     for (const model of models) {
@@ -174,7 +178,15 @@ export async function analyzeCheckProgress({ prevCheck, newCheck }) {
     }
   }
 
-  const models = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'];
+  const models = [
+    'gemini-3.1-flash-lite-preview',
+    'gemini-3.5-flash',
+    'gemini-2.5-flash',
+    'gemini-3-flash-preview',
+    'gemini-3-flash',
+    'gemini-2.5-flash-lite',
+    'gemini-1.5-flash'
+  ];
   for (const model of models) {
     try {
       const r = await fetch(
@@ -224,7 +236,15 @@ Struttura il report con le seguenti sezioni in markdown italiano pulito (usa emo
 
 Mantieni il report compatto ed efficace (circa 200-250 parole). Non aggiungere note esterne, rispondi solo in markdown.`;
 
-  const models = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'];
+  const models = [
+    'gemini-3.1-flash-lite-preview',
+    'gemini-3.5-flash',
+    'gemini-2.5-flash',
+    'gemini-3-flash-preview',
+    'gemini-3-flash',
+    'gemini-2.5-flash-lite',
+    'gemini-1.5-flash'
+  ];
   for (const model of models) {
     try {
       const r = await fetch(
@@ -275,7 +295,15 @@ Struttura JSON richiesta:
     { inlineData: { mimeType, data: base64Image } }
   ];
 
-  const models = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'];
+  const models = [
+    'gemini-3.1-flash-lite-preview',
+    'gemini-3.5-flash',
+    'gemini-2.5-flash',
+    'gemini-3-flash-preview',
+    'gemini-3-flash',
+    'gemini-2.5-flash-lite',
+    'gemini-1.5-flash'
+  ];
   for (const model of models) {
     try {
       const r = await fetch(

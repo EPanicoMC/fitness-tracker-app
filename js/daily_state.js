@@ -133,6 +133,12 @@ async function init() {
     } catch(e) {}
   }
 
+  // Align DOM inputs with loaded variables immediately to prevent overwrite on sync
+  const sfInput = document.getElementById('steps-in');
+  if (sfInput) sfInput.value = logData.steps || '';
+  const kfInput = document.getElementById('burned-in');
+  if (kfInput) kfInput.value = logData.burned_kcal || '';
+
   // Apple Health iOS Shortcuts Bridge
   const params = new URLSearchParams(window.location.search);
   const stepsParam = params.get('steps');
@@ -143,6 +149,8 @@ async function init() {
       const sVal = parseInt(stepsParam);
       if (!isNaN(sVal)) {
         logData.steps = sVal;
+        const sf = document.getElementById('steps-in');
+        if (sf) sf.value = sVal;
         updated = true;
       }
     }
@@ -150,6 +158,8 @@ async function init() {
       const bVal = parseInt(burnedParam);
       if (!isNaN(bVal)) {
         logData.burned_kcal = bVal;
+        const kf = document.getElementById('burned-in');
+        if (kf) kf.value = bVal;
         updated = true;
       }
     }
@@ -708,15 +718,35 @@ function renderMealRow(m, mi, originalMeals) {
   const target = originalMeals?.[mi];
   const override = logData.meals_overrides?.[mi] || logData.meals_overrides?.[String(mi)];
   let deltaBadge = '';
+  let macroDeltasHtml = '';
   let macroCompareBox = '';
   
   if (override && target) {
     const diffKcal = override.kcal - target.kcal;
+    const diffP = (override.protein || 0) - (target.protein || 0);
+    const diffC = (override.carbs || 0) - (target.carbs || 0);
+    const diffF = (override.fats || 0) - (target.fats || 0);
+
     if (diffKcal !== 0) {
       const color = diffKcal > 0 ? 'var(--orange)' : 'var(--green)';
       const sign = diffKcal > 0 ? '+' : '';
       deltaBadge = `<span style="font-size:10px;font-weight:800;color:${color};background:rgba(255,255,255,0.05);padding:2px 6px;border-radius:4px;margin-left:6px">${sign}${Math.round(diffKcal)} kcal</span>`;
     }
+
+    if (diffKcal !== 0 || diffP !== 0 || diffC !== 0 || diffF !== 0) {
+      const getSign = val => val > 0 ? '+' : '';
+      const getCol = val => val > 0 ? 'var(--orange)' : (val < 0 ? 'var(--green)' : 'var(--t3)');
+      macroDeltasHtml = `
+        <div style="font-size:10px;font-weight:700;color:var(--t2);margin-top:4px;display:flex;gap:8px;flex-wrap:wrap">
+          <span style="color:var(--t3)">Δ target:</span>
+          <span style="color:${getCol(diffKcal)}">Kcal: ${getSign(diffKcal)}${Math.round(diffKcal)}</span>
+          <span style="color:${getCol(diffP)}">Pro: ${getSign(diffP)}${diffP.toFixed(1)}g</span>
+          <span style="color:${getCol(diffC)}">Carb: ${getSign(diffC)}${diffC.toFixed(1)}g</span>
+          <span style="color:${getCol(diffF)}">Fat: ${getSign(diffF)}${diffF.toFixed(1)}g</span>
+        </div>
+      `;
+    }
+
     macroCompareBox = renderMacroCompare(target, override);
   }
 
@@ -727,7 +757,8 @@ function renderMealRow(m, mi, originalMeals) {
         ${m.time ? `<span class="meal-time">${m.time}</span>` : ''}
         <div class="meal-info">
           <div class="meal-name">${m.label || m.type}</div>
-          <div class="meal-meta">${kcalDisplay} kcal · P:${m.protein}g C:${m.carbs}g F:${m.fats}g ${deltaBadge}</div>
+          <div class="meal-meta">${kcalDisplay} kcal · P:${m.protein}g C:${m.carbs}g F:${m.fats}g</div>
+          ${macroDeltasHtml}
         </div>
         <div class="meal-kcal">${kcalDisplay}</div>
       </div>

@@ -1140,17 +1140,56 @@ window.generateWeeklyCoachReport = async function() {
   }
 };
 
+function markdownToHtml(md) {
+  if (!md) return '';
+  // Normalize newlines
+  let text = md.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  
+  // Parse paragraphs
+  const paragraphs = text.split(/\n\n+/);
+  return paragraphs.map(p => {
+    p = p.trim();
+    if (!p) return '';
+    
+    // Headers
+    if (p.startsWith('### ')) {
+      return `<h4 style="color:var(--accent);margin-top:16px;margin-bottom:8px;font-weight:700">${p.substring(4)}</h4>`;
+    }
+    if (p.startsWith('## ')) {
+      return `<h3 style="color:var(--accent);margin-top:18px;margin-bottom:10px;font-weight:800">${p.substring(3)}</h3>`;
+    }
+    if (p.startsWith('# ')) {
+      return `<h2 style="color:var(--accent);margin-top:20px;margin-bottom:12px;font-weight:900">${p.substring(2)}</h2>`;
+    }
+    
+    // Bullet points
+    if (p.startsWith('- ') || p.startsWith('* ')) {
+      const items = p.split(/\n[-*]\s+/);
+      const listHtml = items.map((item, idx) => {
+        let cleanItem = item;
+        if (idx === 0) {
+          cleanItem = item.replace(/^[-*]\s+/, '');
+        }
+        // Bold tags inside list item
+        cleanItem = cleanItem.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+        return `<li style="margin-left:14px;margin-bottom:6px;font-size:13px;line-height:1.55;color:var(--t2)">${cleanItem}</li>`;
+      }).join('');
+      return `<ul style="margin-bottom:12px;padding-left:10px">${listHtml}</ul>`;
+    }
+    
+    // Regular text (with bold formatting)
+    let processed = p.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+    processed = processed.replace(/\n/g, '<br>');
+    return `<p style="margin-bottom:12px;font-size:13px;line-height:1.55;color:var(--t2)">${processed}</p>`;
+  }).filter(html => html !== '').join('');
+}
+
 function showWeeklyReportModal(reportMarkdown) {
   const bg = document.createElement('div');
   bg.className = 'modal-bg';
   bg.id = 'weekly-report-modal';
   
-  let htmlContent = reportMarkdown
-    .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
-    .replace(/### (.*?)\n/g, '<h4 style="color:var(--accent);margin-top:16px;margin-bottom:8px">$1</h4>')
-    .replace(/## (.*?)\n/g, '<h3 style="color:var(--accent);margin-top:18px;margin-bottom:10px">$1</h3>')
-    .replace(/\n- (.*?)/g, '<li style="margin-left:14px;margin-bottom:6px;font-size:13px;line-height:1.55;color:var(--t2)">$1</li>')
-    .replace(/\n\n/g, '<p style="margin-bottom:12px;font-size:13px;line-height:1.55;color:var(--t2)"></p>');
+  let htmlContent = markdownToHtml(reportMarkdown);
 
   bg.innerHTML = `
     <div class="modal" style="max-height:85vh;overflow-y:auto;padding:24px;border:1px solid rgba(255,255,255,0.08);background:rgba(18,18,20,0.95);backdrop-filter:blur(20px);border-radius:24px">
