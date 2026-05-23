@@ -88,7 +88,12 @@
 
 <script type="module" src="js/diet.js"></script>
 <script type="module" src="js/ai_coach.js"></script>
-<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/fitness-tracker-app/sw.js')</script>
+<script>
+if('serviceWorker' in navigator) {
+  const base = window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/') + 1);
+  navigator.serviceWorker.register(base + 'sw.js');
+}
+</script>
 <script type="module" src="js/daily_state.js"></script>
 </body>
 </html>

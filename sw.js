@@ -1,31 +1,32 @@
-const CACHE = 'ft-v38';
+const CACHE = 'ft-v39';
+const BASE = self.location.pathname.substring(0, self.location.pathname.lastIndexOf('/') + 1);
 const FILES = [
-  '/fitness-tracker-app/',
-  '/fitness-tracker-app/index.html',
-  '/fitness-tracker-app/session.html',
-  '/fitness-tracker-app/programs.html',
-  '/fitness-tracker-app/diet.html',
-  '/fitness-tracker-app/diary.html',
-  '/fitness-tracker-app/checks.html',
-  '/fitness-tracker-app/settings.html',
-  '/fitness-tracker-app/auth.html',
-  '/fitness-tracker-app/css/style.css',
-  '/fitness-tracker-app/js/app.js',
-  '/fitness-tracker-app/js/auth.js',
-  '/fitness-tracker-app/js/daily_state.js',
-  '/fitness-tracker-app/js/session.js',
-  '/fitness-tracker-app/js/programs.js',
-  '/fitness-tracker-app/js/diet.js',
-  '/fitness-tracker-app/js/diary.js',
-  '/fitness-tracker-app/js/checks.js',
-  '/fitness-tracker-app/js/settings.js',
-  '/fitness-tracker-app/js/gemini.js',
-  '/fitness-tracker-app/js/autocomplete.js',
-  '/fitness-tracker-app/js/ai_coach.js',
-  '/fitness-tracker-app/js/firebase-config.js',
-  '/fitness-tracker-app/icon.svg',
-  '/fitness-tracker-app/img/anatomy.png'
-];
+  '',
+  'index.html',
+  'session.html',
+  'programs.html',
+  'diet.html',
+  'diary.html',
+  'checks.html',
+  'settings.html',
+  'auth.html',
+  'css/style.css',
+  'js/app.js',
+  'js/auth.js',
+  'js/daily_state.js',
+  'js/session.js',
+  'js/programs.js',
+  'js/diet.js',
+  'js/diary.js',
+  'js/checks.js',
+  'js/settings.js',
+  'js/gemini.js',
+  'js/autocomplete.js',
+  'js/ai_coach.js',
+  'js/firebase-config.js',
+  'icon.svg',
+  'img/anatomy.png'
+].map(path => BASE + path);
 
 self.addEventListener('install', e => e.waitUntil(
   caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting())

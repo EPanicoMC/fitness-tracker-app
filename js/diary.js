@@ -3,6 +3,7 @@ import {
   db, getUserId, collection, doc, getDoc, getDocs, setDoc, deleteField, query, where, orderBy, limit
 } from './firebase-config.js';
 import { getTodayString, getDayOfWeek, formatDateIT, formatDateShort, showToast, DAYS_IT, DAY_ORDER } from './app.js';
+import { generateWeeklyCoachReportAI } from './gemini.js';
 
 const TODAY = getTodayString();
 let currentMonth = new Date(TODAY + 'T12:00:00');
@@ -779,6 +780,21 @@ function buildWeekView() {
       <div class="day-heat-row">${heatCards}</div>
     </div>
     <div style="margin-top:5px;font-size:10px;color:var(--t3);text-align:center">Tocca un giorno per i dettagli</div>
+    
+    <!-- AI Weekly Coach Card -->
+    <div class="card" style="margin-top:18px;background:rgba(124,111,255,0.04);border:1px solid rgba(124,111,255,0.12);padding:18px;border-radius:18px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <span style="font-size:10px;font-weight:800;color:var(--accent);letter-spacing:0.5px">🤖 AI WEEKLY COACH</span>
+        <span style="font-size:9px;color:var(--t3);font-weight:700">FEEDBACK PERSONALIZZATO</span>
+      </div>
+      <p style="font-size:12px;color:var(--t2);line-height:1.55;margin-bottom:12px;text-align:left">
+        Analizza l'andamento settimanale delle tue calorie, macro, passi e allenamenti svolti per ricevere consigli strategici mirati.
+      </p>
+      <button class="btn btn-v btn-sm" onclick="window.generateWeeklyCoachReport()" style="width:100%;font-weight:700">
+        🧠 Genera Report AI Settimanale
+      </button>
+    </div>
+
     ${tipsHtml}`;
 }
 
@@ -1007,6 +1023,150 @@ window.deleteWorkout = async function(dateStr, modalBg) {
     showToast('Errore eliminazione', 'err');
   }
 };
+
+window.generateWeeklyCoachReport = async function() {
+  const keySnap = await getDoc(doc(db, 'users', getUserId(), 'settings', 'gemini'));
+  if (!keySnap.exists() || !keySnap.data().api_key) {
+    showToast('⚠️ Per favore, imposta la tua Gemini API Key nelle Impostazioni!', 'err');
+    return;
+  }
+
+  showToast('⏳ Analisi dati settimanali...', 'info');
+
+  const todayDate = new Date(TODAY + 'T12:00:00');
+  const startDate = new Date(todayDate);
+  startDate.setDate(todayDate.getDate() - 6);
+
+  const dates = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(startDate);
+    d.setDate(startDate.getDate() + i);
+    dates.push(d.toISOString().split('T')[0]);
+  }
+
+  let totalKcal = 0, totalProtein = 0, totalCarbs = 0, totalFats = 0;
+  let loggedDays = 0;
+  let totalSteps = 0;
+  let stepDays = 0;
+  let completedWorkouts = 0;
+  let totalWorkoutsPlanned = 0;
+  let totalCalorieAdherenceSum = 0;
+
+  dates.forEach(dateStr => {
+    const log = allRecentLogs[dateStr];
+    if (log && log.steps > 0) {
+      totalSteps += log.steps;
+      stepDays++;
+    }
+    
+    const dow = getDayOfWeek(dateStr);
+    let isTrainingPlanned = !!(programData?.schedule?.[dow]);
+    if (log?.is_training_day != null) isTrainingPlanned = log.is_training_day;
+    if (isTrainingPlanned) {
+      totalWorkoutsPlanned++;
+      if (log?.workout?.completed) {
+        completedWorkouts++;
+      }
+    }
+    
+    if (log && log.nutrition?.totals?.kcal > 0) {
+      totalKcal += log.nutrition.totals.kcal;
+      totalProtein += log.nutrition.totals.protein || 0;
+      totalCarbs += log.nutrition.totals.carbs || 0;
+      totalFats += log.nutrition.totals.fats || 0;
+      loggedDays++;
+      
+      const targetDayPlan = isTrainingPlanned ? _dietPlanCache?.day_on : _dietPlanCache?.day_off;
+      const targetKcal = targetDayPlan?.kcal || 0;
+      if (targetKcal > 0) {
+        const ratio = log.nutrition.totals.kcal / targetKcal;
+        const diff = Math.abs(1 - ratio);
+        const dayAdherence = Math.max(0, Math.round((1 - diff) * 100));
+        totalCalorieAdherenceSum += dayAdherence;
+      }
+    }
+  });
+
+  const avgCalories = loggedDays > 0 ? Math.round(totalKcal / loggedDays) : 0;
+  const avgProtein = loggedDays > 0 ? Math.round(totalProtein / loggedDays) : 0;
+  const avgCarbs = loggedDays > 0 ? Math.round(totalCarbs / loggedDays) : 0;
+  const avgFats = loggedDays > 0 ? Math.round(totalFats / loggedDays) : 0;
+  const avgSteps = stepDays > 0 ? Math.round(totalSteps / stepDays) : 0;
+  const avgCalorieAdherence = loggedDays > 0 ? Math.round(totalCalorieAdherenceSum / loggedDays) : 0;
+
+  const isTodayTraining = !!(programData?.schedule?.[getDayOfWeek(TODAY)]);
+  const defaultTargetPlan = isTodayTraining ? _dietPlanCache?.day_on : _dietPlanCache?.day_off;
+  const targetCalories = defaultTargetPlan?.kcal || 2000;
+
+  const wss = calcWeeklySmartScore(dates, allRecentLogs, programData, _dietPlanCache, settingsData);
+  const weeklyScore = wss.finalScore || 0;
+
+  const dataForAI = {
+    avgCalorieAdherence,
+    avgCalories,
+    targetCalories,
+    avgProtein,
+    avgCarbs,
+    avgFats,
+    totalSteps,
+    avgSteps,
+    completedWorkouts,
+    totalWorkoutsPlanned,
+    weeklyScore
+  };
+
+  showToast('🧠 AI Coach sta elaborando il report...', 'info');
+
+  try {
+    const aiResult = await generateWeeklyCoachReportAI(dataForAI);
+    if (!aiResult.success) {
+      showToast(aiResult.error, 'err');
+      return;
+    }
+    showWeeklyReportModal(aiResult.report);
+  } catch(e) {
+    showToast('Errore generazione report', 'err');
+    console.error(e);
+  }
+};
+
+function showWeeklyReportModal(reportMarkdown) {
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg';
+  bg.id = 'weekly-report-modal';
+  
+  let htmlContent = reportMarkdown
+    .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
+    .replace(/### (.*?)\n/g, '<h4 style="color:var(--accent);margin-top:16px;margin-bottom:8px">$1</h4>')
+    .replace(/## (.*?)\n/g, '<h3 style="color:var(--accent);margin-top:18px;margin-bottom:10px">$1</h3>')
+    .replace(/\n- (.*?)/g, '<li style="margin-left:14px;margin-bottom:6px;font-size:13px;line-height:1.55;color:var(--t2)">$1</li>')
+    .replace(/\n\n/g, '<p style="margin-bottom:12px;font-size:13px;line-height:1.55;color:var(--t2)"></p>');
+
+  bg.innerHTML = `
+    <div class="modal" style="max-height:85vh;overflow-y:auto;padding:24px;border:1px solid rgba(255,255,255,0.08);background:rgba(18,18,20,0.95);backdrop-filter:blur(20px);border-radius:24px">
+      <div class="modal-handle"></div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+        <div style="background:rgba(124,111,255,0.15);width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px">🧠</div>
+        <div>
+          <h2 style="font-size:18px;font-weight:900;color:var(--t1);margin:0">Report AI Weekly Coach</h2>
+          <span style="font-size:10px;color:var(--purple);font-weight:800;letter-spacing:0.5px;text-transform:uppercase">KOVA. Intelligenza Artificiale</span>
+        </div>
+      </div>
+      
+      <div style="background:rgba(255,255,255,0.01);border:1px solid rgba(255,255,255,0.04);border-radius:16px;padding:16px;margin-bottom:20px;max-height:50vh;overflow-y:auto;text-align:left">
+        ${htmlContent}
+      </div>
+      
+      <div class="modal-btns">
+        <button class="btn btn-v" style="width:100%" onclick="document.getElementById('weekly-report-modal').remove()">
+          Ho capito, grazie Coach! 💪
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(bg);
+  bg.onclick = e => { if (e.target === bg) bg.remove(); };
+}
 
 (async function() {
   await requireAuth();

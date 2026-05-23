@@ -1,6 +1,6 @@
 import { requireAuth } from './app.js';
 import {
-  db, getUserId, collection, doc, getDocs, setDoc, deleteDoc, query, orderBy, limit, storage
+  db, getUserId, collection, doc, getDoc, getDocs, setDoc, deleteDoc, query, orderBy, limit, storage
 } from './firebase-config.js';
 import { showToast, showModal, formatDateIT } from './app.js';
 import {
@@ -43,26 +43,108 @@ const photoView = p => typeof p === 'object' && p ? p.view : null;
 async function loadChecks() {
   const el = document.getElementById('checks-list');
   el.innerHTML = '<div class="spin"></div>';
-  const snap = await getDocs(
-    query(collection(db, 'users', getUserId(), 'checks'), orderBy('date', 'desc'))
-  );
-  checks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  
+  const [checksSnap, logsSnap] = await Promise.all([
+    getDocs(query(collection(db, 'users', getUserId(), 'checks'), orderBy('date', 'desc'))),
+    getDocs(query(collection(db, 'users', getUserId(), 'daily_logs'), orderBy('date', 'desc'), limit(30)))
+  ]);
+  
+  checks = checksSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  const logs = logsSnap.docs.map(d => d.data());
 
   renderList();
-  try { renderWeightTrend(); } catch(e) { console.warn('renderWeightTrend error:', e); }
+  try { renderCharts(logs); } catch(e) { console.warn('renderCharts error:', e); }
+  try { await loadTargets(); } catch(e) { console.warn('loadTargets error:', e); }
 }
 
-function renderWeightTrend() {
-  const elChart = document.getElementById('vol-chart');
+async function loadTargets() {
+  try {
+    const sSnap = await getDoc(doc(db, 'users', getUserId(), 'settings', 'app'));
+    if (!sSnap.exists()) return;
+    const s = sSnap.data();
+    const profile = s.profile || {};
+    
+    const weightTarget = profile.weight_target || null;
+    const fatTarget = profile.fat_target || null;
+    
+    const latestCheck = checks.length ? checks[0] : null;
+    const currentWeight = latestCheck ? latestCheck.weight : null;
+    const currentFat = latestCheck ? latestCheck.body_fat : null;
+    
+    let showCard = false;
+    
+    const card = document.getElementById('target-tracker-card');
+    const wContainer = document.getElementById('target-weight-container');
+    const fContainer = document.getElementById('target-fat-container');
+    
+    if (weightTarget && currentWeight) {
+      showCard = true;
+      wContainer.style.display = 'block';
+      document.getElementById('current-weight-lbl').textContent = currentWeight;
+      document.getElementById('target-weight-lbl').textContent = weightTarget;
+      
+      const firstCheck = checks.length > 1 ? checks[checks.length - 1] : null;
+      let pct = 0;
+      if (firstCheck && firstCheck.weight !== weightTarget) {
+        const totalDiff = firstCheck.weight - weightTarget;
+        const currentDiff = currentWeight - weightTarget;
+        pct = Math.round(((totalDiff - currentDiff) / totalDiff) * 100);
+      } else {
+        pct = currentWeight <= weightTarget ? Math.round((currentWeight / weightTarget) * 100) : Math.round((weightTarget / currentWeight) * 100);
+      }
+      pct = Math.max(0, Math.min(100, pct));
+      document.getElementById('weight-pct-lbl').textContent = `${pct}%`;
+      document.getElementById('pb-weight-target').style.width = `${pct}%`;
+    } else if (wContainer) {
+      wContainer.style.display = 'none';
+    }
+    
+    if (fatTarget && currentFat) {
+      showCard = true;
+      fContainer.style.display = 'block';
+      document.getElementById('current-fat-lbl').textContent = currentFat;
+      document.getElementById('target-fat-lbl').textContent = fatTarget;
+      
+      const firstCheck = checks.length > 1 ? checks.find(c => c.body_fat != null && c !== latestCheck) : null;
+      let pct = 0;
+      if (firstCheck && firstCheck.body_fat !== fatTarget) {
+        const totalDiff = firstCheck.body_fat - fatTarget;
+        const currentDiff = currentFat - fatTarget;
+        pct = Math.round(((totalDiff - currentDiff) / totalDiff) * 100);
+      } else {
+        pct = currentFat <= fatTarget ? Math.round((currentFat / fatTarget) * 100) : Math.round((fatTarget / currentFat) * 100);
+      }
+      pct = Math.max(0, Math.min(100, pct));
+      document.getElementById('fat-pct-lbl').textContent = `${pct}%`;
+      document.getElementById('pb-fat-target').style.width = `${pct}%`;
+    } else if (fContainer) {
+      fContainer.style.display = 'none';
+    }
+    
+    if (showCard && card) {
+      card.style.display = 'block';
+    } else if (card) {
+      card.style.display = 'none';
+    }
+  } catch(e) {
+    console.warn('Error loading targets:', e);
+  }
+}
+
+let weightChartInstance = null;
+let compChartInstance = null;
+let volumeChartInstance = null;
+
+function renderCharts(logs) {
+  const canvasW = document.getElementById('weight-chart-canvas');
   const elTotal = document.getElementById('vol-total');
   const elTrend = document.getElementById('vol-trend');
-  if (!elChart) return;
 
-  const pts = checks.filter(c => c.weight != null).slice(0, 8).reverse();
+  const pts = checks.filter(c => c.weight != null).slice(0, 10).reverse();
 
   if (pts.length === 0) {
-    elChart.innerHTML = '<div style="font-size:13px;color:var(--t3);text-align:center;padding-top:30px">Nessun check con peso registrato</div>';
     if (elTotal) elTotal.textContent = '—';
+    if (elTrend) elTrend.textContent = 'Nessun check registrato';
     loadCheckStats();
     return;
   }
@@ -79,46 +161,191 @@ function renderWeightTrend() {
     if (elTrend) elTrend.textContent = 'Primo check registrato';
   }
 
-  if (pts.length < 2) {
-    elChart.innerHTML = '<div style="font-size:12px;color:var(--t3);text-align:center;padding-top:30px">Aggiungi almeno 2 check per vedere il trend</div>';
-    loadCheckStats();
-    return;
+  if (canvasW && pts.length >= 2) {
+    if (weightChartInstance) weightChartInstance.destroy();
+    
+    const ctx = canvasW.getContext('2d');
+    const gradient = ctx.createLinearGradient(0, 0, 0, 160);
+    gradient.addColorStop(0, 'rgba(124, 111, 255, 0.4)');
+    gradient.addColorStop(1, 'rgba(124, 111, 255, 0.0)');
+    
+    weightChartInstance = new Chart(canvasW, {
+      type: 'line',
+      data: {
+        labels: pts.map(p => new Date(p.date + 'T12:00:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })),
+        datasets: [{
+          label: 'Peso (kg)',
+          data: pts.map(p => p.weight),
+          borderColor: '#7c6fff',
+          borderWidth: 3,
+          backgroundColor: gradient,
+          fill: true,
+          tension: 0.35,
+          pointBackgroundColor: '#7c6fff',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 1.5,
+          pointRadius: 4,
+          pointHoverRadius: 6
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#1c1c1e',
+            titleColor: '#fff',
+            bodyColor: '#fff',
+            borderColor: 'rgba(255,255,255,0.08)',
+            borderWidth: 1,
+            displayColors: false,
+            callbacks: {
+              label: (context) => ` ${context.parsed.y} kg`
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: { color: 'rgba(255,255,255,0.4)', font: { size: 10 } }
+          },
+          y: {
+            grid: { color: 'rgba(255,255,255,0.05)' },
+            ticks: { color: 'rgba(255,255,255,0.4)', font: { size: 10 } }
+          }
+        }
+      }
+    });
   }
 
-  const W = 300, H = 100, PAD = 14;
-  const weights = pts.map(p => p.weight);
-  const minW = Math.min(...weights) - 1;
-  const maxW = Math.max(...weights) + 1;
-  const range = maxW - minW || 1;
+  // 2. Composition Chart
+  const canvasC = document.getElementById('comp-chart-canvas');
+  const compCard = document.getElementById('comp-card');
+  const compPts = checks.filter(c => c.body_fat != null || c.muscle_mass != null).slice(0, 10).reverse();
+  
+  if (compPts.length >= 2 && canvasC && compCard) {
+    compCard.style.display = 'block';
+    if (compChartInstance) compChartInstance.destroy();
+    
+    compChartInstance = new Chart(canvasC, {
+      type: 'line',
+      data: {
+        labels: compPts.map(p => new Date(p.date + 'T12:00:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })),
+        datasets: [
+          {
+            label: 'Massa Grassa (%)',
+            data: compPts.map(p => p.body_fat),
+            borderColor: '#ff6a00',
+            borderWidth: 2,
+            tension: 0.35,
+            fill: false,
+            pointBackgroundColor: '#ff6a00',
+            pointRadius: 3
+          },
+          {
+            label: 'Massa Muscolare (%)',
+            data: compPts.map(p => p.muscle_mass),
+            borderColor: '#00dc78',
+            borderWidth: 2,
+            tension: 0.35,
+            fill: false,
+            pointBackgroundColor: '#00dc78',
+            pointRadius: 3
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            display: true,
+            labels: { color: 'rgba(255,255,255,0.6)', boxWidth: 12, font: { size: 10 } }
+          },
+          tooltip: {
+            backgroundColor: '#1c1c1e',
+            titleColor: '#fff',
+            bodyColor: '#fff',
+            borderColor: 'rgba(255,255,255,0.08)',
+            borderWidth: 1
+          }
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: { color: 'rgba(255,255,255,0.4)', font: { size: 10 } }
+          },
+          y: {
+            grid: { color: 'rgba(255,255,255,0.05)' },
+            ticks: { color: 'rgba(255,255,255,0.4)', font: { size: 10 } }
+          }
+        }
+      }
+    });
+  } else if (compCard) {
+    compCard.style.display = 'none';
+  }
 
-  const toX = i => PAD + (i / (pts.length - 1)) * (W - PAD * 2);
-  const toY = w => H - PAD - ((w - minW) / range) * (H - PAD * 2);
-
-  const pathD = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${toX(i).toFixed(1)},${toY(p.weight).toFixed(1)}`).join(' ');
-  const areaD = pathD + ` L${toX(pts.length-1).toFixed(1)},${H} L${toX(0).toFixed(1)},${H} Z`;
-
-  const dots = pts.map((p, i) => {
-    const x = toX(i), y = toY(p.weight);
-    const lbl = new Date(p.date + 'T12:00:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'short' });
-    const isLast = i === pts.length - 1;
-    return `
-      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${isLast ? 4 : 3}" fill="${isLast ? 'var(--accent)' : 'rgba(255,255,255,0.5)'}" stroke="${isLast ? '#fff' : 'none'}" stroke-width="1.5"/>
-      ${isLast ? `<text x="${x.toFixed(1)}" y="${(y - 8).toFixed(1)}" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="9" font-weight="700">${p.weight}kg</text>` : ''}
-      <text x="${x.toFixed(1)}" y="${(H + 2).toFixed(1)}" text-anchor="middle" fill="rgba(255,255,255,0.3)" font-size="7">${lbl}</text>`;
-  }).join('');
-
-  elChart.innerHTML = `
-    <svg viewBox="0 0 ${W} ${H + 14}" xmlns="http://www.w3.org/2000/svg" style="width:100%;overflow:visible">
-      <defs>
-        <linearGradient id="wg" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.25"/>
-          <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
-        </linearGradient>
-      </defs>
-      <path d="${areaD}" fill="url(#wg)"/>
-      <path d="${pathD}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-      ${dots}
-    </svg>`;
+  // 3. Training Volume Chart
+  const canvasV = document.getElementById('volume-chart-canvas');
+  const volumeCard = document.getElementById('volume-card');
+  const volPts = logs ? logs.filter(l => l.workout && l.workout.total_volume > 0).slice(0, 10).reverse() : [];
+  
+  if (volPts.length >= 1 && canvasV && volumeCard) {
+    volumeCard.style.display = 'block';
+    if (volumeChartInstance) volumeChartInstance.destroy();
+    
+    const ctx = canvasV.getContext('2d');
+    const gradient = ctx.createLinearGradient(0, 0, 0, 160);
+    gradient.addColorStop(0, 'rgba(255, 106, 0, 0.4)');
+    gradient.addColorStop(1, 'rgba(255, 106, 0, 0.0)');
+    
+    volumeChartInstance = new Chart(canvasV, {
+      type: 'bar',
+      data: {
+        labels: volPts.map(p => new Date(p.date + 'T12:00:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })),
+        datasets: [{
+          label: 'Volume (kg)',
+          data: volPts.map(p => p.workout.total_volume),
+          borderColor: '#ff6a00',
+          borderWidth: 2,
+          backgroundColor: gradient,
+          borderRadius: 6,
+          borderSkipped: false
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#1c1c1e',
+            titleColor: '#fff',
+            bodyColor: '#fff',
+            borderColor: 'rgba(255,255,255,0.08)',
+            borderWidth: 1,
+            callbacks: {
+              label: (context) => ` ${context.parsed.y} kg`
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: { color: 'rgba(255,255,255,0.4)', font: { size: 10 } }
+          },
+          y: {
+            grid: { color: 'rgba(255,255,255,0.05)' },
+            ticks: { color: 'rgba(255,255,255,0.4)', font: { size: 10 } }
+          }
+        }
+      }
+    });
+  } else if (volumeCard) {
+    volumeCard.style.display = 'none';
+  }
 
   loadCheckStats();
 }
@@ -346,6 +573,12 @@ window.openNewCheck = function() {
         <div class="fg" style="margin:0"><label class="fl">Peso (kg)</label>
           <input type="number" class="fi" id="ck-weight" step="0.1" placeholder="75.0"></div>
       </div>
+      <div class="grid2" style="margin-top:12px">
+        <div class="fg" style="margin:0"><label class="fl">% Massa Grassa</label>
+          <input type="number" class="fi" id="ck-body-fat" step="0.1" placeholder="15.0"></div>
+        <div class="fg" style="margin:0"><label class="fl">% Massa Muscolare</label>
+          <input type="number" class="fi" id="ck-muscle-mass" step="0.1" placeholder="40.0"></div>
+      </div>
       <div class="fg" style="margin-top:12px"><label class="fl">Note</label>
         <textarea class="fi" id="ck-notes" rows="2" placeholder="Come ti senti..."></textarea></div>
     </div>
@@ -404,6 +637,8 @@ window.closeCheckForm = function() {
 window.saveCheck = async function() {
   const date   = document.getElementById('ck-date').value;
   const weight = parseFloat(document.getElementById('ck-weight').value) || null;
+  const body_fat = parseFloat(document.getElementById('ck-body-fat')?.value) || null;
+  const muscle_mass = parseFloat(document.getElementById('ck-muscle-mass')?.value) || null;
   if (!date) { showToast('Inserisci la data', 'err'); return; }
 
   const measurements = {};
@@ -427,11 +662,11 @@ window.saveCheck = async function() {
   const id = `check_${date.replace(/-/g,'')}`;
   const prev = checks[0];
   const data = {
-    date, weight,
+    date, weight, body_fat, muscle_mass,
     notes: document.getElementById('ck-notes').value.trim(),
     measurements,
     photos: photoUrls,
-    previous: prev ? { weight: prev.weight, measurements: prev.measurements || {} } : null
+    previous: prev ? { weight: prev.weight, body_fat: prev.body_fat || null, muscle_mass: prev.muscle_mass || null, measurements: prev.measurements || {} } : null
   };
 
   try {

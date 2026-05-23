@@ -34,6 +34,7 @@ async function loadSettings() {
   }
   if (s.profile?.height)        document.getElementById('s-height').value     = s.profile.height;
   if (s.profile?.weight_target) document.getElementById('s-wtarget').value    = s.profile.weight_target;
+  if (s.profile?.fat_target)    document.getElementById('s-ftarget').value    = s.profile.fat_target;
   if (s.steps_goal)             document.getElementById('s-steps-goal').value = s.steps_goal;
   
   if (s.friend_email) {
@@ -81,7 +82,8 @@ window.saveSettings = async function() {
       sex:           document.getElementById('s-sex').value,
       dob:           document.getElementById('s-dob').value,
       height:        parseInt(document.getElementById('s-height').value)  || null,
-      weight_target: parseFloat(document.getElementById('s-wtarget').value) || null
+      weight_target: parseFloat(document.getElementById('s-wtarget').value) || null,
+      fat_target:    parseFloat(document.getElementById('s-ftarget').value) || null
     },
     steps_goal: parseInt(document.getElementById('s-steps-goal').value) || null,
     friend_email: document.getElementById('s-friend-email').value || null
@@ -150,6 +152,16 @@ window.saveGeminiKey = async function() {
       }
     });
   }
+
+window.copyShortcutUrl = function() {
+  const base = window.location.origin + window.location.pathname.replace('settings.html', 'index.html');
+  const shortcutUrl = `${base}?steps=PASSI&burned=CALORIE`;
+  navigator.clipboard.writeText(shortcutUrl).then(() => {
+    alert('URL copiato negli appunti! 📋\nIncollalo nella tua azione "Apri URL" di Comandi Rapidi su iOS.');
+  }).catch(() => {
+    alert('Impossibile copiare automaticamente. URL:\n' + shortcutUrl);
+  });
+};
 
 (async function() {
   await requireAuth();

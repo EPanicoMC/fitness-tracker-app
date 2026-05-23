@@ -16,10 +16,9 @@ async function getApiKey() {
 }
 
 const MODELS = [
-  'gemini-2.5-pro-preview-05-06',
   'gemini-2.5-flash',
-  'gemini-3-flash-preview',
-  'gemini-3.1-flash-lite-preview'
+  'gemini-1.5-flash',
+  'gemini-1.5-pro'
 ];
 
 async function callGemini(messages, systemPrompt) {
@@ -247,6 +246,133 @@ function cleanDisplayText(text, type) {
   return text.replace(new RegExp(`<${tag}>[\\s\\S]*?<\\/${tag}>`, 'g'), '').trim();
 }
 
+// ── Full Plan Details Preview Modal ─────────────────────────
+function renderFullDietPlanHtml(plan) {
+  const on = plan.day_on || {};
+  const off = plan.day_off || {};
+  
+  function renderMealsList(meals) {
+    if (!meals || !meals.length) return '<p style="color:var(--t3);font-size:12px;margin:8px 0">Nessun pasto</p>';
+    return meals.map(m => `
+      <div style="background:rgba(255,255,255,0.03);padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.05);margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span style="font-weight:800;color:var(--t1);font-size:13px">${m.label || m.type}</span>
+          ${m.time ? `<span style="font-size:11px;color:var(--accent);font-weight:600">⏰ ${m.time}</span>` : ''}
+        </div>
+        <p style="font-size:12px;color:var(--t2);margin:0 0 6px;line-height:1.5">${m.items || ''}</p>
+        <div style="font-size:11px;color:var(--t3)">
+          <b>${m.kcal || 0}</b> kcal · P:<b>${m.protein || 0}g</b> C:<b>${m.carbs || 0}g</b> F:<b>${m.fats || 0}g</b>
+        </div>
+        ${m.variants?.length ? `
+          <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px">
+            ${m.variants.map(v => `<span style="font-size:9px;background:rgba(124,111,255,0.1);color:var(--accent2);padding:2px 6px;border-radius:4px">${typeof v === 'object' ? v.label : v}</span>`).join('')}
+          </div>
+        ` : ''}
+      </div>
+    `).join('');
+  }
+
+  return `
+    <div style="display:flex;flex-direction:column;gap:18px">
+      <div>
+        <div style="font-size:18px;font-weight:900;color:var(--t1);margin-bottom:4px">${plan.name}</div>
+        <div style="font-size:11px;color:var(--t3)">Dettagli completi del piano nutrizionale</div>
+      </div>
+      
+      <div>
+        <div style="font-size:12px;font-weight:800;color:var(--accent);letter-spacing:1px;margin-bottom:8px">💪 GIORNO ON (Allenamento)</div>
+        <div style="background:rgba(124,111,255,0.08);border:1px solid rgba(124,111,255,0.2);padding:10px 14px;border-radius:10px;margin-bottom:10px;font-size:12px;color:var(--t2)">
+          Totale: <b>${on.kcal||0} kcal</b> &nbsp; P: <b>${on.protein||0}g</b> &nbsp; C: <b>${on.carbs||0}g</b> &nbsp; F: <b>${on.fats||0}g</b>
+        </div>
+        ${renderMealsList(on.meals)}
+      </div>
+
+      <div>
+        <div style="font-size:12px;font-weight:800;color:#60a5fa;letter-spacing:1px;margin-bottom:8px">😴 GIORNO OFF (Riposo)</div>
+        <div style="background:rgba(96,165,250,0.08);border:1px solid rgba(96,165,250,0.2);padding:10px 14px;border-radius:10px;margin-bottom:10px;font-size:12px;color:var(--t2)">
+          Totale: <b>${off.kcal||0} kcal</b> &nbsp; P: <b>${off.protein||0}g</b> &nbsp; C: <b>${off.carbs||0}g</b> &nbsp; F: <b>${off.fats||0}g</b>
+        </div>
+        ${renderMealsList(off.meals)}
+      </div>
+    </div>
+  `;
+}
+
+function renderFullWorkoutPlanHtml(plan) {
+  const days = Object.keys(plan.schedule || {});
+  
+  function renderExercisesList(exercises) {
+    if (!exercises || !exercises.length) return '<p style="color:var(--t3);font-size:12px;margin:8px 0">Nessun esercizio</p>';
+    return exercises.map((e, idx) => `
+      <div style="background:rgba(255,255,255,0.03);padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.05);margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+          <span style="font-weight:800;color:var(--t1);font-size:13px">${idx+1}. ${e.name}</span>
+          <span style="font-size:12px;color:var(--accent);font-weight:700">${e.sets}x${e.reps}</span>
+        </div>
+        ${e.rest_seconds ? `<div style="font-size:11px;color:var(--t3);margin-bottom:4px">⏱️ Recupero: ${e.rest_seconds}s</div>` : ''}
+        ${e.notes ? `<p style="font-size:11px;color:var(--t2);margin:4px 0 0;line-height:1.4;font-style:italic">Note: ${e.notes}</p>` : ''}
+      </div>
+    `).join('');
+  }
+
+  const daysHtml = days.map(d => {
+    const s = plan.schedule[d] || {};
+    return `
+      <div style="margin-bottom:18px">
+        <div style="font-size:13px;font-weight:800;color:var(--accent);text-transform:capitalize;margin-bottom:8px">📅 ${d} — ${s.name || 'Sessione'}</div>
+        ${s.cardio ? `<div style="font-size:12px;color:var(--t2);background:rgba(255,255,255,0.02);padding:8px 12px;border-radius:8px;margin-bottom:8px;border:1px solid rgba(255,255,255,0.03)">🏃 Cardio: <b>${s.cardio}</b></div>` : ''}
+        ${renderExercisesList(s.exercises)}
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div style="display:flex;flex-direction:column;gap:18px">
+      <div>
+        <div style="font-size:18px;font-weight:900;color:var(--t1);margin-bottom:4px">${plan.name}</div>
+        <div style="font-size:11px;color:var(--t3)">Scheda di allenamento proposta</div>
+      </div>
+      ${daysHtml}
+    </div>
+  `;
+}
+
+window._openFullPlanPreview = function() {
+  if (!session?.plan) return;
+  const plan = session.plan;
+  const type = session.type;
+  
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg';
+  bg.id = 'full-plan-preview-modal';
+  bg.style.zIndex = '100000'; // above the coach overlay
+  
+  const contentHtml = type === 'workout' 
+    ? renderFullWorkoutPlanHtml(plan) 
+    : renderFullDietPlanHtml(plan);
+    
+  bg.innerHTML = `
+    <div class="modal" style="max-height:85vh;overflow-y:auto;width:92%;max-width:500px">
+      <div class="modal-handle"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h3 style="margin:0">🔍 Dettaglio Piano Completo</h3>
+        <button onclick="document.getElementById('full-plan-preview-modal').remove()" 
+          style="background:none;border:none;color:var(--t2);font-size:20px;cursor:pointer">×</button>
+      </div>
+      
+      <div style="overflow-y:auto;max-height:60vh;padding-right:4px">
+        ${contentHtml}
+      </div>
+      
+      <div style="margin-top:20px;border-top:1px solid var(--border);padding-top:14px;text-align:right">
+        <button class="btn btn-flat" style="width:100%" onclick="document.getElementById('full-plan-preview-modal').remove()">Chiudi Preview</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(bg);
+  bg.onclick = e => { if (e.target === bg) bg.remove(); };
+};
+
 // ── Plan preview card ──────────────────────────────────────
 function renderPlanCard(plan, type) {
   if (!plan) return '';
@@ -267,9 +393,10 @@ function renderPlanCard(plan, type) {
       <div style="border:1px solid rgba(124,111,255,0.35);border-radius:14px;padding:14px;background:rgba(124,111,255,0.07);margin-top:4px">
         <div style="font-size:10px;font-weight:800;color:var(--accent);letter-spacing:1px;margin-bottom:8px">📋 PIANO PROPOSTO</div>
         <div style="font-size:15px;font-weight:900;color:var(--t1);margin-bottom:10px">${plan.name}</div>
-        <div style="display:flex;gap:5px;flex-wrap:wrap">${dayCols}</div>
-        <div style="font-size:11px;color:var(--t3);margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06)">
-          ${days.length} giorni/sett. · ${totalEx} esercizi totali
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px">${dayCols}</div>
+        <div style="font-size:11px;color:var(--t3);padding-top:8px;border-top:1px solid rgba(255,255,255,0.06);display:flex;justify-content:space-between;align-items:center">
+          <span>${days.length} gg. · ${totalEx} es.</span>
+          <button class="btn btn-ghost btn-sm" onclick="window._openFullPlanPreview()" style="font-size:10px;padding:4px 8px;border:1px solid rgba(124,111,255,0.3)">🔍 Vedi dettagli</button>
         </div>
       </div>`;
 
@@ -302,6 +429,9 @@ function renderPlanCard(plan, type) {
           </div>
         </div>
         ${mealRows ? `<div style="font-size:11px;font-weight:800;color:var(--t3);margin-bottom:4px">Pasti giorno ON:</div>${mealRows}` : ''}
+        <div style="margin-top:12px;text-align:right">
+          <button class="btn btn-ghost btn-sm" onclick="window._openFullPlanPreview()" style="font-size:10px;padding:6px 12px;border:1px solid rgba(124,111,255,0.3);width:100%">🔍 Vedi dieta completa</button>
+        </div>
       </div>`;
   }
 }

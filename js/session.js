@@ -261,6 +261,7 @@ function renderExercises() {
 
 function renderExCard(ex, ei) {
   const allDone = ex.sets.every(s => s.done);
+  const rpeVal = ex.rpe || '';
   return `
     <div class="ex-live ${allDone ? 'completed' : ''}" id="exlive-${ei}">
       <div class="ex-head">
@@ -270,6 +271,16 @@ function renderExCard(ex, ei) {
           ${allDone ? '<span class="badge badge-g">✓</span>' : `<span style="font-size:12px;color:var(--t2)">⏱ ${ex.rest_seconds}s</span>`}
         </div>
       </div>
+      
+      <!-- RPE fatigue selector -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin:8px 0 12px;padding:6px 12px;background:rgba(255,255,255,0.02);border-radius:8px;border:1px solid rgba(255,255,255,0.05)">
+        <span style="font-size:12px;color:var(--t2);font-weight:700">😮 RPE Fatica (1-10)</span>
+        <select class="fi" id="ex-rpe-${ei}" onchange="window.onRpeChange(${ei}, this.value)" style="width:65px;height:28px;font-size:12px;padding:2px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;color:var(--t1);outline:none">
+          <option value="">--</option>
+          ${[1,2,3,4,5,6,7,8,9,10].map(v => `<option value="${v}" ${rpeVal == v ? 'selected' : ''}>${v}</option>`).join('')}
+        </select>
+      </div>
+
       ${ex.notes ? `<div class="ex-note" id="enote-${ei}">${ex.notes}</div>` : ''}
       <div id="sets-wrap-${ei}">
         ${ex.sets.map((s, si) => renderSetRow(ex, ei, si, s)).join('')}
@@ -315,6 +326,12 @@ function renderSetRow(ex, ei, si, s) {
 window.toggleNote = function(ei) {
   const el = document.getElementById(`enote-${ei}`);
   if (el) el.classList.toggle('open');
+};
+
+window.onRpeChange = function(ei, val) {
+  if (exState[ei]) {
+    exState[ei].rpe = parseInt(val) || null;
+  }
 };
 
 window.addSetToExercise = function(ei) {
@@ -516,6 +533,7 @@ window.finishSession = async function() {
     completed:        true,
     exercises: exState.map(ex => ({
       name: ex.name,
+      rpe:  ex.rpe || null,
       sets: ex.sets.map(s => ({
         weight: parseFloat(s.actual_weight) || 0,
         reps:   s.actual_reps || s.reps_target,
@@ -539,6 +557,7 @@ window.finishSession = async function() {
       session_notes:    document.getElementById('s-notes')?.value || '',
       exercises: exState.map(ex => ({
         name: ex.name,
+        rpe:  ex.rpe || null,
         sets: ex.sets.map((s, i) => ({
           set_num: i + 1,
           weight:  parseFloat(s.actual_weight) || 0,
@@ -553,7 +572,34 @@ window.finishSession = async function() {
     }
 
     showToast('🏁 Sessione completata! 💪');
-    setTimeout(() => { window.location.href = 'index.html'; }, 1500);
+
+    // Calculate autoperiodization advice
+    const rpes = exState.map(ex => ex.rpe).filter(r => r != null);
+    let adviceTitle = "Allenamento Completato!";
+    let adviceText = "Ottimo lavoro! Continua così per massimizzare la costanza e superare i tuoi limiti.";
+    
+    if (rpes.length > 0) {
+      const avgRpe = rpes.reduce((a, b) => a + b) / rpes.length;
+      if (avgRpe < 7) {
+        adviceTitle = "📈 Autoperiodizzazione KOVA. · Incremento peso!";
+        adviceText = `Il tuo RPE medio è di <b>${avgRpe.toFixed(1)}</b> (intensità leggera). Per la prossima sessione ti suggeriamo di incrementare i carichi di <b>+2.5 kg</b> (o +2.5%) per mantenere uno stimolo allenante efficace! 💪`;
+      } else if (avgRpe >= 9.5) {
+        adviceTitle = "😮‍💨 Autoperiodizzazione KOVA. · Scarico consigliato!";
+        adviceText = `Il tuo RPE medio è di <b>${avgRpe.toFixed(1)}</b> (intensità estrema/cedimento). Consigliamo di scaricare i carichi del 10% (Deload) o mantenere i pesi stabili per favorire il recupero muscolare e articolare.`;
+      } else {
+        adviceTitle = "⚖️ Autoperiodizzazione KOVA. · Intensità ottimale";
+        adviceText = `Il tuo RPE medio è di <b>${avgRpe.toFixed(1)}</b> (intensità ottimale). Mantieni stabili i pesi per la prossima sessione e concentrati sulla progressione delle ripetizioni o sul perfezionamento della tecnica!`;
+      }
+    }
+
+    // Show beautiful advice modal before returning to home
+    showModal({
+      title: adviceTitle,
+      text: adviceText,
+      confirmLabel: 'Ok, andiamo! ⚡',
+      onConfirm: () => { window.location.href = 'index.html'; }
+    });
+
   } catch(e) {
     console.error('Errore salvataggio sessione:', e);
     showToast('Errore salvataggio: ' + e.message, 'err');

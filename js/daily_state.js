@@ -5,7 +5,7 @@ import {
 import {
   getTodayString, getYesterdayString, getDayOfWeek, formatDateIT, formatDateShort, addDays, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER, cleanOldLogs, calcFitScore, calcSmartScore
 } from './app.js';
-import { calcMacrosFromText } from './gemini.js';
+import { calcMacrosFromText, analyzeFoodImageAI } from './gemini.js';
 
 const TODAY = getTodayString();
 let logData = {};
@@ -25,6 +25,7 @@ function saveToLocal() {
     mealStates.forEach((m, i) => {
       meals_state[i] = { eaten: m.eaten, variant: m.active_variant };
     });
+    logData.meals_state = meals_state;
     const payload = {
       meals_state,
       meals_overrides: logData.meals_overrides || {},
@@ -130,6 +131,35 @@ async function init() {
       if (local.daily_note != null)   logData.daily_note   = local.daily_note;
       if (local.day_override != null) logData.day_override = local.day_override;
     } catch(e) {}
+  }
+
+  // Apple Health iOS Shortcuts Bridge
+  const params = new URLSearchParams(window.location.search);
+  const stepsParam = params.get('steps');
+  const burnedParam = params.get('burned') || params.get('burned_kcal');
+  if (stepsParam || burnedParam) {
+    let updated = false;
+    if (stepsParam) {
+      const sVal = parseInt(stepsParam);
+      if (!isNaN(sVal)) {
+        logData.steps = sVal;
+        updated = true;
+      }
+    }
+    if (burnedParam) {
+      const bVal = parseInt(burnedParam);
+      if (!isNaN(bVal)) {
+        logData.burned_kcal = bVal;
+        updated = true;
+      }
+    }
+    if (updated) {
+      saveToLocal();
+      await syncToFirebase();
+      showToast('🍎 Dati Apple Health sincronizzati con successo! 👟');
+      const cleanUrl = window.location.origin + window.location.pathname;
+      window.history.replaceState({}, document.title, cleanUrl);
+    }
   }
 
   const name = appSettings?.profile?.name || appSettings?.name || '';
@@ -550,15 +580,15 @@ function buildMeals() {
   const meals  = activeDiet?.[dayKey]?.meals || [];
 
   mealStates = meals.map((m, i) => {
-    const ov = logData.meals_overrides?.[i];
+    const ov = logData.meals_overrides?.[i] || logData.meals_overrides?.[String(i)];
     return {
       ...m,
       kcal:           ov?.kcal    ?? m.kcal,
       protein:        ov?.protein ?? m.protein,
       carbs:          ov?.carbs   ?? m.carbs,
       fats:           ov?.fats    ?? m.fats,
-      eaten:          logData.meals_state?.[i]?.eaten ?? logData.meals_eaten?.[i] ?? false,
-      active_variant: logData.meals_state?.[i]?.variant ?? logData.meals_variant?.[i] ?? null,
+      eaten:          logData.meals_state?.[i]?.eaten ?? logData.meals_state?.[String(i)]?.eaten ?? logData.meals_eaten?.[i] ?? false,
+      active_variant: logData.meals_state?.[i]?.variant ?? logData.meals_state?.[String(i)]?.variant ?? logData.meals_variant?.[i] ?? null,
       override_kcal:  ov?.kcal ?? null
     };
   });
@@ -581,14 +611,16 @@ function buildMeals() {
     
     let friendList = [];
     fMeals.forEach((fm, fi) => {
-       if (friendLogData.meals_state?.[fi]?.eaten) {
-          const ov = friendLogData.meals_overrides?.[fi];
+       const fsState = friendLogData.meals_state?.[fi] || friendLogData.meals_state?.[String(fi)];
+       if (fsState?.eaten) {
+          const ov = friendLogData.meals_overrides?.[fi] || friendLogData.meals_overrides?.[String(fi)];
           friendList.push({
              name: fm.label || fm.type,
              kcal: ov?.kcal ?? fm.kcal,
              protein: ov?.protein ?? fm.protein,
              carbs: ov?.carbs ?? fm.carbs,
-             fats: ov?.fats ?? fm.fats
+             fats: ov?.fats ?? fm.fats,
+             ingredients: ov?.items_text ?? fm.items ?? ''
           });
        }
     });
@@ -599,9 +631,12 @@ function buildMeals() {
            kcal: em.kcal,
            protein: em.protein,
            carbs: em.carbs,
-           fats: em.fats
+           fats: em.fats,
+           ingredients: em.ingredients || ''
        });
     });
+    
+    window.currentFriendMeals = friendList;
     
     if (friendList.length > 0) {
       friendBannerHtml = `
@@ -610,11 +645,12 @@ function buildMeals() {
           <div style="display:flex;flex-direction:column;gap:6px">
             ${friendList.map((fm, idx) => `
               <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.05)">
-                 <div>
+                 <div style="flex:1;margin-right:12px">
                    <div style="font-size:13px;font-weight:700;color:var(--t1)">${fm.name}</div>
                    <div style="font-size:11px;color:var(--t2)">${fm.kcal} kcal · P:${fm.protein}g C:${fm.carbs}g F:${fm.fats}g</div>
+                   ${fm.ingredients ? `<div style="font-size:11px;color:var(--accent);margin-top:4px;font-style:italic">${fm.ingredients}</div>` : ''}
                  </div>
-                 <button class="btn btn-ghost btn-sm" onclick='window.openAddMeal(${JSON.stringify(fm)})'>Copia</button>
+                 <button class="btn btn-ghost btn-sm" onclick="window.openAddMeal(window.currentFriendMeals[${idx}])">Copia</button>
               </div>
             `).join('')}
           </div>
@@ -622,9 +658,10 @@ function buildMeals() {
       `;
     }
   }
+  
   const extraHtml = (logData.extra_meals || []).map((m, xi) => `
     <div class="meal-item eaten" style="border-left:3px solid var(--orange)">
-      <div class="meal-top">
+      <div class="meal-top" onclick="window.toggleExtraMealDetail(${xi})" style="cursor:pointer">
         <div class="meal-chk" style="background:var(--orange)">✓</div>
         ${m.time ? `<span class="meal-time">${m.time}</span>` : ''}
         <div class="meal-info">
@@ -633,12 +670,24 @@ function buildMeals() {
         </div>
         <div class="meal-kcal">${m.kcal}</div>
       </div>
+      ${m.ingredients ? `
+      <div class="meal-detail" id="extradtl-${xi}" style="display:none;padding:10px;border-top:1px solid rgba(255,255,255,0.05)">
+        <p style="font-size:13px;color:var(--t2);line-height:1.6;margin:0">${m.ingredients}</p>
+      </div>
+      <div onclick="window.toggleExtraMealDetail(${xi})" style="text-align:right;font-size:11px;color:var(--t3);cursor:pointer;padding:4px 0;margin-bottom:4px">▼ dettagli</div>
+      ` : ''}
     </div>`).join('');
-  el.innerHTML = friendBannerHtml + mealStates.map((m, mi) => renderMealRow(m, mi)).join('') + extraHtml;
+    
+  el.innerHTML = friendBannerHtml + mealStates.map((m, mi) => renderMealRow(m, mi, meals)).join('') + extraHtml;
   updateNutritionTotals();
 }
 
-function renderMealRow(m, mi) {
+window.toggleExtraMealDetail = function(xi) {
+  const el = document.getElementById(`extradtl-${xi}`);
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+};
+
+function renderMealRow(m, mi, originalMeals) {
   const kcalDisplay = m.override_kcal ?? m.kcal;
   const varsHtml = m.variants?.length ? `
     <div class="vars">
@@ -654,7 +703,22 @@ function renderMealRow(m, mi) {
         ${typeof m.variants[m.active_variant] === 'object' ? m.variants[m.active_variant].detail : m.variants[m.active_variant]}
        </div>` : '';
 
-  const userTxt = logData.meals_overrides?.[mi]?.items_text ?? m.items ?? '';
+  const userTxt = logData.meals_overrides?.[mi]?.items_text ?? logData.meals_overrides?.[String(mi)]?.items_text ?? m.items ?? '';
+
+  const target = originalMeals?.[mi];
+  const override = logData.meals_overrides?.[mi] || logData.meals_overrides?.[String(mi)];
+  let deltaBadge = '';
+  let macroCompareBox = '';
+  
+  if (override && target) {
+    const diffKcal = override.kcal - target.kcal;
+    if (diffKcal !== 0) {
+      const color = diffKcal > 0 ? 'var(--orange)' : 'var(--green)';
+      const sign = diffKcal > 0 ? '+' : '';
+      deltaBadge = `<span style="font-size:10px;font-weight:800;color:${color};background:rgba(255,255,255,0.05);padding:2px 6px;border-radius:4px;margin-left:6px">${sign}${Math.round(diffKcal)} kcal</span>`;
+    }
+    macroCompareBox = renderMacroCompare(target, override);
+  }
 
   return `
     <div class="meal-item ${m.eaten ? 'eaten' : ''}" id="meal-${mi}">
@@ -663,7 +727,7 @@ function renderMealRow(m, mi) {
         ${m.time ? `<span class="meal-time">${m.time}</span>` : ''}
         <div class="meal-info">
           <div class="meal-name">${m.label || m.type}</div>
-          <div class="meal-meta">${kcalDisplay} kcal · P:${m.protein}g C:${m.carbs}g F:${m.fats}g</div>
+          <div class="meal-meta">${kcalDisplay} kcal · P:${m.protein}g C:${m.carbs}g F:${m.fats}g ${deltaBadge}</div>
         </div>
         <div class="meal-kcal">${kcalDisplay}</div>
       </div>
@@ -671,12 +735,7 @@ function renderMealRow(m, mi) {
         <p style="font-size:13px;color:var(--t2);line-height:1.6;margin-bottom:8px">${userTxt}</p>
         ${varsHtml}
         ${selVariantDetail}
-        ${logData.meals_state?.[mi]?.custom_macros
-          ? renderMacroCompare(
-              { kcal: m.kcal, protein: m.protein, carbs: m.carbs, fats: m.fats },
-              logData.meals_state[mi].custom_macros
-            )
-          : ''}
+        ${macroCompareBox}
         <div style="margin-top:12px">
           <label class="fl"><i class="ri-edit-2-line"></i> Ingredienti (modifica)</label>
           <textarea id="meal-txt-${mi}" class="fi" rows="2" style="font-size:13px">${userTxt}</textarea>
@@ -1067,6 +1126,73 @@ window.saveRecoveredDay = async function(dateStr) {
   }
 };
 
+// ── MEAL TEMPLATES ─────────────────────────────────────────
+let mealTemplates = [];
+
+window.saveAsTemplate = async function() {
+  const name = document.getElementById('am-name')?.value?.trim();
+  const kcal = parseFloat(document.getElementById('am-kcal')?.value) || 0;
+  const protein = parseFloat(document.getElementById('am-protein')?.value) || 0;
+  const carbs = document.getElementById('am-carbs')?.value ? parseFloat(document.getElementById('am-carbs').value) : 0;
+  const fats = document.getElementById('am-fats')?.value ? parseFloat(document.getElementById('am-fats').value) : 0;
+  const ingredients = document.getElementById('am-ingredients')?.value?.trim() || '';
+
+  if (!name) return showToast('Inserisci un nome per il template', 'err');
+  if (kcal === 0 && protein === 0) return showToast('Inserisci almeno le calorie o le proteine', 'err');
+
+  showToast('⭐ Salvataggio template...', 'info');
+  try {
+    const templateId = `template_${Date.now()}`;
+    await setDoc(doc(db, 'users', getUserId(), 'meal_templates', templateId), {
+      name, kcal, protein, carbs, fats, ingredients,
+      created_at: new Date().toISOString()
+    });
+    showToast('⭐ Template salvato!');
+    await loadMealTemplatesForDropdown();
+  } catch(e) {
+    showToast('Errore salvataggio template', 'err');
+    console.error(e);
+  }
+};
+
+async function loadMealTemplatesForDropdown() {
+  try {
+    const snap = await getDocs(collection(db, 'users', getUserId(), 'meal_templates'));
+    mealTemplates = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    
+    const container = document.getElementById('template-select-container');
+    const select = document.getElementById('am-template-select');
+    
+    if (select && mealTemplates.length > 0) {
+      select.innerHTML = '<option value="">-- Seleziona un template --</option>';
+      mealTemplates.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t.id;
+        opt.textContent = `${t.name} (${t.kcal} kcal - P:${t.protein}g C:${t.carbs}g F:${t.fats}g)`;
+        select.appendChild(opt);
+      });
+      if (container) container.style.display = 'block';
+    }
+  } catch(e) {
+    console.warn('Error loading meal templates:', e);
+  }
+}
+
+window.loadMealTemplate = function(templateId) {
+  if (!templateId) return;
+  const t = mealTemplates.find(x => x.id === templateId);
+  if (!t) return;
+  
+  if (document.getElementById('am-name')) document.getElementById('am-name').value = t.name || '';
+  if (document.getElementById('am-ingredients')) document.getElementById('am-ingredients').value = t.ingredients || '';
+  if (document.getElementById('am-kcal')) document.getElementById('am-kcal').value = t.kcal || '';
+  if (document.getElementById('am-protein')) document.getElementById('am-protein').value = t.protein || '';
+  if (document.getElementById('am-carbs')) document.getElementById('am-carbs').value = t.carbs || '';
+  if (document.getElementById('am-fats')) document.getElementById('am-fats').value = t.fats || '';
+  
+  showToast('⭐ Template caricato!');
+};
+
 // ── Aggiungi pasto extra ───────────────────────────────────
 window.openAddMeal = function(prefillData) {
   const bg = document.createElement('div');
@@ -1076,22 +1202,43 @@ window.openAddMeal = function(prefillData) {
     <div class="modal" style="max-height:85vh;overflow-y:auto">
       <div class="modal-handle"></div>
       <h3>${prefillData ? 'Copia Pasto Amico' : '+ Aggiungi Pasto'}</h3>
+ 
+      <div class="fg" id="template-select-container" style="display:none;margin-bottom:16px">
+        <label class="fl">⭐ Carica da Template</label>
+        <select class="fi" id="am-template-select" onchange="window.loadMealTemplate(this.value)">
+          <option value="">-- Seleziona un template --</option>
+        </select>
+      </div>
 
       <div class="fg">
         <label class="fl">Nome pasto</label>
         <input type="text" class="fi" id="am-name" placeholder="Es. Snack, Extra proteine..." value="${prefillData?.name || ''}">
       </div>
-
+ 
       <div class="fg">
         <label class="fl">Ingredienti</label>
         <textarea class="fi" id="am-ingredients" rows="3"
-          placeholder="Es: 150g pollo, 100g riso, 10g olio&#10;Oppure inserisci macro manualmente sotto"></textarea>
-        <button class="btn btn-ghost btn-sm" onclick="calcAIMeal()"
-                style="margin-top:8px;width:auto">
-          ✨ Calcola con AI
-        </button>
+          placeholder="Es: 150g pollo, 100g riso, 10g olio&#10;Oppure inserisci macro manualmente sotto">${prefillData?.ingredients || ''}</textarea>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn btn-ghost btn-sm" onclick="calcAIMeal()" style="flex:1">
+            ✨ Calcola con AI
+          </button>
+          <button class="btn btn-ghost btn-sm" onclick="window.startFoodCamera()" style="flex:1">
+            📸 Scansiona Cibo
+          </button>
+        </div>
       </div>
-
+ 
+      <!-- Video camera preview area -->
+      <div id="am-camera-container" style="display:none;margin-bottom:16px;flex-direction:column;gap:8px;align-items:center">
+        <video id="am-video" autoplay playsinline style="width:100%;max-width:320px;border-radius:12px;background:#000"></video>
+        <div style="display:flex;gap:8px;width:100%;max-width:320px">
+          <button class="btn btn-flat btn-sm" onclick="window.stopFoodCamera()" style="flex:1">Annulla</button>
+          <button class="btn btn-v btn-sm" onclick="window.captureFoodImage()" style="flex:1">📸 Scatta e Analizza</button>
+        </div>
+        <canvas id="am-canvas" style="display:none"></canvas>
+      </div>
+ 
       <div class="fmp" id="am-macro-preview" style="margin-bottom:16px">
         <div class="fmp-item">
           <input type="number" class="fi" id="am-kcal" placeholder="Kcal" min="0" value="${prefillData?.kcal || ''}">
@@ -1110,7 +1257,7 @@ window.openAddMeal = function(prefillData) {
           <div class="fmp-l">Grassi g</div>
         </div>
       </div>
-
+ 
       <div class="fg">
         <label class="fl">Tipo pasto</label>
         <select class="fi" id="am-type">
@@ -1122,12 +1269,15 @@ window.openAddMeal = function(prefillData) {
           <option value="cena">Cena</option>
         </select>
       </div>
-
-      <div class="modal-btns">
-        <button class="btn btn-flat" onclick="document.getElementById('add-meal-modal').remove()">
+ 
+      <div class="modal-btns" style="display:flex;flex-wrap:wrap;gap:8px">
+        <button class="btn btn-flat btn-sm" onclick="document.getElementById('add-meal-modal').remove()">
           Annulla
         </button>
-        <button class="btn btn-g" onclick="saveExtraMeal()">
+        <button class="btn btn-ghost btn-sm" onclick="window.saveAsTemplate()">
+          ⭐ Salva come Template
+        </button>
+        <button class="btn btn-g btn-sm" onclick="saveExtraMeal()">
           💾 Salva
         </button>
       </div>
@@ -1135,8 +1285,9 @@ window.openAddMeal = function(prefillData) {
   `;
   document.body.appendChild(bg);
   bg.onclick = e => { if (e.target === bg) bg.remove(); };
+  loadMealTemplatesForDropdown();
 };
-
+ 
 window.calcAIMeal = async function() {
   const text = document.getElementById('am-ingredients')?.value?.trim();
   if (!text) return showToast('Inserisci gli ingredienti', 'err');
@@ -1149,7 +1300,7 @@ window.calcAIMeal = async function() {
   document.getElementById('am-fats').value    = r.fats;
   showToast('✅ Macro calcolati!');
 };
-
+ 
 window.saveExtraMeal = async function() {
   const name    = document.getElementById('am-name')?.value?.trim();
   const kcal    = parseFloat(document.getElementById('am-kcal')?.value)    || 0;
@@ -1157,17 +1308,18 @@ window.saveExtraMeal = async function() {
   const carbs   = parseFloat(document.getElementById('am-carbs')?.value)   || 0;
   const fats    = parseFloat(document.getElementById('am-fats')?.value)    || 0;
   const type    = document.getElementById('am-type')?.value || 'extra';
-
+  const ingredients = document.getElementById('am-ingredients')?.value?.trim() || '';
+ 
   if (!name)                       return showToast('Inserisci il nome del pasto', 'err');
   if (kcal === 0 && protein === 0) return showToast('Inserisci almeno le kcal', 'err');
-
+ 
   if (!logData.extra_meals) logData.extra_meals = [];
   logData.extra_meals.push({
-    name, type, kcal, protein, carbs, fats,
+    name, type, kcal, protein, carbs, fats, ingredients,
     time:     new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }),
     added_at: new Date().toISOString()
   });
-
+ 
   updateNutritionTotals();
   saveToLocal();
   document.getElementById('add-meal-modal')?.remove();
@@ -1228,6 +1380,76 @@ window.saveManualMacro = function(mealIndex) {
   showToast('✅ Macro salvati! Pasto segnato ✓');
 };
 
+
+let cameraStream = null;
+
+window.startFoodCamera = async function() {
+  const container = document.getElementById('am-camera-container');
+  const video = document.getElementById('am-video');
+  if (!container || !video) return;
+
+  showToast('🎥 Avvio fotocamera...', 'info');
+
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment' },
+      audio: false
+    });
+    video.srcObject = cameraStream;
+    video.style.transform = 'none';
+    container.style.display = 'flex';
+  } catch(e) {
+    showToast('Impossibile accedere alla fotocamera', 'err');
+    console.error(e);
+  }
+};
+
+window.stopFoodCamera = function() {
+  const container = document.getElementById('am-camera-container');
+  if (container) container.style.display = 'none';
+
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(track => track.stop());
+    cameraStream = null;
+  }
+};
+
+window.captureFoodImage = async function() {
+  const video = document.getElementById('am-video');
+  const canvas = document.getElementById('am-canvas');
+  if (!video || !canvas || !cameraStream) return;
+
+  const ctx = canvas.getContext('2d');
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
+
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  window.stopFoodCamera();
+
+  showToast('⏳ Analisi immagine cibo con AI...', 'info');
+
+  try {
+    const base64Image = canvas.toDataURL('image/jpeg').split(',')[1];
+    const r = await analyzeFoodImageAI(base64Image, 'image/jpeg');
+
+    if (!r.success) {
+      showToast(r.error, 'err');
+      return;
+    }
+
+    if (document.getElementById('am-name')) document.getElementById('am-name').value = r.name;
+    if (document.getElementById('am-ingredients')) document.getElementById('am-ingredients').value = r.ingredients;
+    if (document.getElementById('am-kcal')) document.getElementById('am-kcal').value = r.kcal;
+    if (document.getElementById('am-protein')) document.getElementById('am-protein').value = r.protein;
+    if (document.getElementById('am-carbs')) document.getElementById('am-carbs').value = r.carbs;
+    if (document.getElementById('am-fats')) document.getElementById('am-fats').value = r.fats;
+
+    showToast('🥗 Cibo scansionato con successo!');
+  } catch(e) {
+    showToast('Errore durante la scansione', 'err');
+    console.error(e);
+  }
+};
 
 (async function() {
   await requireAuth();

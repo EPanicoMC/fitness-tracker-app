@@ -54,6 +54,12 @@
       </div>
     </div>
     <div class="s-row">
+      <div><div class="s-lbl">Massa Grassa target</div></div>
+      <div style="display:flex;align-items:center;gap:4px">
+        <input type="number" class="fi-in" id="s-ftarget" style="width:60px" step="0.5"> <span style="color:var(--t2);font-size:13px">%</span>
+      </div>
+    </div>
+    <div class="s-row">
       <div><div class="s-lbl">Obiettivo passi</div></div>
       <div style="display:flex;align-items:center;gap:4px">
         <input type="number" class="fi-in" id="s-steps-goal" style="width:80px" placeholder="10000"> <span style="color:var(--t2);font-size:13px">passi/giorno</span>
@@ -73,6 +79,25 @@
       <input type="email" class="fi" id="s-friend-email" list="friend-list" placeholder="amico@email.com">
       <datalist id="friend-list"></datalist>
     </div>
+  </div>
+
+  <div class="card" style="margin-top: 14px">
+    <span class="clabel">🍎 Apple Health Bridge (iOS)</span>
+    <div style="font-size:12px;color:var(--t2);line-height:1.5;margin-bottom:12px">
+      Sincronizza passi e calorie bruciate direttamente dall'app Salute su iOS usando un Comando Rapido.
+    </div>
+    <div style="background:rgba(255,255,255,0.03);padding:10px;border-radius:8px;border:1px solid var(--border);margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;color:var(--t1)">Come configurare:</div>
+      <ol style="margin:6px 0 0;padding-left:16px;font-size:11px;color:var(--t2);display:flex;flex-direction:column;gap:4px">
+        <li>Copia l'URL del bridge con il pulsante qui sotto.</li>
+        <li>Apri l'app <b>Comandi Rapidi</b> su iPhone.</li>
+        <li>Crea un comando che ottiene la somma dei Passi di oggi e dell'Energia attiva di oggi.</li>
+        <li>Aggiungi l'azione "Apri URL" inserendo l'URL copiato e sostituendo <code>PASSI</code> e <code>CALORIE</code> con i risultati precedenti.</li>
+      </ol>
+    </div>
+    <button class="btn btn-ghost btn-sm" id="btn-copy-shortcut" onclick="copyShortcutUrl()" style="width:100%">
+      📋 Copia URL Comando Rapido
+    </button>
   </div>
 
   <div class="card">
@@ -104,6 +129,11 @@
 </div>
 
 <script type="module" src="js/settings.js"></script>
-<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/fitness-tracker-app/sw.js')</script>
+<script>
+if('serviceWorker' in navigator) {
+  const base = window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/') + 1);
+  navigator.serviceWorker.register(base + 'sw.js');
+}
+</script>
 </body>
 </html>
