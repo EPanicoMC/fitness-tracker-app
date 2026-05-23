@@ -1451,6 +1451,13 @@ window.captureFoodImage = async function() {
   }
 };
 
+window.openAddMealWithCamera = function() {
+  window.openAddMeal();
+  setTimeout(() => {
+    window.startFoodCamera();
+  }, 250);
+};
+
 (async function() {
   await requireAuth();
   init();

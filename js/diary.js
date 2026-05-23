@@ -3,7 +3,7 @@ import {
   db, getUserId, collection, doc, getDoc, getDocs, setDoc, deleteField, query, where, orderBy, limit
 } from './firebase-config.js';
 import { getTodayString, getDayOfWeek, formatDateIT, formatDateShort, showToast, DAYS_IT, DAY_ORDER } from './app.js';
-import { generateWeeklyCoachReportAI } from './gemini.js';
+import { generateWeeklyCoachReportAI, calcMacrosFromText, analyzeFoodImageAI } from './gemini.js';
 
 const TODAY = getTodayString();
 let currentMonth = new Date(TODAY + 'T12:00:00');
@@ -225,6 +225,10 @@ window.showDay = async function(dateStr) {
         ${X}
         <p style="font-size:15px;font-weight:700;margin-bottom:4px">${formatDateIT(dateStr)}</p>
         <p style="color:var(--t2);font-size:14px">Nessun dato registrato</p>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn btn-ghost btn-sm" onclick="window.openAddMealForDate('${dateStr}')" style="flex:1">＋ Pasto</button>
+          <button class="btn btn-ghost btn-sm" onclick="window.openAddMealWithCameraForDate('${dateStr}')" style="flex:1">📸 Scanner</button>
+        </div>
         ${isPast ? `<button class="btn btn-ghost btn-sm" style="margin-top:10px;width:100%" onclick="openRecoverDay('${dateStr}')">📋 Recupera questa giornata</button>` : ''}
       </div>`;
     return;
@@ -322,6 +326,12 @@ window.showDay = async function(dateStr) {
       ${log.steps       ? `<div style="margin-top:8px;font-size:13px;color:var(--t2)">👟 ${log.steps.toLocaleString('it-IT')} passi</div>` : ''}
       ${log.burned_kcal ? `<div style="font-size:13px;color:var(--t2)">🔥 ${log.burned_kcal} kcal bruciate</div>` : ''}
       ${log.daily_note  ? `<div style="margin-top:10px;font-size:13px;color:var(--t2);font-style:italic">"${log.daily_note}"</div>` : ''}
+      
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn btn-ghost btn-sm" onclick="window.openAddMealForDate('${dateStr}')" style="flex:1">＋ Pasto Extra</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.openAddMealWithCameraForDate('${dateStr}')" style="flex:1">📸 Scanner Pasto</button>
+      </div>
+
       ${workoutHtml}
     </div>`;
 };
@@ -1167,6 +1177,225 @@ function showWeeklyReportModal(reportMarkdown) {
   document.body.appendChild(bg);
   bg.onclick = e => { if (e.target === bg) bg.remove(); };
 }
+
+window.openAddMealForDate = function(dateStr, prefillData) {
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg';
+  bg.id = 'add-meal-modal';
+  bg.innerHTML = `
+    <div class="modal" style="max-height:85vh;overflow-y:auto">
+      <div class="modal-handle"></div>
+      <h3>${prefillData ? 'Copia Pasto' : '+ Aggiungi Pasto'}</h3>
+ 
+      <div class="fg">
+        <label class="fl">Nome pasto</label>
+        <input type="text" class="fi" id="am-name" placeholder="Es. Snack, Extra proteine..." value="${prefillData?.name || ''}">
+      </div>
+ 
+      <div class="fg">
+        <label class="fl">Ingredienti</label>
+        <textarea class="fi" id="am-ingredients" rows="3"
+          placeholder="Es: 150g pollo, 100g riso, 10g olio&#10;Oppure inserisci macro manualmente sotto">${prefillData?.ingredients || ''}</textarea>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn btn-ghost btn-sm" onclick="calcAIMealForDate()" style="flex:1">
+            ✨ Calcola con AI
+          </button>
+          <button class="btn btn-ghost btn-sm" onclick="window.startFoodCameraForDate()" style="flex:1">
+            📸 Scansiona Cibo
+          </button>
+        </div>
+      </div>
+ 
+      <!-- Video camera preview area -->
+      <div id="am-camera-container" style="display:none;margin-bottom:16px;flex-direction:column;gap:8px;align-items:center">
+        <video id="am-video" autoplay playsinline style="width:100%;max-width:320px;border-radius:12px;background:#000"></video>
+        <div style="display:flex;gap:8px;width:100%;max-width:320px">
+          <button class="btn btn-flat btn-sm" onclick="window.stopFoodCameraForDate()" style="flex:1">Annulla</button>
+          <button class="btn btn-v btn-sm" onclick="window.captureFoodImageForDate()" style="flex:1">📸 Scatta e Analizza</button>
+        </div>
+        <canvas id="am-canvas" style="display:none"></canvas>
+      </div>
+ 
+      <div class="fmp" id="am-macro-preview" style="margin-bottom:16px">
+        <div class="fmp-item">
+          <input type="number" class="fi" id="am-kcal" placeholder="Kcal" min="0" value="${prefillData?.kcal || ''}">
+          <div class="fmp-l">Kcal</div>
+        </div>
+        <div class="fmp-item">
+          <input type="number" class="fi" id="am-protein" placeholder="0" min="0" step="0.1" value="${prefillData?.protein || ''}">
+          <div class="fmp-l">Proteine g</div>
+        </div>
+        <div class="fmp-item">
+          <input type="number" class="fi" id="am-carbs" placeholder="0" min="0" step="0.1" value="${prefillData?.carbs || ''}">
+          <div class="fmp-l">Carbo g</div>
+        </div>
+        <div class="fmp-item">
+          <input type="number" class="fi" id="am-fats" placeholder="0" min="0" step="0.1" value="${prefillData?.fats || ''}">
+          <div class="fmp-l">Grassi g</div>
+        </div>
+      </div>
+ 
+      <div class="fg">
+        <label class="fl">Tipo pasto</label>
+        <select class="fi" id="am-type">
+          <option value="extra">Extra / Fuori piano</option>
+          <option value="colazione">Colazione</option>
+          <option value="spuntino">Spuntino</option>
+          <option value="pranzo">Pranzo</option>
+          <option value="merenda">Merenda</option>
+          <option value="cena">Cena</option>
+        </select>
+      </div>
+ 
+      <div class="modal-btns">
+        <button class="btn btn-flat" onclick="document.getElementById('add-meal-modal').remove()">
+          Annulla
+        </button>
+        <button class="btn btn-g" onclick="window.saveExtraMealForDate('${dateStr}')">
+          💾 Salva
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(bg);
+  bg.onclick = e => { if (e.target === bg) bg.remove(); };
+};
+
+window.openAddMealWithCameraForDate = function(dateStr) {
+  window.openAddMealForDate(dateStr);
+  setTimeout(() => {
+    window.startFoodCameraForDate();
+  }, 250);
+};
+
+window.calcAIMealForDate = async function() {
+  const text = document.getElementById('am-ingredients')?.value?.trim();
+  if (!text) return showToast('Inserisci gli ingredienti', 'err');
+  showToast('⏳ Calcolo in corso...', 'info');
+  const r = await calcMacrosFromText(text);
+  if (!r.success) return showToast('Errore AI: ' + r.error, 'err');
+  document.getElementById('am-kcal').value    = r.kcal;
+  document.getElementById('am-protein').value = r.protein;
+  document.getElementById('am-carbs').value   = r.carbs;
+  document.getElementById('am-fats').value    = r.fats;
+  showToast('✅ Macro calcolati!');
+};
+
+window.saveExtraMealForDate = async function(dateStr) {
+  const name    = document.getElementById('am-name')?.value?.trim();
+  const kcal    = parseFloat(document.getElementById('am-kcal')?.value)    || 0;
+  const protein = parseFloat(document.getElementById('am-protein')?.value) || 0;
+  const carbs   = parseFloat(document.getElementById('am-carbs')?.value)   || 0;
+  const fats    = parseFloat(document.getElementById('am-fats')?.value)    || 0;
+  const type    = document.getElementById('am-type')?.value || 'extra';
+  const ingredients = document.getElementById('am-ingredients')?.value?.trim() || '';
+
+  if (!name) return showToast('Inserisci il nome del pasto', 'err');
+  if (kcal === 0 && protein === 0) return showToast('Inserisci almeno le kcal', 'err');
+
+  let log = monthLogs[dateStr] || { nutrition: { totals: { kcal: 0, protein: 0, carbs: 0, fats: 0 } }, extra_meals: [] };
+  if (!log.extra_meals) log.extra_meals = [];
+
+  log.extra_meals.push({
+    name, type, kcal, protein, carbs, fats, ingredients,
+    time: new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }),
+    added_at: new Date().toISOString()
+  });
+
+  const totals = log.nutrition?.totals || { kcal: 0, protein: 0, carbs: 0, fats: 0 };
+  totals.kcal += kcal;
+  totals.protein += protein;
+  totals.carbs += carbs;
+  totals.fats += fats;
+
+  if (!log.nutrition) log.nutrition = {};
+  log.nutrition.totals = totals;
+
+  try {
+    showToast('💾 Salvataggio in corso...', 'info');
+    await setDoc(doc(db, 'users', getUserId(), 'daily_logs', dateStr), log, { merge: true });
+    
+    monthLogs[dateStr] = log;
+    document.getElementById('add-meal-modal')?.remove();
+    showToast('✅ Pasto aggiunto!');
+    
+    renderGrid(currentMonth.getFullYear(), currentMonth.getMonth());
+    showDay(dateStr);
+  } catch(e) {
+    showToast('Errore salvataggio', 'err');
+    console.error(e);
+  }
+};
+
+let diaryCameraStream = null;
+
+window.startFoodCameraForDate = async function() {
+  const container = document.getElementById('am-camera-container');
+  const video = document.getElementById('am-video');
+  if (!container || !video) return;
+
+  showToast('🎥 Avvio fotocamera...', 'info');
+
+  try {
+    diaryCameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment' },
+      audio: false
+    });
+    video.srcObject = diaryCameraStream;
+    video.style.transform = 'none';
+    container.style.display = 'flex';
+  } catch(e) {
+    showToast('Impossibile accedere alla fotocamera', 'err');
+    console.error(e);
+  }
+};
+
+window.stopFoodCameraForDate = function() {
+  const container = document.getElementById('am-camera-container');
+  if (container) container.style.display = 'none';
+
+  if (diaryCameraStream) {
+    diaryCameraStream.getTracks().forEach(track => track.stop());
+    diaryCameraStream = null;
+  }
+};
+
+window.captureFoodImageForDate = async function() {
+  const video = document.getElementById('am-video');
+  const canvas = document.getElementById('am-canvas');
+  if (!video || !canvas || !diaryCameraStream) return;
+
+  const ctx = canvas.getContext('2d');
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
+
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  window.stopFoodCameraForDate();
+
+  showToast('⏳ Analisi immagine cibo con AI...', 'info');
+
+  try {
+    const base64Image = canvas.toDataURL('image/jpeg').split(',')[1];
+    const r = await analyzeFoodImageAI(base64Image, 'image/jpeg');
+
+    if (!r.success) {
+      showToast(r.error, 'err');
+      return;
+    }
+
+    if (document.getElementById('am-name')) document.getElementById('am-name').value = r.name;
+    if (document.getElementById('am-ingredients')) document.getElementById('am-ingredients').value = r.ingredients;
+    if (document.getElementById('am-kcal')) document.getElementById('am-kcal').value = r.kcal;
+    if (document.getElementById('am-protein')) document.getElementById('am-protein').value = r.protein;
+    if (document.getElementById('am-carbs')) document.getElementById('am-carbs').value = r.carbs;
+    if (document.getElementById('am-fats')) document.getElementById('am-fats').value = r.fats;
+
+    showToast('🥗 Cibo scansionato con successo!');
+  } catch(e) {
+    showToast('Errore durante la scansione', 'err');
+    console.error(e);
+  }
+};
 
 (async function() {
   await requireAuth();

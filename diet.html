@@ -55,7 +55,10 @@
         <span class="clabel" style="margin:0"><i class="ri-restaurant-2-line"></i> Pasti del giorno</span>
       </div>
       <div id="meals-list"><div class="spin"></div></div>
-      <button class="btn btn-ghost btn-sm" onclick="openAddMeal()" style="margin-top:12px;width:100%">+ Aggiungi pasto extra</button>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn btn-ghost btn-sm" onclick="openAddMeal()" style="flex:1">+ Pasto extra</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.openAddMealWithCamera()" style="flex:1">📸 Foto Scanner</button>
+      </div>
     </div>
     <!-- AI QUICK INPUT -->
     <div class="ai-box">
