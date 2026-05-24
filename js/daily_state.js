@@ -49,6 +49,7 @@ let isTrainingDay = false;
 let mealStates = [];
 let friendLogData = null;
 let friendActiveDiet = null;
+window.isServerLoaded = false;
 
 let cloudSyncTimer = null;
 function saveToLocal() {
@@ -149,6 +150,7 @@ async function init() {
       query(collection(db, 'users', userId, 'checks'), orderBy('date', 'desc'), limit(1))
     ];
 
+    window.isServerLoaded = false;
     await loadSmart(refs, (snaps) => {
       const [logSnap, progSnap, dietSnap, settSnap, checksSnap] = snaps;
       logData = logSnap.exists() ? logSnap.data() : {};
@@ -210,7 +212,10 @@ async function init() {
         }).catch(() => {});
       }
     });
+    window.isServerLoaded = true;
+    buildSmartAdvisor();
   } catch (e) {
+    window.isServerLoaded = true;
     console.error('DIAGNOSTIC: Error fetching DB data:', e);
     showToast('Errore nel caricamento dati dal cloud', 'err');
     // Fallback to empty states to allow the app to at least boot
@@ -834,7 +839,16 @@ window.openEditExtraMeal = function(xi) {
 };
 
 function renderMealRow(m, mi, originalMeals) {
-  const kcalDisplay = m.override_kcal ?? m.kcal;
+  const target = originalMeals?.[mi];
+  const override = logData.meals_overrides?.[mi] || logData.meals_overrides?.[String(mi)];
+  const isEaten = !!m.eaten;
+  const useOverride = isEaten && !!override;
+
+  const kcalDisplay = useOverride ? (override.kcal ?? target?.kcal ?? m.kcal) : (target?.kcal ?? m.kcal);
+  const proteinDisplay = useOverride ? (override.protein ?? target?.protein ?? m.protein) : (target?.protein ?? m.protein);
+  const carbsDisplay = useOverride ? (override.carbs ?? target?.carbs ?? m.carbs) : (target?.carbs ?? m.carbs);
+  const fatsDisplay = useOverride ? (override.fats ?? target?.fats ?? m.fats) : (target?.fats ?? m.fats);
+
   const varsHtml = m.variants?.length ? `
     <div class="vars">
       ${m.variants.map((v, vi) => {
@@ -851,13 +865,11 @@ function renderMealRow(m, mi, originalMeals) {
 
   const userTxt = logData.meals_overrides?.[mi]?.items_text ?? logData.meals_overrides?.[String(mi)]?.items_text ?? m.items ?? '';
 
-  const target = originalMeals?.[mi];
-  const override = logData.meals_overrides?.[mi] || logData.meals_overrides?.[String(mi)];
   let deltaBadge = '';
   let macroDeltasHtml = '';
   let macroCompareBox = '';
   
-  if (override && target) {
+  if (useOverride && target) {
     const diffKcal = override.kcal - target.kcal;
     const diffP = (override.protein || 0) - (target.protein || 0);
     const diffC = (override.carbs || 0) - (target.carbs || 0);
@@ -893,7 +905,7 @@ function renderMealRow(m, mi, originalMeals) {
         ${m.time ? `<span class="meal-time">${m.time}</span>` : ''}
         <div class="meal-info">
           <div class="meal-name">${m.label || m.type}</div>
-          <div class="meal-meta">${kcalDisplay} kcal · P:${m.protein}g C:${m.carbs}g F:${m.fats}g</div>
+          <div class="meal-meta">${kcalDisplay} kcal · P:${proteinDisplay}g C:${carbsDisplay}g F:${fatsDisplay}g</div>
           ${macroDeltasHtml}
         </div>
         <div class="meal-kcal">${kcalDisplay}</div>
@@ -1806,6 +1818,31 @@ async function buildSmartAdvisor() {
       saveToLocal();
       renderSmartAdvisorContent(cachedText);
     } else {
+      if (!window.isServerLoaded) {
+        box.innerHTML = `
+          <div class="card" style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); padding:16px; border-radius:var(--rs);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+              <div style="font-size:10px; font-weight:800; color:var(--accent); letter-spacing:1px; display:flex; align-items:center; gap:6px;">
+                <i class="ri-flashlight-fill"></i> KOVA SMART ADVISOR
+              </div>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:8px;">
+              <div style="height:12px; background:rgba(255,255,255,0.05); width:80%; border-radius:4px; animation: pulse 1.5s infinite ease-in-out;"></div>
+              <div style="height:12px; background:rgba(255,255,255,0.05); width:95%; border-radius:4px; animation: pulse 1.5s infinite ease-in-out;"></div>
+              <div style="height:12px; background:rgba(255,255,255,0.05); width:50%; border-radius:4px; animation: pulse 1.5s infinite ease-in-out;"></div>
+            </div>
+          </div>
+          <style>
+            @keyframes pulse {
+              0% { opacity: 0.6; }
+              50% { opacity: 0.3; }
+              100% { opacity: 0.6; }
+            }
+          </style>
+        `;
+        return;
+      }
+
       // Nessun consiglio caricato. Mostra lo skeleton e genera silente
       box.innerHTML = `
         <div class="card" style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); padding:16px; border-radius:var(--rs);">
