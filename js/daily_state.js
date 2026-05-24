@@ -209,6 +209,7 @@ async function init() {
           if (fSnap.exists()) friendLogData = fSnap.data();
           friendActiveDiet = fDietSnap.docs.find(d => d.data().active)?.data() || null;
           buildNutrition();
+          buildMeals();
         }).catch(() => {});
       }
     });
