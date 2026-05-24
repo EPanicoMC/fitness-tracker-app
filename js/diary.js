@@ -1,6 +1,6 @@
 import { requireAuth, loadSmart } from './app.js';
 import {
-  db, getUserId, collection, doc, getDoc, getDocFromCache, getDocs, getDocsFromCache, setDoc, deleteField, query, where, orderBy, limit
+  db, getUserId, collection, doc, getDoc, getDocs, setDoc, deleteField, query, where, orderBy, limit
 } from './firebase-config.js';
 import { getTodayString, getDayOfWeek, formatDateIT, formatDateShort, showToast, DAYS_IT, DAY_ORDER } from './app.js';
 import { generateWeeklyCoachReportAI, calcMacrosFromText, analyzeFoodImageAI } from './gemini.js';
@@ -123,15 +123,10 @@ async function loadCalendar() {
   };
 
   try {
-    const cachedSnap = await getDocsFromCache(q);
-    render(cachedSnap);
-  } catch (e) {}
-
-  try {
-    const serverSnap = await getDocs(q);
-    render(serverSnap);
+    const snap = await getDocs(q);
+    render(snap);
   } catch (e) {
-    console.warn('loadCalendar error:', e);
+    console.warn('loadCalendar error:', e.message);
     if (Object.keys(monthLogs).length === 0) renderGrid(y, m);
   }
 }
@@ -368,17 +363,10 @@ async function getActiveDietPlan() {
   if (_dietPlanCache) return _dietPlanCache;
   const coll = collection(db, 'users', getUserId(), 'diet_plans');
   try {
-    const cachedSnap = await getDocsFromCache(coll);
-    _dietPlanCache = cachedSnap.docs.find(d => d.data().active)?.data() || null;
-  } catch (e) {}
-  
-  if (!_dietPlanCache) {
-    try {
-      const snap = await getDocs(coll);
-      _dietPlanCache = snap.docs.find(d => d.data().active)?.data() || null;
-    } catch (e) {
-      console.warn('getActiveDietPlan error:', e);
-    }
+    const snap = await getDocs(coll);
+    _dietPlanCache = snap.docs.find(d => d.data().active)?.data() || null;
+  } catch (e) {
+    console.warn('getActiveDietPlan error:', e.message);
   }
   return _dietPlanCache;
 }

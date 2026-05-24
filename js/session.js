@@ -1,6 +1,6 @@
 import { requireAuth, loadSmart } from './app.js';
 import {
-  db, getUserId, collection, doc, getDoc, getDocFromCache, getDocs, getDocsFromCache, setDoc, query, orderBy, limit
+  db, getUserId, collection, doc, getDoc, getDocs, setDoc, query, orderBy, limit
 } from './firebase-config.js';
 import { getTodayString, getDayOfWeek, showToast, showModal, fmtTimer, DAYS_IT, DAY_ORDER } from './app.js';
 
@@ -143,22 +143,11 @@ window.startWithSession = async function(dayKey) {
   const dailyLogsQuery = query(collection(db, 'users', getUserId(), 'daily_logs'), orderBy('date', 'desc'), limit(20));
 
   try {
-    let lastSnap;
-    try {
-      lastSnap = await getDocFromCache(lastDocRef);
-    } catch (e) {
-      lastSnap = await getDoc(lastDocRef);
-    }
-
+    const lastSnap = await getDoc(lastDocRef);
     if (lastSnap.exists()) {
       prevLog = { workout: { exercises: lastSnap.data().exercises } };
     } else {
-      let snap;
-      try {
-        snap = await getDocsFromCache(dailyLogsQuery);
-      } catch (e) {
-        snap = await getDocs(dailyLogsQuery);
-      }
+      const snap = await getDocs(dailyLogsQuery);
       for (const d of snap.docs) {
         const ld = d.data();
         if (ld.date !== TODAY && ld.workout?.session_day === dayKey && ld.workout?.exercises?.length) {
@@ -167,7 +156,7 @@ window.startWithSession = async function(dayKey) {
       }
     }
   } catch(e) {
-    console.warn('Pre-fill load error:', e);
+    console.warn('Pre-fill load error:', e.message);
   }
 
   buildExState(session, dayKey, prevLog);

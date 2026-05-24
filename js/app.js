@@ -6,8 +6,6 @@ import {
   setDoc,
   getDoc,
   getDocs,
-  getDocFromCache,
-  getDocsFromCache,
   collection,
   deleteDoc
 } from './firebase-config.js';
@@ -303,52 +301,24 @@ export async function cleanOldLogs(db, userId, monthsToKeep=12) {
   }
 }
 
-async function fetchSmart(ref) {
-  const isDoc = ref.type === 'document' || (ref.path && ref.path.split('/').length % 2 === 0);
-  try {
-    if (isDoc) {
-      return await getDocFromCache(ref);
-    } else {
-      return await getDocsFromCache(ref);
-    }
-  } catch (cacheError) {
-    if (isDoc) {
-      return await getDoc(ref);
-    } else {
-      return await getDocs(ref);
-    }
-  }
-}
 
 export async function loadSmart(refs, callback) {
-  let cachedSnaps = null;
-  
-  // 1. Try cache-first fetch and callback immediately
+  // The Firestore SDK with persistentLocalCache handles caching transparently.
+  // We just do a direct getDocs/getDoc — the SDK serves from cache when offline
+  // and updates from the network when online. No manual cache-first needed.
   try {
-    cachedSnaps = await Promise.all(refs.map(ref => {
-      const isDoc = ref.type === 'document' || (ref.path && ref.path.split('/').length % 2 === 0);
-      return isDoc ? getDocFromCache(ref) : getDocsFromCache(ref);
-    }));
-    callback(cachedSnaps, false);
-  } catch (cacheError) {
-    console.warn("loadSmart: cache load skipped or empty", cacheError.message);
-  }
-
-  // 2. Fetch from server and trigger callback unconditionally to ensure freshness
-  try {
-    const serverSnaps = await Promise.all(refs.map(ref => {
+    const snaps = await Promise.all(refs.map(ref => {
       const isDoc = ref.type === 'document' || (ref.path && ref.path.split('/').length % 2 === 0);
       return isDoc ? getDoc(ref) : getDocs(ref);
     }));
-    callback(serverSnaps, false);
-  } catch (serverError) {
-    console.error("loadSmart: server load failed", serverError);
-    if (!cachedSnaps) {
-      // If we don't even have cached data, propagate the error
-      throw serverError;
-    }
+    callback(snaps, false);
+  } catch (err) {
+    console.error('loadSmart: fetch failed:', err.code, err.message);
+    // Re-throw so callers can handle (e.g. show error toast)
+    throw err;
   }
 }
+
 
 // ── Global Error Logger ──────────────────────────────────────
 async function logErrorToFirebase(type, errorData) {

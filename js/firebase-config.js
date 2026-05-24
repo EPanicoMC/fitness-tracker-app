@@ -11,7 +11,7 @@ import {
 import {
   initializeFirestore,
   persistentLocalCache,
-  persistentMultipleTabManager,
+  persistentSingleTabManager,
   getFirestore,
   collection,
   doc,
@@ -43,14 +43,19 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 let db;
 try {
+  // Use single-tab manager: avoids IndexedDB lock contention that freezes PWAs
   db = initializeFirestore(app, {
     localCache: persistentLocalCache({
-      tabManager: persistentMultipleTabManager()
+      tabManager: persistentSingleTabManager()
     })
   });
 } catch (e) {
-  console.warn("Failed to initialize Firestore with persistent local cache, falling back to standard Firestore:", e);
-  db = getFirestore(app);
+  console.warn("persistentLocalCache failed, falling back to memory cache:", e);
+  try {
+    db = getFirestore(app);
+  } catch (e2) {
+    console.error("Firestore init failed completely:", e2);
+  }
 }
 const auth = getAuth(app);
 const storage = getStorage(app);

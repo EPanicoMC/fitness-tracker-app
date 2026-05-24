@@ -1,6 +1,6 @@
 import { requireAuth, loadSmart } from './app.js';
 import {
-  db, getUserId, collection, doc, getDocs, getDocsFromCache, addDoc, setDoc, deleteDoc
+  db, getUserId, collection, doc, getDocs, addDoc, setDoc, deleteDoc
 } from './firebase-config.js';
 import { showToast, showModal } from './app.js';
 import { AutoComplete, saveToLibrary } from './autocomplete.js';

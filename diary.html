@@ -77,7 +77,20 @@
 <script>
 if('serviceWorker' in navigator) {
   const base = window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/') + 1);
-  navigator.serviceWorker.register(base + 'sw.js');
+  navigator.serviceWorker.register(base + 'sw.js').then(reg => {
+    reg.update();
+    reg.onupdatefound = () => {
+      const installingWorker = reg.installing;
+      if (installingWorker) {
+        installingWorker.onstatechange = () => {
+          if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            console.log('New service worker installed, forcing reload.');
+            window.location.reload();
+          }
+        };
+      }
+    };
+  });
 }
 </script>
 </body>

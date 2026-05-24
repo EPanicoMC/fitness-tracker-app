@@ -1,6 +1,6 @@
 import { requireAuth, loadSmart } from './app.js';
 import {
-  db, getUserId, doc, getDoc, getDocFromCache, getDocsFromCache, setDoc, getDocs, collection, query, orderBy, limit
+  db, getUserId, doc, getDoc, setDoc, getDocs, collection, query, orderBy, limit
 } from './firebase-config.js';
 import {
   getTodayString, getYesterdayString, getDayOfWeek, formatDateIT, formatDateShort, addDays, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER, cleanOldLogs, calcFitScore, calcSmartScore
@@ -157,16 +157,8 @@ async function init() {
 
     window.isServerLoaded = false;
     window.isMockData = false;
-    const fallbackTimer = setTimeout(() => {
-       if (!window.isServerLoaded) {
-         console.log("Firestore server load timed out, forcing isServerLoaded = true");
-         window.isServerLoaded = true;
-         buildSmartAdvisor();
-       }
-    }, 1500);
 
-    loadSmart(refs, (snaps, isMock) => {
-      window.isMockData = false;
+    await loadSmart(refs, (snaps) => {
       const [logSnap, progSnap, dietSnap, settSnap, checksSnap] = snaps;
       logData = logSnap.exists() ? logSnap.data() : {};
       activeProgram = progSnap.docs.find(d => d.data().active)?.data() || null;
@@ -201,7 +193,7 @@ async function init() {
             if (local.smart_advice)         logData.smart_advice = local.smart_advice;
             logData.last_updated = localTime;
           } else {
-            // Local is outdated. Update local storage to match the newer Firestore data
+            // Local is outdated — update local storage to match fresh Firestore data
             const payload = {
               meals_state:     logData.meals_state     || {},
               meals_overrides: logData.meals_overrides || {},
@@ -222,7 +214,7 @@ async function init() {
       renderDailyStateUI(local);
       window.isServerLoaded = true;
 
-      // Async load friend data if present
+      // Async load friend data (non-blocking — don't block main render)
       if (appSettings?.friend_email) {
         const cleanFriendEmail = appSettings.friend_email.trim().toLowerCase();
         if (cleanFriendEmail !== loadedFriendEmail) {
@@ -240,31 +232,30 @@ async function init() {
             buildNutrition();
             buildMeals();
           }).catch((err) => {
-            console.warn('loadSmart friend fetch failed:', err);
+            console.warn('Friend data fetch failed (non-critical):', err.message);
           });
         }
       }
-    }).then(() => {
-      clearTimeout(fallbackTimer);
-      window.isServerLoaded = true;
-      buildSmartAdvisor();
-    }).catch((err) => {
-      clearTimeout(fallbackTimer);
-      window.isServerLoaded = true;
-      buildSmartAdvisor();
     });
+
+    // loadSmart resolved — mark loaded and build advisor
+    window.isServerLoaded = true;
+    buildSmartAdvisor();
+
   } catch (e) {
     window.isServerLoaded = true;
-    console.error('DIAGNOSTIC: Error fetching DB data:', e);
-    showToast('Errore nel caricamento dati dal cloud', 'err');
-    // Fallback to empty states to allow the app to at least boot
+    console.error('CRITICAL: Firestore data load failed:', e.code, e.message);
+    showToast('Errore caricamento dati. Controlla la connessione.', 'err');
+    // Still render with empty data so app is usable
     logData = {};
     activeProgram = null;
     activeDiet = null;
     appSettings = {};
     latestCheck = null;
     renderDailyStateUI(null);
+    buildSmartAdvisor();
   }
+
 
   if (new Date().getDate() === 1) {
     cleanOldLogs(db, getUserId());
@@ -413,15 +404,10 @@ async function buildStreak() {
   };
 
   try {
-    const cachedSnap = await getDocsFromCache(q);
-    render(cachedSnap);
-  } catch (e) {}
-
-  try {
-    const serverSnap = await getDocs(q);
-    render(serverSnap);
+    const snap = await getDocs(q);
+    render(snap);
   } catch (e) {
-    console.warn('buildStreak error:', e);
+    console.warn('buildStreak error:', e.message);
   }
 }
 
@@ -1250,14 +1236,10 @@ async function checkYesterdayLog() {
   const yesterday = getYesterdayString();
   let snap;
   try {
-    snap = await getDocFromCache(doc(db, 'users', getUserId(), 'daily_logs', yesterday));
-  } catch (e) {
-    try {
-      snap = await getDoc(doc(db, 'users', getUserId(), 'daily_logs', yesterday));
-    } catch (err) {
-      console.warn('checkYesterdayLog error:', err);
-      return;
-    }
+    snap = await getDoc(doc(db, 'users', getUserId(), 'daily_logs', yesterday));
+  } catch (err) {
+    console.warn('checkYesterdayLog error:', err.message);
+    return;
   }
   if (snap && snap.exists()) {
     const banner = document.querySelector('[data-yesterday-banner]');
