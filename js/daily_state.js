@@ -53,6 +53,7 @@ window.isServerLoaded = false;
 
 let cloudSyncTimer = null;
 function saveToLocal() {
+  if (!window.isServerLoaded) return;
   try {
     const key = 'fittracker_today_' + getTodayString();
     const meals_state = {};
@@ -945,6 +946,7 @@ function renderMealRow(m, mi, originalMeals) {
 }
 
 window.toggleMeal = function(mi) {
+  if (!window.isServerLoaded) return;
   mealStates[mi].eaten = !mealStates[mi].eaten;
   if (!logData.meals_state) logData.meals_state = {};
   logData.meals_state[mi] = { eaten: mealStates[mi].eaten, variant: mealStates[mi].active_variant };
@@ -1141,6 +1143,7 @@ window.openAddMealFromAI = function(kcal, protein, carbs, fats, text) {
 
 // ── Cloud Sync (called by saveToLocal debouncer + manual saveDay) ───
 async function syncToFirebase() {
+  if (!window.isServerLoaded) return;
   if (!getUserId()) return;
 
   const sf = document.getElementById('steps-in');
@@ -1390,6 +1393,19 @@ window.loadMealTemplate = function(id) {
 window.openAddMeal = function(prefillData, editIndex) {
   const isEdit = editIndex !== undefined && editIndex !== null;
   const selectedType = prefillData?.type || 'extra';
+  const dayKey = isTrainingDay ? 'day_on' : 'day_off';
+  const planMeals = activeDiet?.[dayKey]?.meals || [];
+
+  const destHtml = !isEdit ? `
+    <div class="fg" style="margin-bottom:16px">
+      <label class="fl">📋 Destinazione Pasto</label>
+      <select class="fi" id="am-destination">
+        <option value="extra">Aggiungi come Extra / Fuori piano</option>
+        ${planMeals.map((pm, pmi) => `
+          <option value="${pmi}">Sostituisci: ${pm.label || pm.type} (${pm.kcal} kcal)</option>
+        `).join('')}
+      </select>
+    </div>` : '';
 
   const bg = document.createElement('div');
   bg.className = 'modal-bg';
@@ -1410,6 +1426,8 @@ window.openAddMeal = function(prefillData, editIndex) {
         <label class="fl">Nome pasto</label>
         <input type="text" class="fi" id="am-name" placeholder="Es. Snack, Extra proteine..." value="${prefillData?.name || ''}">
       </div>
+ 
+      ${destHtml}
  
       <div class="fg">
         <label class="fl">Ingredienti</label>
@@ -1509,9 +1527,31 @@ window.saveExtraMeal = async function(editIndex) {
   const fats    = parseFloat(document.getElementById('am-fats')?.value)    || 0;
   const type    = document.getElementById('am-type')?.value || 'extra';
   const ingredients = document.getElementById('am-ingredients')?.value?.trim() || '';
+  const destination = document.getElementById('am-destination')?.value || 'extra';
  
   if (!name)                       return showToast('Inserisci il nome del pasto', 'err');
   if (kcal === 0 && protein === 0) return showToast('Inserisci almeno le kcal', 'err');
+ 
+  if (!window.isServerLoaded) return;
+
+  if (destination !== 'extra') {
+    const targetMealIndex = parseInt(destination);
+    if (!logData.meals_overrides) logData.meals_overrides = {};
+    logData.meals_overrides[targetMealIndex] = {
+      kcal,
+      protein,
+      carbs,
+      fats,
+      items_text: name + (ingredients ? `: ${ingredients}` : '')
+    };
+    patchMealRow(targetMealIndex, kcal, protein, carbs, fats);
+    saveToLocal();
+    buildNutrition();
+    document.getElementById('add-meal-modal')?.remove();
+    showToast('✅ Pasto del piano sostituito con successo!');
+    buildMeals();
+    return;
+  }
  
   if (!logData.extra_meals) logData.extra_meals = [];
   

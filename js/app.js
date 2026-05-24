@@ -19,9 +19,8 @@ export function requireAuth() {
       if (user) {
         if (user.email) {
           const emailLower = user.email.toLowerCase();
-          try {
-            await setDoc(doc(db, 'users', emailLower), { email: emailLower }, { merge: true });
-          } catch(e) { console.warn('Poteva non essere possibile salvare il doc utente:', e); }
+          setDoc(doc(db, 'users', emailLower), { email: emailLower }, { merge: true })
+            .catch(e => console.warn('Poteva non essere possibile salvare il doc utente:', e));
         }
         resolve(user);
       } else {
