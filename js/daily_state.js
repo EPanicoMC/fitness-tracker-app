@@ -216,17 +216,22 @@ async function init() {
       window.isServerLoaded = true;
 
       // Async load friend data if present
-      if (appSettings?.friend_email && appSettings.friend_email !== loadedFriendEmail) {
-        loadedFriendEmail = appSettings.friend_email;
-        const fLogRef = doc(db, 'users', appSettings.friend_email, 'daily_logs', TODAY);
-        const fDietRef = collection(db, 'users', appSettings.friend_email, 'diet_plans');
-        loadSmart([fLogRef, fDietRef], (fSnaps) => {
-          const [fSnap, fDietSnap] = fSnaps;
-          if (fSnap.exists()) friendLogData = fSnap.data();
-          friendActiveDiet = fDietSnap.docs.find(d => d.data().active)?.data() || null;
-          buildNutrition();
-          buildMeals();
-        }).catch(() => {});
+      if (appSettings?.friend_email) {
+        const cleanFriendEmail = appSettings.friend_email.trim().toLowerCase();
+        if (cleanFriendEmail !== loadedFriendEmail) {
+          loadedFriendEmail = cleanFriendEmail;
+          const fLogRef = doc(db, 'users', cleanFriendEmail, 'daily_logs', TODAY);
+          const fDietRef = collection(db, 'users', cleanFriendEmail, 'diet_plans');
+          loadSmart([fLogRef, fDietRef], (fSnaps) => {
+            const [fSnap, fDietSnap] = fSnaps;
+            friendLogData = fSnap.exists() ? fSnap.data() : null;
+            friendActiveDiet = fDietSnap.docs.find(d => d.data().active)?.data() || null;
+            buildNutrition();
+            buildMeals();
+          }).catch((err) => {
+            console.warn('loadSmart friend fetch failed:', err);
+          });
+        }
       }
     }).then(() => {
       clearTimeout(fallbackTimer);
@@ -748,9 +753,9 @@ function buildMeals() {
   }
 
   let friendBannerHtml = '';
-  if (friendLogData && friendActiveDiet) {
+  if (friendLogData) {
     const fDayKey = friendLogData.is_training_day ? 'day_on' : 'day_off';
-    const fMeals = friendActiveDiet[fDayKey]?.meals || [];
+    const fMeals = friendActiveDiet ? (friendActiveDiet[fDayKey]?.meals || []) : [];
     
     let friendList = [];
     fMeals.forEach((fm, fi) => {
@@ -1422,7 +1427,6 @@ window.loadMealTemplate = function(id) {
 // ── Aggiungi pasto extra ───────────────────────────────────
 window.openAddMeal = function(prefillData, editIndex) {
   const isEdit = editIndex !== undefined && editIndex !== null;
-  const selectedType = prefillData?.type || 'extra';
   const dayKey = isTrainingDay ? 'day_on' : 'day_off';
   const planMeals = activeDiet?.[dayKey]?.meals || [];
 
@@ -1502,17 +1506,7 @@ window.openAddMeal = function(prefillData, editIndex) {
         </div>
       </div>
  
-      <div class="fg">
-        <label class="fl">Tipo pasto</label>
-        <select class="fi" id="am-type">
-          <option value="extra" ${selectedType === 'extra' ? 'selected' : ''}>Extra / Fuori piano</option>
-          <option value="colazione" ${selectedType === 'colazione' ? 'selected' : ''}>Colazione</option>
-          <option value="spuntino" ${selectedType === 'spuntino' ? 'selected' : ''}>Spuntino</option>
-          <option value="pranzo" ${selectedType === 'pranzo' ? 'selected' : ''}>Pranzo</option>
-          <option value="merenda" ${selectedType === 'merenda' ? 'selected' : ''}>Merenda</option>
-          <option value="cena" ${selectedType === 'cena' ? 'selected' : ''}>Cena</option>
-        </select>
-      </div>
+
  
       <div class="modal-btns" style="display:flex;flex-wrap:wrap;gap:8px">
         <button class="btn btn-flat btn-sm" onclick="document.getElementById('add-meal-modal').remove()">
@@ -1555,7 +1549,7 @@ window.saveExtraMeal = async function(editIndex) {
   const protein = parseFloat(document.getElementById('am-protein')?.value) || 0;
   const carbs   = parseFloat(document.getElementById('am-carbs')?.value)   || 0;
   const fats    = parseFloat(document.getElementById('am-fats')?.value)    || 0;
-  const type    = document.getElementById('am-type')?.value || 'extra';
+  const type    = 'extra';
   const ingredients = document.getElementById('am-ingredients')?.value?.trim() || '';
   const destination = document.getElementById('am-destination')?.value || 'extra';
  
