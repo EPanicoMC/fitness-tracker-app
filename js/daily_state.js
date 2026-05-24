@@ -8,6 +8,38 @@ import {
 import { calcMacrosFromText, analyzeFoodImageAI, generateSmartAdviceAI } from './gemini.js';
 
 const TODAY = getTodayString();
+
+const safeLocalStorage = {
+  getItem(key) {
+    try {
+      return localStorage.getItem(key);
+    } catch (e) {
+      return null;
+    }
+  },
+  setItem(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch (e) {
+      console.warn('safeLocalStorage.setItem error:', e);
+    }
+  },
+  removeItem(key) {
+    try {
+      localStorage.removeItem(key);
+    } catch (e) {
+      console.warn('safeLocalStorage.removeItem error:', e);
+    }
+  },
+  keys() {
+    try {
+      return Object.keys(localStorage);
+    } catch (e) {
+      return [];
+    }
+  }
+};
+
 let logData = {};
 let activeDiet = null;
 let activeProgram = null;
@@ -39,10 +71,10 @@ function saveToLocal() {
       day_override:    logData.day_override,
       last_updated:    logData.last_updated
     };
-    localStorage.setItem(key, JSON.stringify(payload));
-    Object.keys(localStorage)
+    safeLocalStorage.setItem(key, JSON.stringify(payload));
+    safeLocalStorage.keys()
       .filter(k => k.startsWith('fittracker_today_') && k !== key)
-      .forEach(k => localStorage.removeItem(k));
+      .forEach(k => safeLocalStorage.removeItem(k));
 
     // Debounced cloud sync — 1.5s after last change
     if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
@@ -55,7 +87,7 @@ function saveToLocal() {
 // ── Day rollover auto-save ─────────────────────────────────
 async function checkDayRollover() {
   const yesterday = getYesterdayString();
-  const yesterdayLS = localStorage.getItem('fittracker_today_' + yesterday);
+  const yesterdayLS = safeLocalStorage.getItem('fittracker_today_' + yesterday);
   if (!yesterdayLS) return;
   try {
     const data = JSON.parse(yesterdayLS);
@@ -75,7 +107,7 @@ async function checkDayRollover() {
       // Doc esiste ma la nota in localStorage potrebbe non essere stata sincronizzata
       await setDoc(doc(db, 'users', getUserId(), 'daily_logs', yesterday), { daily_note: data.daily_note }, { merge: true });
     }
-    localStorage.removeItem('fittracker_today_' + yesterday);
+    safeLocalStorage.removeItem('fittracker_today_' + yesterday);
   } catch(e) {
     console.warn('Errore auto-save yesterday:', e);
   }
@@ -106,7 +138,7 @@ async function init() {
 
       // Merge localStorage (higher priority for today's working state if local is newer)
       const lsKey = 'fittracker_today_' + getTodayString();
-      const cached = localStorage.getItem(lsKey);
+      const cached = safeLocalStorage.getItem(lsKey);
       let local = null;
       if (cached) {
         try {
@@ -136,7 +168,7 @@ async function init() {
               day_override:    logData.day_override,
               last_updated:    firestoreTime
             };
-            localStorage.setItem(lsKey, JSON.stringify(payload));
+            safeLocalStorage.setItem(lsKey, JSON.stringify(payload));
           }
         } catch(e) {}
       }
@@ -181,7 +213,7 @@ async function init() {
       return;
     }
     if (getTodayString() !== TODAY) { window.location.reload(); return; }
-    const cached = localStorage.getItem('fittracker_today_' + TODAY);
+    const cached = safeLocalStorage.getItem('fittracker_today_' + TODAY);
     if (cached) {
       try {
         const local = JSON.parse(cached);
@@ -1759,7 +1791,7 @@ async function buildSmartAdvisor() {
 
   const partOfDay = getPartOfDay();
   const cachedKey = `fittracker_advice_${TODAY}_${partOfDay}`;
-  const cachedText = localStorage.getItem(cachedKey);
+  const cachedText = safeLocalStorage.getItem(cachedKey);
 
   if (cachedText) {
     renderSmartAdvisorContent(cachedText);
@@ -1859,7 +1891,7 @@ window.refreshSmartAdvisor = async function(silent = false) {
 
     if (r.success && r.advice) {
       const cachedKey = `fittracker_advice_${TODAY}_${partOfDay}`;
-      localStorage.setItem(cachedKey, r.advice);
+      safeLocalStorage.setItem(cachedKey, r.advice);
       renderSmartAdvisorContent(r.advice);
     } else {
       if (!silent && r.error && r.error.includes('Key')) {
@@ -1873,7 +1905,7 @@ window.refreshSmartAdvisor = async function(silent = false) {
         partOfDay
       });
       const cachedKey = `fittracker_advice_${TODAY}_${partOfDay}`;
-      localStorage.setItem(cachedKey, localAdvice);
+      safeLocalStorage.setItem(cachedKey, localAdvice);
       renderSmartAdvisorContent(localAdvice);
     }
   } catch(e) {
