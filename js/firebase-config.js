@@ -57,7 +57,7 @@ const storage = getStorage(app);
 
 
 
-export function getUserId() { return auth?.currentUser?.email; }
+export function getUserId() { return auth?.currentUser?.email?.toLowerCase(); }
 export {
   app,
   db,

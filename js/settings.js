@@ -86,7 +86,7 @@ window.saveSettings = async function() {
       fat_target:    parseFloat(document.getElementById('s-ftarget').value) || null
     },
     steps_goal: parseInt(document.getElementById('s-steps-goal').value) || null,
-    friend_email: document.getElementById('s-friend-email').value || null
+    friend_email: document.getElementById('s-friend-email').value?.trim().toLowerCase() || null
   };
   try {
     await setDoc(doc(db, 'users', getUserId(), 'settings', 'app'), data, { merge: true });
