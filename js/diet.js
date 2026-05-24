@@ -1,4 +1,4 @@
-import { requireAuth } from './app.js';
+import { requireAuth, loadSmart } from './app.js';
 import {
   db, getUserId, collection, doc, getDocs, getDocsFromCache, addDoc, setDoc, deleteDoc
 } from './firebase-config.js';
@@ -54,24 +54,16 @@ async function loadDiets() {
     renderList();
   };
 
-  let cachedSnap = null;
-  try {
-    cachedSnap = await getDocsFromCache(coll);
-    await processAndRender(cachedSnap);
-  } catch (e) {
-    el.innerHTML = '<div class="spin"></div>';
-  }
+  el.innerHTML = '<div class="spin"></div>';
 
   try {
-    const serverSnap = await getDocs(coll);
-    if (!cachedSnap || JSON.stringify(cachedSnap.docs.map(d => d.data())) !== JSON.stringify(serverSnap.docs.map(d => d.data()))) {
-      await processAndRender(serverSnap);
-    }
+    await loadSmart([coll], async (snaps) => {
+      const [snap] = snaps;
+      await processAndRender(snap);
+    });
   } catch (e) {
-    if (!cachedSnap) {
-      console.error('loadDiets error:', e);
-      el.innerHTML = `<div class="empty"><span class="ei">⚠️</span><p>Errore caricamento piani.<br><button class="btn btn-ghost btn-sm" onclick="window.loadDiets()">↺ Riprova</button></p></div>`;
-    }
+    console.error('loadDiets error:', e);
+    el.innerHTML = `<div class="empty"><span class="ei">⚠️</span><p>Errore caricamento piani.<br><button class="btn btn-ghost btn-sm" onclick="window.loadDiets()">↺ Riprova</button></p></div>`;
   }
 }
 window.loadDiets = loadDiets;

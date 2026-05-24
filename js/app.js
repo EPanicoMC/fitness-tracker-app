@@ -303,69 +303,64 @@ export async function cleanOldLogs(db, userId, monthsToKeep=12) {
   }
 }
 
-export async function loadSmart(refs, callback) {
-  let cachedSnaps = null;
+async function fetchSmart(ref) {
+  const isDoc = ref.type === 'document' || (ref.path && ref.path.split('/').length % 2 === 0);
   try {
-    cachedSnaps = await Promise.all(refs.map(ref => {
-      if (ref.type === 'document' || (ref.path && ref.path.split('/').length % 2 === 0)) {
-        return getDocFromCache(ref);
-      } else {
-        return getDocsFromCache(ref);
-      }
-    }));
-    callback(cachedSnaps, false);
+    if (isDoc) {
+      return await getDocFromCache(ref);
+    } else {
+      return await getDocsFromCache(ref);
+    }
   } catch (cacheError) {
-    // Ignore cache error, fallback to server but invoke callback with mock empty snapshots to prevent infinite loading spinner
-    const mockSnaps = refs.map(ref => {
-      const isDoc = ref.type === 'document' || (ref.path && ref.path.split('/').length % 2 === 0);
-      if (isDoc) {
-        return {
-          exists: () => false,
-          data: () => ({}),
-          id: ref.id || (ref.path ? ref.path.split('/').pop() : '')
-        };
-      } else {
-        return {
-          empty: true,
-          docs: []
-        };
-      }
-    });
+    if (isDoc) {
+      return await getDoc(ref);
+    } else {
+      return await getDocs(ref);
+    }
+  }
+}
+
+export async function loadSmart(refs, callback) {
+  let snaps;
+  try {
+    snaps = await Promise.all(refs.map(ref => fetchSmart(ref)));
+    callback(snaps, false);
+  } catch (err) {
+    console.warn("loadSmart: cache-first fetch failed, falling back to server only", err);
     try {
-      callback(mockSnaps, true);
-    } catch (cbErr) {
-      console.warn('Callback error on mock snaps:', cbErr);
+      snaps = await Promise.all(refs.map(ref => {
+        const isDoc = ref.type === 'document' || (ref.path && ref.path.split('/').length % 2 === 0);
+        return isDoc ? getDoc(ref) : getDocs(ref);
+      }));
+      callback(snaps, false);
+    } catch (serverErr) {
+      console.error("loadSmart critical failure:", serverErr);
+      throw serverErr;
     }
   }
 
+  // Background server refresh
   try {
     const serverSnaps = await Promise.all(refs.map(ref => {
-      if (ref.type === 'document' || (ref.path && ref.path.split('/').length % 2 === 0)) {
-        return getDoc(ref);
-      } else {
-        return getDocs(ref);
-      }
+      const isDoc = ref.type === 'document' || (ref.path && ref.path.split('/').length % 2 === 0);
+      return isDoc ? getDoc(ref) : getDocs(ref);
     }));
-    
+
     let changed = false;
-    if (!cachedSnaps) {
-      changed = true;
-    } else {
-      for (let i = 0; i < refs.length; i++) {
-        const cData = cachedSnaps[i].docs ? cachedSnaps[i].docs.map(d => d.data()) : cachedSnaps[i].data();
-        const sData = serverSnaps[i].docs ? serverSnaps[i].docs.map(d => d.data()) : serverSnaps[i].data();
-        if (JSON.stringify(cData) !== JSON.stringify(sData)) {
-          changed = true;
-          break;
-        }
+    for (let i = 0; i < refs.length; i++) {
+      const cData = snaps[i].docs ? snaps[i].docs.map(d => d.data()) : snaps[i].data();
+      const sData = serverSnaps[i].docs ? serverSnaps[i].docs.map(d => d.data()) : serverSnaps[i].data();
+      if (JSON.stringify(cData) !== JSON.stringify(sData)) {
+        changed = true;
+        break;
       }
     }
-    
+
     if (changed) {
+      console.log("loadSmart: Background data changed, invoking callback");
       callback(serverSnaps, false);
     }
   } catch (serverError) {
     console.warn('Background server load failed:', serverError);
-    if (!cachedSnaps) throw serverError;
   }
 }

@@ -49,8 +49,9 @@ let isTrainingDay = false;
 let mealStates = [];
 let friendLogData = null;
 let friendActiveDiet = null;
+let loadedFriendEmail = null;
 window.isServerLoaded = false;
-window.isMockData = true;
+window.isMockData = false;
 
 let cloudSyncTimer = null;
 function saveToLocal() {
@@ -153,17 +154,17 @@ async function init() {
     ];
 
     window.isServerLoaded = false;
-    window.isMockData = true;
+    window.isMockData = false;
     const fallbackTimer = setTimeout(() => {
-      if (!window.isServerLoaded) {
-        console.log("Firestore server load timed out, forcing isServerLoaded = true");
-        window.isServerLoaded = true;
-        buildSmartAdvisor();
-      }
+       if (!window.isServerLoaded) {
+         console.log("Firestore server load timed out, forcing isServerLoaded = true");
+         window.isServerLoaded = true;
+         buildSmartAdvisor();
+       }
     }, 1500);
 
     loadSmart(refs, (snaps, isMock) => {
-      window.isMockData = !!isMock;
+      window.isMockData = false;
       const [logSnap, progSnap, dietSnap, settSnap, checksSnap] = snaps;
       logData = logSnap.exists() ? logSnap.data() : {};
       activeProgram = progSnap.docs.find(d => d.data().active)?.data() || null;
@@ -212,9 +213,11 @@ async function init() {
       }
 
       renderDailyStateUI(local);
+      window.isServerLoaded = true;
 
       // Async load friend data if present
-      if (appSettings?.friend_email) {
+      if (appSettings?.friend_email && appSettings.friend_email !== loadedFriendEmail) {
+        loadedFriendEmail = appSettings.friend_email;
         const fLogRef = doc(db, 'users', appSettings.friend_email, 'daily_logs', TODAY);
         const fDietRef = collection(db, 'users', appSettings.friend_email, 'diet_plans');
         loadSmart([fLogRef, fDietRef], (fSnaps) => {
