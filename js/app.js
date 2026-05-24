@@ -270,3 +270,52 @@ export async function cleanOldLogs(db, userId, monthsToKeep=12) {
     console.warn('cleanOldLogs error:', e);
   }
 }
+
+export async function loadSmart(refs, callback) {
+  let cachedSnaps = null;
+  try {
+    const { getDocFromCache, getDocsFromCache } = await import('./firebase-config.js');
+    cachedSnaps = await Promise.all(refs.map(ref => {
+      if (ref.type === 'document' || (ref.path && ref.path.split('/').length % 2 === 0)) {
+        return getDocFromCache(ref);
+      } else {
+        return getDocsFromCache(ref);
+      }
+    }));
+    callback(cachedSnaps);
+  } catch (cacheError) {
+    // Ignore cache error, fallback to server
+  }
+
+  try {
+    const { getDoc, getDocs } = await import('./firebase-config.js');
+    const serverSnaps = await Promise.all(refs.map(ref => {
+      if (ref.type === 'document' || (ref.path && ref.path.split('/').length % 2 === 0)) {
+        return getDoc(ref);
+      } else {
+        return getDocs(ref);
+      }
+    }));
+    
+    let changed = false;
+    if (!cachedSnaps) {
+      changed = true;
+    } else {
+      for (let i = 0; i < refs.length; i++) {
+        const cData = cachedSnaps[i].docs ? cachedSnaps[i].docs.map(d => d.data()) : cachedSnaps[i].data();
+        const sData = serverSnaps[i].docs ? serverSnaps[i].docs.map(d => d.data()) : serverSnaps[i].data();
+        if (JSON.stringify(cData) !== JSON.stringify(sData)) {
+          changed = true;
+          break;
+        }
+      }
+    }
+    
+    if (changed) {
+      callback(serverSnaps);
+    }
+  } catch (serverError) {
+    console.warn('Background server load failed:', serverError);
+    if (!cachedSnaps) throw serverError;
+  }
+}

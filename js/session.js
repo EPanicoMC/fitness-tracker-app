@@ -1,6 +1,6 @@
-import { requireAuth } from './app.js';
+import { requireAuth, loadSmart } from './app.js';
 import {
-  db, getUserId, collection, doc, getDoc, getDocs, setDoc, query, orderBy, limit
+  db, getUserId, collection, doc, getDoc, getDocFromCache, getDocs, getDocsFromCache, setDoc, query, orderBy, limit
 } from './firebase-config.js';
 import { getTodayString, getDayOfWeek, showToast, showModal, fmtTimer, DAYS_IT, DAY_ORDER } from './app.js';
 
@@ -67,56 +67,64 @@ async function requestNotifPermission() {
 
 // ── Load select screen ─────────────────────────────────────
 async function loadSessionSelect() {
-  const [progSnap, logsSnap] = await Promise.all([
-    getDocs(collection(db, 'users', getUserId(), 'programs')),
-    getDocs(query(collection(db, 'users', getUserId(), 'daily_logs'), orderBy('date', 'desc'), limit(30)))
-  ]);
+  const refs = [
+    collection(db, 'users', getUserId(), 'programs'),
+    query(collection(db, 'users', getUserId(), 'daily_logs'), orderBy('date', 'desc'), limit(30))
+  ];
 
-  const activeDoc = progSnap.docs.find(d => d.data().active);
-  if (!activeDoc) {
-    document.getElementById('all-sessions').innerHTML =
-      '<div class="empty"><span class="ei">💪</span><p>Nessun programma attivo.<br><a href="programs.html" style="color:var(--accent)">Crea un programma</a></p></div>';
-    return;
+  try {
+    await loadSmart(refs, (snaps) => {
+      const [progSnap, logsSnap] = snaps;
+      const activeDoc = progSnap.docs.find(d => d.data().active);
+      if (!activeDoc) {
+        document.getElementById('all-sessions').innerHTML =
+          '<div class="empty"><span class="ei">💪</span><p>Nessun programma attivo.<br><a href="programs.html" style="color:var(--accent)">Crea un programma</a></p></div>';
+        return;
+      }
+      programData = { id: activeDoc.id, ...activeDoc.data() };
+
+      const dow       = getDayOfWeek(TODAY);
+      const todayLog  = logsSnap.docs.find(d => d.data().date === TODAY)?.data();
+      const lastDone  = todayLog?.workout?.completed
+        ? todayLog
+        : logsSnap.docs.find(d => d.data().date !== TODAY && d.data().workout?.completed)?.data();
+
+      // Suggested session: next after last done
+      const days = DAY_ORDER.filter(d => programData.schedule?.[d]);
+      let suggested = days.find(d => d === dow) || days[0];
+      if (lastDone?.workout?.session_day) {
+        const lastIdx = days.indexOf(lastDone.workout.session_day);
+        suggested = days[(lastIdx + 1) % days.length] || days[0];
+      }
+
+      if (suggested && programData.schedule[suggested]) {
+        const s = programData.schedule[suggested];
+        document.getElementById('sug-name').textContent = s.name;
+        document.getElementById('sug-meta').textContent =
+          `${DAYS_IT[suggested]} · ${s.exercises?.length || 0} esercizi${s.cardio ? ' + ' + s.cardio.type : ''}`;
+        document.getElementById('suggested-card').style.display = 'block';
+        document.getElementById('sug-btn').onclick = () => startWithSession(suggested);
+      }
+
+      // All sessions list
+      const listEl = document.getElementById('all-sessions');
+      listEl.innerHTML = days.map(d => {
+        const s = programData.schedule[d];
+        const isToday = d === dow;
+        return `
+          <div class="ss-card ${isToday ? 'card-o' : ''}" onclick="startWithSession('${d}')">
+            <div>
+              <div class="ss-name">${s.name}</div>
+              <div class="ss-meta">${DAYS_IT[d]}${s.time ? ' · ' + s.time : ''} · ${s.exercises?.length||0} esercizi${s.cardio ? ' · 🏃 ' + s.cardio.type : ''}</div>
+            </div>
+            <button class="btn btn-o btn-sm" style="flex-shrink:0">▶️</button>
+          </div>`;
+      }).join('');
+    });
+  } catch (e) {
+    console.error('loadSessionSelect error:', e);
+    showToast('Errore caricamento sessioni dal cloud', 'err');
   }
-  programData = { id: activeDoc.id, ...activeDoc.data() };
-
-  const dow       = getDayOfWeek(TODAY);
-  const todayLog  = logsSnap.docs.find(d => d.data().date === TODAY)?.data();
-  const lastDone  = todayLog?.workout?.completed
-    ? todayLog
-    : logsSnap.docs.find(d => d.data().date !== TODAY && d.data().workout?.completed)?.data();
-
-  // Suggested session: next after last done
-  const days = DAY_ORDER.filter(d => programData.schedule?.[d]);
-  let suggested = days.find(d => d === dow) || days[0];
-  if (lastDone?.workout?.session_day) {
-    const lastIdx = days.indexOf(lastDone.workout.session_day);
-    suggested = days[(lastIdx + 1) % days.length] || days[0];
-  }
-
-  if (suggested && programData.schedule[suggested]) {
-    const s = programData.schedule[suggested];
-    document.getElementById('sug-name').textContent = s.name;
-    document.getElementById('sug-meta').textContent =
-      `${DAYS_IT[suggested]} · ${s.exercises?.length || 0} esercizi${s.cardio ? ' + ' + s.cardio.type : ''}`;
-    document.getElementById('suggested-card').style.display = 'block';
-    document.getElementById('sug-btn').onclick = () => startWithSession(suggested);
-  }
-
-  // All sessions list
-  const listEl = document.getElementById('all-sessions');
-  listEl.innerHTML = days.map(d => {
-    const s = programData.schedule[d];
-    const isToday = d === dow;
-    return `
-      <div class="ss-card ${isToday ? 'card-o' : ''}" onclick="startWithSession('${d}')">
-        <div>
-          <div class="ss-name">${s.name}</div>
-          <div class="ss-meta">${DAYS_IT[d]}${s.time ? ' · ' + s.time : ''} · ${s.exercises?.length||0} esercizi${s.cardio ? ' · 🏃 ' + s.cardio.type : ''}</div>
-        </div>
-        <button class="btn btn-o btn-sm" style="flex-shrink:0">▶️</button>
-      </div>`;
-  }).join('');
 }
 
 // ── Start session ──────────────────────────────────────────
@@ -126,14 +134,26 @@ window.startWithSession = async function(dayKey) {
 
   // Load last session for weight pre-fill (from last_sessions first, then daily_logs)
   let prevLog = null;
+  const lastDocRef = doc(db, 'users', getUserId(), 'last_sessions', dayKey);
+  const dailyLogsQuery = query(collection(db, 'users', getUserId(), 'daily_logs'), orderBy('date', 'desc'), limit(20));
+
   try {
-    const lastSnap = await getDoc(doc(db, 'users', getUserId(), 'last_sessions', dayKey));
+    let lastSnap;
+    try {
+      lastSnap = await getDocFromCache(lastDocRef);
+    } catch (e) {
+      lastSnap = await getDoc(lastDocRef);
+    }
+
     if (lastSnap.exists()) {
       prevLog = { workout: { exercises: lastSnap.data().exercises } };
     } else {
-      const snap = await getDocs(
-        query(collection(db, 'users', getUserId(), 'daily_logs'), orderBy('date', 'desc'), limit(20))
-      );
+      let snap;
+      try {
+        snap = await getDocsFromCache(dailyLogsQuery);
+      } catch (e) {
+        snap = await getDocs(dailyLogsQuery);
+      }
       for (const d of snap.docs) {
         const ld = d.data();
         if (ld.date !== TODAY && ld.workout?.session_day === dayKey && ld.workout?.exercises?.length) {
@@ -141,7 +161,9 @@ window.startWithSession = async function(dayKey) {
         }
       }
     }
-  } catch(e) {}
+  } catch(e) {
+    console.warn('Pre-fill load error:', e);
+  }
 
   buildExState(session, dayKey, prevLog);
   sessionData = { dayKey, name: session.name, cardio: session.cardio || null };

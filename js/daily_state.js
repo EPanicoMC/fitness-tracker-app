@@ -1,6 +1,6 @@
-import { requireAuth } from './app.js';
+import { requireAuth, loadSmart } from './app.js';
 import {
-  db, getUserId, doc, getDoc, setDoc, getDocs, collection, query, orderBy, limit
+  db, getUserId, doc, getDoc, getDocFromCache, getDocsFromCache, setDoc, getDocs, collection, query, orderBy, limit
 } from './firebase-config.js';
 import {
   getTodayString, getYesterdayString, getDayOfWeek, formatDateIT, formatDateShort, addDays, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER, cleanOldLogs, calcFitScore, calcSmartScore
@@ -88,19 +88,73 @@ async function init() {
   await checkDayRollover();
 
   try {
-    const [logSnap, progSnap, dietSnap, settSnap, checksSnap] = await Promise.all([
-      getDoc(doc(db, 'users', getUserId(), 'daily_logs', TODAY)),
-      getDocs(collection(db, 'users', getUserId(), 'programs')),
-      getDocs(collection(db, 'users', getUserId(), 'diet_plans')),
-      getDoc(doc(db, 'users', getUserId(), 'settings', 'app')),
-      getDocs(query(collection(db, 'users', getUserId(), 'checks'), orderBy('date', 'desc'), limit(1)))
-    ]);
+    const refs = [
+      doc(db, 'users', getUserId(), 'daily_logs', TODAY),
+      collection(db, 'users', getUserId(), 'programs'),
+      collection(db, 'users', getUserId(), 'diet_plans'),
+      doc(db, 'users', getUserId(), 'settings', 'app'),
+      query(collection(db, 'users', getUserId(), 'checks'), orderBy('date', 'desc'), limit(1))
+    ];
 
-    logData = logSnap.exists() ? logSnap.data() : {};
-    activeProgram = progSnap.docs.find(d => d.data().active)?.data() || null;
-    activeDiet    = dietSnap.docs.find(d => d.data().active)?.data() || null;
-    appSettings   = settSnap.exists() ? settSnap.data() : {};
-    latestCheck   = !checksSnap.empty ? checksSnap.docs[0].data() : null;
+    await loadSmart(refs, (snaps) => {
+      const [logSnap, progSnap, dietSnap, settSnap, checksSnap] = snaps;
+      logData = logSnap.exists() ? logSnap.data() : {};
+      activeProgram = progSnap.docs.find(d => d.data().active)?.data() || null;
+      activeDiet    = dietSnap.docs.find(d => d.data().active)?.data() || null;
+      appSettings   = settSnap.exists() ? settSnap.data() : {};
+      latestCheck   = !checksSnap.empty ? checksSnap.docs[0].data() : null;
+
+      // Merge localStorage (higher priority for today's working state if local is newer)
+      const lsKey = 'fittracker_today_' + getTodayString();
+      const cached = localStorage.getItem(lsKey);
+      let local = null;
+      if (cached) {
+        try {
+          local = JSON.parse(cached);
+          const localTime = local.last_updated || 0;
+          const firestoreTime = logData.last_updated || 0;
+
+          if (localTime > firestoreTime) {
+            logData.meals_overrides = local.meals_overrides || {};
+            logData.meals_state     = local.meals_state     || {};
+            logData.extra_meals     = local.extra_meals     || [];
+            if (local.steps != null)        logData.steps        = local.steps;
+            if (local.burned_kcal != null)  logData.burned_kcal  = local.burned_kcal;
+            if (local.daily_note != null)   logData.daily_note   = local.daily_note;
+            if (local.day_override != null) logData.day_override = local.day_override;
+            logData.last_updated = localTime;
+          } else {
+            // Local is outdated. Update local storage to match the newer Firestore data
+            const payload = {
+              meals_state:     logData.meals_state     || {},
+              meals_overrides: logData.meals_overrides || {},
+              extra_meals:     logData.extra_meals     || [],
+              steps:           logData.steps           || null,
+              burned_kcal:     logData.burned_kcal     || null,
+              daily_note:      logData.daily_note      || '',
+              is_training_day: isTrainingDay,
+              day_override:    logData.day_override,
+              last_updated:    firestoreTime
+            };
+            localStorage.setItem(lsKey, JSON.stringify(payload));
+          }
+        } catch(e) {}
+      }
+
+      renderDailyStateUI(local);
+
+      // Async load friend data if present
+      if (appSettings?.friend_email) {
+        const fLogRef = doc(db, 'users', appSettings.friend_email, 'daily_logs', TODAY);
+        const fDietRef = collection(db, 'users', appSettings.friend_email, 'diet_plans');
+        loadSmart([fLogRef, fDietRef], (fSnaps) => {
+          const [fSnap, fDietSnap] = fSnaps;
+          if (fSnap.exists()) friendLogData = fSnap.data();
+          friendActiveDiet = fDietSnap.docs.find(d => d.data().active)?.data() || null;
+          buildNutrition();
+        }).catch(() => {});
+      }
+    });
   } catch (e) {
     console.error('DIAGNOSTIC: Error fetching DB data:', e);
     showToast('Errore nel caricamento dati dal cloud', 'err');
@@ -110,55 +164,47 @@ async function init() {
     activeDiet = null;
     appSettings = {};
     latestCheck = null;
+    renderDailyStateUI(null);
   }
 
-  if (appSettings?.friend_email) {
-    try {
-      const fSnap = await getDoc(doc(db, 'users', appSettings.friend_email, 'daily_logs', TODAY));
-      if (fSnap.exists()) friendLogData = fSnap.data();
-
-      const fDietSnap = await getDocs(collection(db, 'users', appSettings.friend_email, 'diet_plans'));
-      friendActiveDiet = fDietSnap.docs.find(d => d.data().active)?.data() || null;
-    } catch(e) { console.warn('Errore friend log:', e); }
+  if (new Date().getDate() === 1) {
+    cleanOldLogs(db, getUserId());
   }
 
-  // Merge localStorage (higher priority for today's working state if local is newer)
-  const lsKey = 'fittracker_today_' + getTodayString();
-  const cached = localStorage.getItem(lsKey);
-  let local = null;
-  if (cached) {
-    try {
-      local = JSON.parse(cached);
-      const localTime = local.last_updated || 0;
-      const firestoreTime = logData.last_updated || 0;
-
-      if (localTime > firestoreTime) {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      // Pagina va in background/navigazione: forza sync immediato
+      const nf = document.getElementById('note-in');
+      if (nf) logData.daily_note = nf.value;
+      saveToLocal();
+      syncToFirebase();
+      return;
+    }
+    if (getTodayString() !== TODAY) { window.location.reload(); return; }
+    const cached = localStorage.getItem('fittracker_today_' + TODAY);
+    if (cached) {
+      try {
+        const local = JSON.parse(cached);
         logData.meals_overrides = local.meals_overrides || {};
         logData.meals_state     = local.meals_state     || {};
         logData.extra_meals     = local.extra_meals     || [];
-        if (local.steps != null)        logData.steps        = local.steps;
-        if (local.burned_kcal != null)  logData.burned_kcal  = local.burned_kcal;
-        if (local.daily_note != null)   logData.daily_note   = local.daily_note;
-        if (local.day_override != null) logData.day_override = local.day_override;
-        logData.last_updated = localTime;
-      } else {
-        // Local is outdated. Update local storage to match the newer Firestore data
-        const payload = {
-          meals_state:     logData.meals_state     || {},
-          meals_overrides: logData.meals_overrides || {},
-          extra_meals:     logData.extra_meals     || [],
-          steps:           logData.steps           || null,
-          burned_kcal:     logData.burned_kcal     || null,
-          daily_note:      logData.daily_note      || '',
-          is_training_day: isTrainingDay,
-          day_override:    logData.day_override,
-          last_updated:    firestoreTime
-        };
-        localStorage.setItem(lsKey, JSON.stringify(payload));
-      }
-    } catch(e) {}
-  }
+        if (local.steps != null && local.steps > (logData.steps || 0))       logData.steps       = local.steps;
+        if (local.burned_kcal != null && local.burned_kcal > (logData.burned_kcal || 0)) logData.burned_kcal = local.burned_kcal;
+        if (local.daily_note != null)  logData.daily_note  = local.daily_note;
+      } catch(e) {}
+    }
+    buildNutrition(); buildMeals(); buildWorkout(); buildStats(); buildFitScore();
+  });
 
+  window.addEventListener('pagehide', () => {
+    const nf = document.getElementById('note-in');
+    if (nf) logData.daily_note = nf.value;
+    saveToLocal();
+    syncToFirebase();
+  });
+}
+
+function renderDailyStateUI(local) {
   // Align DOM inputs with loaded variables immediately to prevent overwrite on sync
   const sfInput = document.getElementById('steps-in');
   if (sfInput) sfInput.value = logData.steps || '';
@@ -191,7 +237,7 @@ async function init() {
     }
     if (updated) {
       saveToLocal();
-      await syncToFirebase();
+      syncToFirebase();
       showToast('🍎 Dati Apple Health sincronizzati con successo! 👟');
       const cleanUrl = window.location.origin + window.location.pathname;
       window.history.replaceState({}, document.title, cleanUrl);
@@ -235,57 +281,22 @@ async function init() {
   buildFitScore();
   buildSmartAdvisor();
 
-  if (new Date().getDate() === 1) {
-    cleanOldLogs(db, getUserId());
-  }
-
   checkYesterdayLog();
-
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') {
-      // Pagina va in background/navigazione: forza sync immediato
-      const nf = document.getElementById('note-in');
-      if (nf) logData.daily_note = nf.value;
-      saveToLocal();
-      syncToFirebase();
-      return;
-    }
-    if (getTodayString() !== TODAY) { window.location.reload(); return; }
-    const cached = localStorage.getItem('fittracker_today_' + TODAY);
-    if (cached) {
-      try {
-        const local = JSON.parse(cached);
-        logData.meals_overrides = local.meals_overrides || {};
-        logData.meals_state     = local.meals_state     || {};
-        logData.extra_meals     = local.extra_meals     || [];
-        if (local.steps != null && local.steps > (logData.steps || 0))       logData.steps       = local.steps;
-        if (local.burned_kcal != null && local.burned_kcal > (logData.burned_kcal || 0)) logData.burned_kcal = local.burned_kcal;
-        if (local.daily_note != null)  logData.daily_note  = local.daily_note;
-      } catch(e) {}
-    }
-    buildNutrition(); buildMeals(); buildWorkout(); buildStats(); buildFitScore();
-  });
-
-  window.addEventListener('pagehide', () => {
-    const nf = document.getElementById('note-in');
-    if (nf) logData.daily_note = nf.value;
-    saveToLocal();
-    syncToFirebase();
-  });
 }
 
 // ── Streak box: show weekly workout count ──────────────────────
 async function buildStreak() {
   const box = document.getElementById('streak-box');
   if (!box) return;
-  try {
-    const snap = await getDocs(query(
-      collection(db, 'users', getUserId(), 'daily_logs'),
-      orderBy('date', 'desc'),
-      limit(14)
-    ));
+  
+  const q = query(
+    collection(db, 'users', getUserId(), 'daily_logs'),
+    orderBy('date', 'desc'),
+    limit(14)
+  );
+
+  const render = (snap) => {
     const logs = snap.docs.map(d => d.data());
-    // Count training days completed in the last 7 days
     const weekAgo = new Date(TODAY + 'T12:00:00');
     weekAgo.setDate(weekAgo.getDate() - 6);
     const weekAgoStr = weekAgo.toISOString().split('T')[0];
@@ -298,9 +309,18 @@ async function buildStreak() {
     } else {
       box.innerHTML = '';
     }
-  } catch(e) {
-    const fallback = logData.streak || 0;
-    if (fallback) box.innerHTML = `<div class="streak">🔥 ${fallback} giorni</div>`;
+  };
+
+  try {
+    const cachedSnap = await getDocsFromCache(q);
+    render(cachedSnap);
+  } catch (e) {}
+
+  try {
+    const serverSnap = await getDocs(q);
+    render(serverSnap);
+  } catch (e) {
+    console.warn('buildStreak error:', e);
   }
 }
 
@@ -1153,8 +1173,24 @@ window.saveDay = async function() {
 // ── Recupero giorni passati ────────────────────────────────
 async function checkYesterdayLog() {
   const yesterday = getYesterdayString();
-  const snap = await getDoc(doc(db, 'users', getUserId(), 'daily_logs', yesterday));
-  if (snap.exists()) return;
+  let snap;
+  try {
+    snap = await getDocFromCache(doc(db, 'users', getUserId(), 'daily_logs', yesterday));
+  } catch (e) {
+    try {
+      snap = await getDoc(doc(db, 'users', getUserId(), 'daily_logs', yesterday));
+    } catch (err) {
+      console.warn('checkYesterdayLog error:', err);
+      return;
+    }
+  }
+  if (snap && snap.exists()) {
+    const banner = document.querySelector('[data-yesterday-banner]');
+    if (banner) banner.remove();
+    return;
+  }
+
+  if (document.querySelector('[data-yesterday-banner]')) return;
 
   const banner = document.createElement('div');
   banner.setAttribute('data-yesterday-banner', '1');

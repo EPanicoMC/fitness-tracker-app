@@ -1,4 +1,4 @@
-const CACHE = 'ft-v41';
+const CACHE = 'ft-v42';
 const BASE = self.location.pathname.substring(0, self.location.pathname.lastIndexOf('/') + 1);
 const FILES = [
   '',
@@ -46,7 +46,7 @@ self.addEventListener('message', event => {
     restTimerId = setTimeout(() => {
       self.registration.showNotification('⚡ Recupero terminato!', {
         body: 'Pronti per la prossima serie? 💪',
-        icon: '/fitness-tracker-app/icon.svg',
+        icon: BASE + 'icon.svg',
         vibrate: [200, 100, 200],
         tag: 'rest-timer',
         renotify: true
@@ -88,7 +88,7 @@ self.addEventListener('fetch', e => {
           caches.open(CACHE).then(c => c.put(e.request, clone));
         }
         return res;
-      }).catch(() => caches.match('/fitness-tracker-app/index.html'));
+      }).catch(() => caches.match(BASE + 'index.html'));
     })
   );
 });

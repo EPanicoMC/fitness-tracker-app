@@ -1,6 +1,6 @@
-import { requireAuth } from './app.js';
+import { requireAuth, loadSmart } from './app.js';
 import {
-  db, getUserId, collection, doc, getDoc, getDocs, setDoc, deleteField, query, where, orderBy, limit
+  db, getUserId, collection, doc, getDoc, getDocFromCache, getDocs, getDocsFromCache, setDoc, deleteField, query, where, orderBy, limit
 } from './firebase-config.js';
 import { getTodayString, getDayOfWeek, formatDateIT, formatDateShort, showToast, DAYS_IT, DAY_ORDER } from './app.js';
 import { generateWeeklyCoachReportAI, calcMacrosFromText, analyzeFoodImageAI } from './gemini.js';
@@ -15,31 +15,39 @@ let selectedDate = null;
 let settingsData = null;
 
 async function init() {
-  const [progSnap, logsSnap, settSnap, dietSnap] = await Promise.all([
-    getDocs(collection(db, 'users', getUserId(), 'programs')),
-    getDocs(query(
+  const refs = [
+    collection(db, 'users', getUserId(), 'programs'),
+    query(
       collection(db, 'users', getUserId(), 'daily_logs'),
       orderBy('date', 'desc'),
       limit(60)
-    )),
-    getDoc(doc(db, 'users', getUserId(), 'settings', 'app')),
-    getDocs(collection(db, 'users', getUserId(), 'diet_plans'))
-  ]);
+    ),
+    doc(db, 'users', getUserId(), 'settings', 'app'),
+    collection(db, 'users', getUserId(), 'diet_plans')
+  ];
 
-  const activeDoc = progSnap.docs.find(d => d.data().active);
-  if (activeDoc) programData = activeDoc.data();
-  settingsData = settSnap.exists() ? settSnap.data() : {};
-  _dietPlanCache = dietSnap.docs.find(d => d.data().active)?.data() || null;
+  try {
+    await loadSmart(refs, (snaps) => {
+      const [progSnap, logsSnap, settSnap, dietSnap] = snaps;
+      const activeDoc = progSnap.docs.find(d => d.data().active);
+      if (activeDoc) programData = activeDoc.data();
+      settingsData = settSnap.exists() ? settSnap.data() : {};
+      _dietPlanCache = dietSnap.docs.find(d => d.data().active)?.data() || null;
 
-  logsSnap.docs.forEach(d => { allRecentLogs[d.data().date] = d.data(); });
+      logsSnap.docs.forEach(d => { allRecentLogs[d.data().date] = d.data(); });
 
-  const lastCompleted = logsSnap.docs
-    .map(d => d.data())
-    .find(d => d.workout?.completed);
+      const lastCompleted = logsSnap.docs
+        .map(d => d.data())
+        .find(d => d.workout?.completed);
 
-  renderNextSession(lastCompleted);
-  buildWeekView();
-  loadCalendar();
+      renderNextSession(lastCompleted);
+      buildWeekView();
+      loadCalendar();
+    });
+  } catch (e) {
+    console.error('diary init error:', e);
+    showToast('Errore caricamento diario dal cloud', 'err');
+  }
 }
 
 // ── Prossima sessione ──────────────────────────────────────
@@ -96,17 +104,30 @@ async function loadCalendar() {
     currentMonth.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' });
 
   monthLogs = {};
-  try {
-    const snap = await getDocs(query(
-      collection(db, 'users', getUserId(), 'daily_logs'),
-      where('date', '>=', `${monthStr}-01`),
-      where('date', '<=', `${monthStr}-31`),
-      orderBy('date')
-    ));
-    snap.docs.forEach(d => { monthLogs[d.data().date] = d.data(); });
-  } catch(e) {}
+  const q = query(
+    collection(db, 'users', getUserId(), 'daily_logs'),
+    where('date', '>=', `${monthStr}-01`),
+    where('date', '<=', `${monthStr}-31`),
+    orderBy('date')
+  );
 
-  renderGrid(y, m);
+  const render = (snap) => {
+    snap.docs.forEach(d => { monthLogs[d.data().date] = d.data(); });
+    renderGrid(y, m);
+  };
+
+  try {
+    const cachedSnap = await getDocsFromCache(q);
+    render(cachedSnap);
+  } catch (e) {}
+
+  try {
+    const serverSnap = await getDocs(q);
+    render(serverSnap);
+  } catch (e) {
+    console.warn('loadCalendar error:', e);
+    if (Object.keys(monthLogs).length === 0) renderGrid(y, m);
+  }
 }
 
 function renderGrid(year, month) {
@@ -339,8 +360,20 @@ window.showDay = async function(dateStr) {
 let _dietPlanCache = null;
 async function getActiveDietPlan() {
   if (_dietPlanCache) return _dietPlanCache;
-  const snap = await getDocs(collection(db, 'users', getUserId(), 'diet_plans'));
-  _dietPlanCache = snap.docs.find(d => d.data().active)?.data() || null;
+  const coll = collection(db, 'users', getUserId(), 'diet_plans');
+  try {
+    const cachedSnap = await getDocsFromCache(coll);
+    _dietPlanCache = cachedSnap.docs.find(d => d.data().active)?.data() || null;
+  } catch (e) {}
+  
+  if (!_dietPlanCache) {
+    try {
+      const snap = await getDocs(coll);
+      _dietPlanCache = snap.docs.find(d => d.data().active)?.data() || null;
+    } catch (e) {
+      console.warn('getActiveDietPlan error:', e);
+    }
+  }
   return _dietPlanCache;
 }
 

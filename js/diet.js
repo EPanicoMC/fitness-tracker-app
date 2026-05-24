@@ -1,6 +1,6 @@
 import { requireAuth } from './app.js';
 import {
-  db, getUserId, collection, doc, getDocs, addDoc, setDoc, deleteDoc
+  db, getUserId, collection, doc, getDocs, getDocsFromCache, addDoc, setDoc, deleteDoc
 } from './firebase-config.js';
 import { showToast, showModal } from './app.js';
 import { AutoComplete, saveToLibrary } from './autocomplete.js';
@@ -19,9 +19,10 @@ function buildEmptyDay() {
 async function loadDiets() {
   const el = document.getElementById('diet-list');
   if (!el) return;
-  el.innerHTML = '<div class="spin"></div>';
-  try {
-    const snap = await getDocs(collection(db, 'users', getUserId(), 'diet_plans'));
+
+  const coll = collection(db, 'users', getUserId(), 'diet_plans');
+
+  const processAndRender = async (snap) => {
     diets = await Promise.all(snap.docs.map(async d => {
       const data = d.data();
       let updated = false;
@@ -45,9 +46,26 @@ async function loadDiets() {
     }));
     diets.sort((a, b) => (b.active?1:0) - (a.active?1:0));
     renderList();
-  } catch(e) {
-    console.error('loadDiets error:', e);
-    el.innerHTML = `<div class="empty"><span class="ei">⚠️</span><p>Errore caricamento piani.<br><button class="btn btn-ghost btn-sm" onclick="window.loadDiets()">↺ Riprova</button></p></div>`;
+  };
+
+  let cachedSnap = null;
+  try {
+    cachedSnap = await getDocsFromCache(coll);
+    await processAndRender(cachedSnap);
+  } catch (e) {
+    el.innerHTML = '<div class="spin"></div>';
+  }
+
+  try {
+    const serverSnap = await getDocs(coll);
+    if (!cachedSnap || JSON.stringify(cachedSnap.docs.map(d => d.data())) !== JSON.stringify(serverSnap.docs.map(d => d.data()))) {
+      await processAndRender(serverSnap);
+    }
+  } catch (e) {
+    if (!cachedSnap) {
+      console.error('loadDiets error:', e);
+      el.innerHTML = `<div class="empty"><span class="ei">⚠️</span><p>Errore caricamento piani.<br><button class="btn btn-ghost btn-sm" onclick="window.loadDiets()">↺ Riprova</button></p></div>`;
+    }
   }
 }
 window.loadDiets = loadDiets;

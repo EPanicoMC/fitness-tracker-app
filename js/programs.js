@@ -1,6 +1,6 @@
 import { requireAuth } from './app.js';
 import {
-  db, getUserId, collection, doc, getDocs, addDoc, setDoc, deleteDoc
+  db, getUserId, collection, doc, getDocs, getDocsFromCache, addDoc, setDoc, deleteDoc
 } from './firebase-config.js';
 import { showToast, showModal, DAYS_IT, DAY_ORDER } from './app.js';
 import { AutoComplete, saveToLibrary } from './autocomplete.js';
@@ -13,15 +13,33 @@ let formSched = {};
 async function loadPrograms() {
   const el = document.getElementById('prg-list');
   if (!el) return;
-  el.innerHTML = '<div class="spin"></div>';
-  try {
-    const snap = await getDocs(collection(db, 'users', getUserId(), 'programs'));
+
+  const coll = collection(db, 'users', getUserId(), 'programs');
+
+  const render = (snap) => {
     programs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     programs.sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0));
     renderList();
-  } catch(e) {
-    console.error('loadPrograms error:', e);
-    el.innerHTML = `<div class="empty"><span class="ei">⚠️</span><p>Errore caricamento schede.<br><button class="btn btn-ghost btn-sm" onclick="window.loadPrograms()">↺ Riprova</button></p></div>`;
+  };
+
+  let cachedSnap = null;
+  try {
+    cachedSnap = await getDocsFromCache(coll);
+    render(cachedSnap);
+  } catch (e) {
+    el.innerHTML = '<div class="spin"></div>';
+  }
+
+  try {
+    const serverSnap = await getDocs(coll);
+    if (!cachedSnap || JSON.stringify(cachedSnap.docs.map(d => d.data())) !== JSON.stringify(serverSnap.docs.map(d => d.data()))) {
+      render(serverSnap);
+    }
+  } catch (e) {
+    if (!cachedSnap) {
+      console.error('loadPrograms error:', e);
+      el.innerHTML = `<div class="empty"><span class="ei">⚠️</span><p>Errore caricamento schede.<br><button class="btn btn-ghost btn-sm" onclick="window.loadPrograms()">↺ Riprova</button></p></div>`;
+    }
   }
 }
 window.loadPrograms = loadPrograms;
