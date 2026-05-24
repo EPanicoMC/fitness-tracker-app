@@ -152,7 +152,15 @@ async function init() {
     ];
 
     window.isServerLoaded = false;
-    await loadSmart(refs, (snaps) => {
+    const fallbackTimer = setTimeout(() => {
+      if (!window.isServerLoaded) {
+        console.log("Firestore server load timed out, forcing isServerLoaded = true");
+        window.isServerLoaded = true;
+        buildSmartAdvisor();
+      }
+    }, 1500);
+
+    loadSmart(refs, (snaps) => {
       const [logSnap, progSnap, dietSnap, settSnap, checksSnap] = snaps;
       logData = logSnap.exists() ? logSnap.data() : {};
       activeProgram = progSnap.docs.find(d => d.data().active)?.data() || null;
@@ -213,9 +221,15 @@ async function init() {
           buildMeals();
         }).catch(() => {});
       }
+    }).then(() => {
+      clearTimeout(fallbackTimer);
+      window.isServerLoaded = true;
+      buildSmartAdvisor();
+    }).catch((err) => {
+      clearTimeout(fallbackTimer);
+      window.isServerLoaded = true;
+      buildSmartAdvisor();
     });
-    window.isServerLoaded = true;
-    buildSmartAdvisor();
   } catch (e) {
     window.isServerLoaded = true;
     console.error('DIAGNOSTIC: Error fetching DB data:', e);
@@ -946,7 +960,10 @@ function renderMealRow(m, mi, originalMeals) {
 }
 
 window.toggleMeal = function(mi) {
-  if (!window.isServerLoaded) return;
+  if (!window.isServerLoaded) {
+    showToast('Caricamento dati in corso... Riprova tra un istante', 'info');
+    return;
+  }
   mealStates[mi].eaten = !mealStates[mi].eaten;
   if (!logData.meals_state) logData.meals_state = {};
   logData.meals_state[mi] = { eaten: mealStates[mi].eaten, variant: mealStates[mi].active_variant };
@@ -1532,7 +1549,10 @@ window.saveExtraMeal = async function(editIndex) {
   if (!name)                       return showToast('Inserisci il nome del pasto', 'err');
   if (kcal === 0 && protein === 0) return showToast('Inserisci almeno le kcal', 'err');
  
-  if (!window.isServerLoaded) return;
+  if (!window.isServerLoaded) {
+    showToast('Caricamento dati in corso... Riprova tra un istante', 'info');
+    return;
+  }
 
   if (destination !== 'extra') {
     const targetMealIndex = parseInt(destination);
@@ -1614,6 +1634,10 @@ window.openManualMacro = function(mealIndex) {
 };
 
 window.saveManualMacro = function(mealIndex) {
+  if (!window.isServerLoaded) {
+    showToast('Caricamento dati in corso... Riprova tra un istante', 'info');
+    return;
+  }
   const kcal    = parseFloat(document.getElementById('mm-kcal')?.value)  || 0;
   const protein = parseFloat(document.getElementById('mm-pro')?.value)   || 0;
   const carbs   = parseFloat(document.getElementById('mm-carb')?.value)  || 0;
