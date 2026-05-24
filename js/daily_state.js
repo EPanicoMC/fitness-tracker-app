@@ -5,13 +5,14 @@ import {
 import {
   getTodayString, getYesterdayString, getDayOfWeek, formatDateIT, formatDateShort, addDays, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER, cleanOldLogs, calcFitScore, calcSmartScore
 } from './app.js';
-import { calcMacrosFromText, analyzeFoodImageAI } from './gemini.js';
+import { calcMacrosFromText, analyzeFoodImageAI, generateSmartAdviceAI } from './gemini.js';
 
 const TODAY = getTodayString();
 let logData = {};
 let activeDiet = null;
 let activeProgram = null;
 let appSettings = null;
+let latestCheck = null;
 let isTrainingDay = false;
 let mealStates = [];
 let friendLogData = null;
@@ -26,6 +27,7 @@ function saveToLocal() {
       meals_state[i] = { eaten: m.eaten, variant: m.active_variant };
     });
     logData.meals_state = meals_state;
+    logData.last_updated = Date.now();
     const payload = {
       meals_state,
       meals_overrides: logData.meals_overrides || {},
@@ -34,7 +36,8 @@ function saveToLocal() {
       burned_kcal:     logData.burned_kcal     || null,
       daily_note:      logData.daily_note      || '',
       is_training_day: isTrainingDay,
-      day_override:    logData.day_override
+      day_override:    logData.day_override,
+      last_updated:    logData.last_updated
     };
     localStorage.setItem(key, JSON.stringify(payload));
     Object.keys(localStorage)
@@ -85,17 +88,19 @@ async function init() {
   await checkDayRollover();
 
   try {
-    const [logSnap, progSnap, dietSnap, settSnap] = await Promise.all([
+    const [logSnap, progSnap, dietSnap, settSnap, checksSnap] = await Promise.all([
       getDoc(doc(db, 'users', getUserId(), 'daily_logs', TODAY)),
       getDocs(collection(db, 'users', getUserId(), 'programs')),
       getDocs(collection(db, 'users', getUserId(), 'diet_plans')),
-      getDoc(doc(db, 'users', getUserId(), 'settings', 'app'))
+      getDoc(doc(db, 'users', getUserId(), 'settings', 'app')),
+      getDocs(query(collection(db, 'users', getUserId(), 'checks'), orderBy('date', 'desc'), limit(1)))
     ]);
 
     logData = logSnap.exists() ? logSnap.data() : {};
     activeProgram = progSnap.docs.find(d => d.data().active)?.data() || null;
     activeDiet    = dietSnap.docs.find(d => d.data().active)?.data() || null;
     appSettings   = settSnap.exists() ? settSnap.data() : {};
+    latestCheck   = !checksSnap.empty ? checksSnap.docs[0].data() : null;
   } catch (e) {
     console.error('DIAGNOSTIC: Error fetching DB data:', e);
     showToast('Errore nel caricamento dati dal cloud', 'err');
@@ -104,6 +109,7 @@ async function init() {
     activeProgram = null;
     activeDiet = null;
     appSettings = {};
+    latestCheck = null;
   }
 
   if (appSettings?.friend_email) {
@@ -116,20 +122,40 @@ async function init() {
     } catch(e) { console.warn('Errore friend log:', e); }
   }
 
-  // Merge localStorage (higher priority for today's working state)
+  // Merge localStorage (higher priority for today's working state if local is newer)
   const lsKey = 'fittracker_today_' + getTodayString();
   const cached = localStorage.getItem(lsKey);
   let local = null;
   if (cached) {
     try {
       local = JSON.parse(cached);
-      logData.meals_overrides = local.meals_overrides || {};
-      logData.meals_state     = local.meals_state     || {};
-      logData.extra_meals     = local.extra_meals     || [];
-      if (local.steps != null && local.steps > (logData.steps || 0))        logData.steps        = local.steps;
-      if (local.burned_kcal != null && local.burned_kcal > (logData.burned_kcal || 0))  logData.burned_kcal  = local.burned_kcal;
-      if (local.daily_note != null)   logData.daily_note   = local.daily_note;
-      if (local.day_override != null) logData.day_override = local.day_override;
+      const localTime = local.last_updated || 0;
+      const firestoreTime = logData.last_updated || 0;
+
+      if (localTime > firestoreTime) {
+        logData.meals_overrides = local.meals_overrides || {};
+        logData.meals_state     = local.meals_state     || {};
+        logData.extra_meals     = local.extra_meals     || [];
+        if (local.steps != null)        logData.steps        = local.steps;
+        if (local.burned_kcal != null)  logData.burned_kcal  = local.burned_kcal;
+        if (local.daily_note != null)   logData.daily_note   = local.daily_note;
+        if (local.day_override != null) logData.day_override = local.day_override;
+        logData.last_updated = localTime;
+      } else {
+        // Local is outdated. Update local storage to match the newer Firestore data
+        const payload = {
+          meals_state:     logData.meals_state     || {},
+          meals_overrides: logData.meals_overrides || {},
+          extra_meals:     logData.extra_meals     || [],
+          steps:           logData.steps           || null,
+          burned_kcal:     logData.burned_kcal     || null,
+          daily_note:      logData.daily_note      || '',
+          is_training_day: isTrainingDay,
+          day_override:    logData.day_override,
+          last_updated:    firestoreTime
+        };
+        localStorage.setItem(lsKey, JSON.stringify(payload));
+      }
     } catch(e) {}
   }
 
@@ -207,6 +233,7 @@ async function init() {
   buildWorkout();
   buildStats();
   buildFitScore();
+  buildSmartAdvisor();
 
   if (new Date().getDate() === 1) {
     cleanOldLogs(db, getUserId());
@@ -424,6 +451,7 @@ function calcTotals() {
   });
 
   (logData.extra_meals || []).forEach(m => {
+    if (m.eaten === false) return;
     kcal    += m.kcal    || 0;
     protein += m.protein || 0;
     carbs   += m.carbs   || 0;
@@ -669,24 +697,30 @@ function buildMeals() {
     }
   }
   
-  const extraHtml = (logData.extra_meals || []).map((m, xi) => `
-    <div class="meal-item eaten" style="border-left:3px solid var(--orange)">
-      <div class="meal-top" onclick="window.toggleExtraMealDetail(${xi})" style="cursor:pointer">
-        <div class="meal-chk" style="background:var(--orange)">✓</div>
-        ${m.time ? `<span class="meal-time">${m.time}</span>` : ''}
-        <div class="meal-info">
+  const extraHtml = (logData.extra_meals || []).map((m, xi) => {
+    const isEaten = m.eaten !== false;
+    return `
+    <div class="meal-item ${isEaten ? 'eaten' : ''}" style="border-left:3px solid var(--orange)">
+      <div class="meal-top">
+        <div class="meal-chk" style="background:${isEaten ? 'var(--orange)' : 'transparent'}; border:1px solid var(--orange); cursor:pointer" onclick="window.toggleExtraMeal(${xi})">
+          ${isEaten ? '✓' : ''}
+        </div>
+        <div class="meal-info" onclick="window.toggleExtraMealDetail(${xi})" style="cursor:pointer; flex:1">
           <div class="meal-name">${m.name} <span style="font-size:10px;color:var(--orange);font-weight:700;background:rgba(255,152,0,.15);padding:1px 5px;border-radius:4px">EXTRA</span></div>
           <div class="meal-meta">${m.kcal} kcal · P:${m.protein}g C:${m.carbs}g F:${m.fats}g</div>
         </div>
-        <div class="meal-kcal">${m.kcal}</div>
+        <div class="meal-kcal" onclick="window.toggleExtraMealDetail(${xi})" style="cursor:pointer">${m.kcal}</div>
       </div>
-      ${m.ingredients ? `
-      <div class="meal-detail" id="extradtl-${xi}" style="display:none;padding:10px;border-top:1px solid rgba(255,255,255,0.05)">
-        <p style="font-size:13px;color:var(--t2);line-height:1.6;margin:0">${m.ingredients}</p>
+      <div class="meal-detail" id="extradtl-${xi}" style="display:none;padding:12px;border-top:1px solid rgba(255,255,255,0.05)">
+        ${m.ingredients ? `<p style="font-size:13px;color:var(--t2);line-height:1.6;margin-bottom:8px">${m.ingredients}</p>` : '<p style="font-size:12px;color:var(--t3);margin-bottom:8px;font-style:italic">Nessun ingrediente inserito</p>'}
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn btn-ghost btn-sm" onclick="window.openEditExtraMeal(${xi})" style="flex:1"><i class="ri-edit-2-line"></i> Modifica</button>
+          <button class="btn btn-del" onclick="window.deleteExtraMeal(${xi})" style="padding: 7px 12px;"><i class="ri-delete-bin-line"></i> Elimina</button>
+        </div>
       </div>
       <div onclick="window.toggleExtraMealDetail(${xi})" style="text-align:right;font-size:11px;color:var(--t3);cursor:pointer;padding:4px 0;margin-bottom:4px">▼ dettagli</div>
-      ` : ''}
-    </div>`).join('');
+    </div>`;
+  }).join('');
     
   el.innerHTML = friendBannerHtml + mealStates.map((m, mi) => renderMealRow(m, mi, meals)).join('') + extraHtml;
   updateNutritionTotals();
@@ -695,6 +729,33 @@ function buildMeals() {
 window.toggleExtraMealDetail = function(xi) {
   const el = document.getElementById(`extradtl-${xi}`);
   if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+};
+
+window.toggleExtraMeal = function(xi) {
+  if (logData.extra_meals && logData.extra_meals[xi]) {
+    logData.extra_meals[xi].eaten = logData.extra_meals[xi].eaten === false ? true : false;
+    saveToLocal();
+    buildMeals();
+    updateNutritionTotals();
+    buildFitScore();
+  }
+};
+
+window.deleteExtraMeal = function(xi) {
+  if (confirm('Sei sicuro di voler eliminare questo pasto extra?')) {
+    logData.extra_meals.splice(xi, 1);
+    saveToLocal();
+    buildMeals();
+    updateNutritionTotals();
+    buildFitScore();
+    document.getElementById('add-meal-modal')?.remove();
+  }
+};
+
+window.openEditExtraMeal = function(xi) {
+  const m = logData.extra_meals[xi];
+  if (!m) return;
+  window.openAddMeal(m, xi);
 };
 
 function renderMealRow(m, mi, originalMeals) {
@@ -770,7 +831,20 @@ function renderMealRow(m, mi, originalMeals) {
         <div style="margin-top:12px">
           <label class="fl"><i class="ri-edit-2-line"></i> Ingredienti (modifica)</label>
           <textarea id="meal-txt-${mi}" class="fi" rows="2" style="font-size:13px">${userTxt}</textarea>
-          <button class="btn btn-ghost btn-sm" onclick="recalcMeal(${mi})" style="margin-top:8px">✨ Ricalcola con AI</button>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn btn-ghost btn-sm" onclick="recalcMeal(${mi})" style="flex:1">✨ Ricalcola con AI</button>
+            <button class="btn btn-ghost btn-sm" onclick="window.startMealCamera(${mi})" style="flex:1">📸 Scansiona Cibo</button>
+          </div>
+          
+          <div id="meal-camera-container-${mi}" style="display:none;margin-top:8px;flex-direction:column;gap:8px;align-items:center">
+            <video id="meal-video-${mi}" autoplay playsinline style="width:100%;max-width:320px;border-radius:12px;background:#000"></video>
+            <div style="display:flex;gap:8px;width:100%;max-width:320px">
+              <button class="btn btn-flat btn-sm" onclick="window.stopMealCamera(${mi})" style="flex:1">Annulla</button>
+              <button class="btn btn-v btn-sm" onclick="window.captureMealImage(${mi})" style="flex:1">📸 Scatta e Analizza</button>
+            </div>
+            <canvas id="meal-canvas-${mi}" style="display:none"></canvas>
+          </div>
+
           <div id="meal-ai-${mi}" style="display:none;margin-top:8px"></div>
           <div style="margin-top:8px">
             <button class="btn btn-ghost btn-sm" onclick="openManualMacro(${mi})"><i class="ri-pencil-line"></i> Inserisci manuale</button>
@@ -794,7 +868,13 @@ window.toggleMeal = function(mi) {
 
 window.toggleMealDetail = function(mi) {
   const el = document.getElementById(`mdtl-${mi}`);
-  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  if (el) {
+    const isOpening = el.style.display === 'none';
+    el.style.display = isOpening ? 'block' : 'none';
+    if (!isOpening) {
+      window.stopMealCamera(mi);
+    }
+  }
 };
 
 window.selectVariant = function(mi, vi) {
@@ -901,7 +981,7 @@ function buildWorkout() {
   } else {
     el.innerHTML = `
       <div style="font-size:15px;font-weight:700;margin-bottom:10px">${session?.name || 'Sessione'}</div>
-      <a href="session.html" class="btn btn-o" style="text-decoration:none">🏋�// ── Stats ──────────────────────────────────────────────────
+      <a href="session.html" class="btn btn-o" style="text-decoration:none">🏋 // ── Stats ──────────────────────────────────────────────────
 function buildStats() {
   const sf = document.getElementById('steps-in');
   if(sf) {
@@ -1047,7 +1127,8 @@ async function syncToFirebase() {
     streak:          logData.streak || 1,
     meals_state:     logData.meals_state     || {},
     meals_overrides: logData.meals_overrides || {},
-    extra_meals:     logData.extra_meals     || []
+    extra_meals:     logData.extra_meals     || [],
+    last_updated:    logData.last_updated    || Date.now()
   };
   
   if (logData.day_override != null) data.day_override = logData.day_override;
@@ -1222,49 +1303,19 @@ async function loadMealTemplatesForDropdown() {
     const snap = await getDocs(collection(db, 'users', getUserId(), 'meal_templates'));
     mealTemplates = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     
-    const container = document.getElementById('template-select-container');
-    const select = document.getElementById('am-template-select');
-    
-    if (select && mealTemplates.length > 0) {
-      select.innerHTML = '<option value="">-- Seleziona un template --</option>';
-      mealTemplates.forEach(t => {
-        const opt = document.createElement('option');
-        opt.value = t.id;
-        opt.textContent = `${t.name} (${t.kcal} kcal - P:${t.protein}g C:${t.carbs}g F:${t.fats}g)`;
-        select.appendChild(opt);
-      });
-      if (container) container.style.display = 'block';
-    }
-  } catch(e) {
-    console.warn('Error loading meal templates:', e);
-  }
-}
+    const container // ── Aggiungi pasto extra ───────────────────────────────────
+window.openAddMeal = function(prefillData, editIndex) {
+  const isEdit = editIndex !== undefined && editIndex !== null;
+  const selectedType = prefillData?.type || 'extra';
 
-window.loadMealTemplate = function(templateId) {
-  if (!templateId) return;
-  const t = mealTemplates.find(x => x.id === templateId);
-  if (!t) return;
-  
-  if (document.getElementById('am-name')) document.getElementById('am-name').value = t.name || '';
-  if (document.getElementById('am-ingredients')) document.getElementById('am-ingredients').value = t.ingredients || '';
-  if (document.getElementById('am-kcal')) document.getElementById('am-kcal').value = t.kcal || '';
-  if (document.getElementById('am-protein')) document.getElementById('am-protein').value = t.protein || '';
-  if (document.getElementById('am-carbs')) document.getElementById('am-carbs').value = t.carbs || '';
-  if (document.getElementById('am-fats')) document.getElementById('am-fats').value = t.fats || '';
-  
-  showToast('⭐ Template caricato!');
-};
-
-// ── Aggiungi pasto extra ───────────────────────────────────
-window.openAddMeal = function(prefillData) {
   const bg = document.createElement('div');
   bg.className = 'modal-bg';
   bg.id = 'add-meal-modal';
   bg.innerHTML = `
     <div class="modal" style="max-height:85vh;overflow-y:auto">
       <div class="modal-handle"></div>
-      <h3>${prefillData ? 'Copia Pasto Amico' : '+ Aggiungi Pasto'}</h3>
- 
+      <h3>${isEdit ? '✏️ Modifica Pasto Extra' : (prefillData ? 'Copia Pasto Amico' : '+ Aggiungi Pasto')}</h3>
+  
       <div class="fg" id="template-select-container" style="display:none;margin-bottom:16px">
         <label class="fl">⭐ Carica da Template</label>
         <select class="fi" id="am-template-select" onchange="window.loadMealTemplate(this.value)">
@@ -1323,12 +1374,12 @@ window.openAddMeal = function(prefillData) {
       <div class="fg">
         <label class="fl">Tipo pasto</label>
         <select class="fi" id="am-type">
-          <option value="extra">Extra / Fuori piano</option>
-          <option value="colazione">Colazione</option>
-          <option value="spuntino">Spuntino</option>
-          <option value="pranzo">Pranzo</option>
-          <option value="merenda">Merenda</option>
-          <option value="cena">Cena</option>
+          <option value="extra" ${selectedType === 'extra' ? 'selected' : ''}>Extra / Fuori piano</option>
+          <option value="colazione" ${selectedType === 'colazione' ? 'selected' : ''}>Colazione</option>
+          <option value="spuntino" ${selectedType === 'spuntino' ? 'selected' : ''}>Spuntino</option>
+          <option value="pranzo" ${selectedType === 'pranzo' ? 'selected' : ''}>Pranzo</option>
+          <option value="merenda" ${selectedType === 'merenda' ? 'selected' : ''}>Merenda</option>
+          <option value="cena" ${selectedType === 'cena' ? 'selected' : ''}>Cena</option>
         </select>
       </div>
  
@@ -1336,10 +1387,14 @@ window.openAddMeal = function(prefillData) {
         <button class="btn btn-flat btn-sm" onclick="document.getElementById('add-meal-modal').remove()">
           Annulla
         </button>
+        ${isEdit ? `
+        <button class="btn btn-del btn-sm" onclick="window.deleteExtraMeal(${editIndex})" style="background:rgba(255,61,90,0.1);color:var(--red);border:1px solid rgba(255,61,90,0.2)">
+          <i class="ri-delete-bin-line"></i> Elimina
+        </button>` : `
         <button class="btn btn-ghost btn-sm" onclick="window.saveAsTemplate()">
           ⭐ Salva come Template
-        </button>
-        <button class="btn btn-g btn-sm" onclick="saveExtraMeal()">
+        </button>`}
+        <button class="btn btn-g btn-sm" onclick="saveExtraMeal(${isEdit ? editIndex : 'null'})">
           💾 Salva
         </button>
       </div>
@@ -1363,7 +1418,7 @@ window.calcAIMeal = async function() {
   showToast('✅ Macro calcolati!');
 };
  
-window.saveExtraMeal = async function() {
+window.saveExtraMeal = async function(editIndex) {
   const name    = document.getElementById('am-name')?.value?.trim();
   const kcal    = parseFloat(document.getElementById('am-kcal')?.value)    || 0;
   const protein = parseFloat(document.getElementById('am-protein')?.value) || 0;
@@ -1376,16 +1431,26 @@ window.saveExtraMeal = async function() {
   if (kcal === 0 && protein === 0) return showToast('Inserisci almeno le kcal', 'err');
  
   if (!logData.extra_meals) logData.extra_meals = [];
-  logData.extra_meals.push({
-    name, type, kcal, protein, carbs, fats, ingredients,
-    time:     new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }),
-    added_at: new Date().toISOString()
-  });
+  
+  if (editIndex !== undefined && editIndex !== null) {
+    const existing = logData.extra_meals[editIndex];
+    logData.extra_meals[editIndex] = {
+      ...existing,
+      name, type, kcal, protein, carbs, fats, ingredients
+    };
+  } else {
+    logData.extra_meals.push({
+      name, type, kcal, protein, carbs, fats, ingredients,
+      time:     new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }),
+      added_at: new Date().toISOString(),
+      eaten:    true
+    });
+  }
  
   updateNutritionTotals();
   saveToLocal();
   document.getElementById('add-meal-modal')?.remove();
-  showToast('✅ Pasto aggiunto!');
+  showToast(editIndex !== undefined && editIndex !== null ? '✅ Pasto modificato!' : '✅ Pasto aggiunto!');
   buildMeals();
 };
 
@@ -1513,11 +1578,282 @@ window.captureFoodImage = async function() {
   }
 };
 
+window.startMealCamera = async function(mi) {
+  const container = document.getElementById(`meal-camera-container-${mi}`);
+  const video = document.getElementById(`meal-video-${mi}`);
+  if (!container || !video) return;
+
+  showToast('🎥 Avvio fotocamera...', 'info');
+
+  try {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+    }
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment' },
+      audio: false
+    });
+    video.srcObject = cameraStream;
+    video.style.transform = 'none';
+    container.style.display = 'flex';
+  } catch(e) {
+    showToast('Impossibile accedere alla fotocamera', 'err');
+    console.error(e);
+  }
+};
+
+window.stopMealCamera = function(mi) {
+  const container = document.getElementById(`meal-camera-container-${mi}`);
+  if (container) container.style.display = 'none';
+
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(track => track.stop());
+    cameraStream = null;
+  }
+};
+
+window.captureMealImage = async function(mi) {
+  const video = document.getElementById(`meal-video-${mi}`);
+  const canvas = document.getElementById(`meal-canvas-${mi}`);
+  if (!video || !canvas || !cameraStream) return;
+
+  const ctx = canvas.getContext('2d');
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
+
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  window.stopMealCamera(mi);
+
+  showToast('⏳ Analisi immagine cibo con AI...', 'info');
+
+  try {
+    const base64Image = canvas.toDataURL('image/jpeg').split(',')[1];
+    const r = await analyzeFoodImageAI(base64Image, 'image/jpeg');
+
+    if (!r.success) {
+      showToast(r.error, 'err');
+      return;
+    }
+
+    const textEl = document.getElementById(`meal-txt-${mi}`);
+    if (textEl) textEl.value = r.ingredients || r.name;
+
+    const box = document.getElementById(`meal-ai-${mi}`);
+    if (box) {
+      box.style.display = 'block';
+      box.innerHTML = `
+        <div class="fmp">
+          <div class="fmp-item"><div class="fmp-v" style="color:var(--green)">${r.kcal}</div><div class="fmp-l">Kcal</div></div>
+          <div class="fmp-item"><div class="fmp-v" style="color:var(--blue)">${r.protein}g</div><div class="fmp-l">Pro</div></div>
+          <div class="fmp-item"><div class="fmp-v" style="color:var(--yellow)">${r.carbs}g</div><div class="fmp-l">Carbo</div></div>
+          <div class="fmp-item"><div class="fmp-v" style="color:var(--purple)">${r.fats}g</div><div class="fmp-l">Grassi</div></div>
+        </div>
+        <button class="btn btn-v btn-sm" onclick="applyMealAI(${mi},${r.kcal},${r.protein},${r.carbs},${r.fats})" style="margin-top:8px">✅ Applica</button>`;
+      
+      const tgt = mealStates[mi].kcal;
+      const diff = r.kcal - tgt;
+      const deltaEl = document.getElementById(`meal-delta-${mi}`);
+      if (deltaEl) {
+        deltaEl.textContent = `Target: ${tgt}kcal | AI: ${r.kcal}kcal | ${diff >= 0 ? '+' : ''}${diff}kcal`;
+        deltaEl.className = 'meal-delta ' + (Math.abs(diff) < 50 ? 'delta-ok' : diff > 0 ? 'delta-over' : 'delta-warn');
+      }
+    }
+
+    showToast('🥗 Cibo scansionato con successo!');
+  } catch(e) {
+    showToast('Errore durante la scansione', 'err');
+    console.error(e);
+  }
+};
+
 window.openAddMealWithCamera = function() {
   window.openAddMeal();
   setTimeout(() => {
     window.startFoodCamera();
   }, 250);
+};
+
+// ── Smart Advisor ──────────────────────────────────────────
+let isGeneratingAdvice = false;
+
+function getPartOfDay() {
+  const hr = new Date().getHours();
+  if (hr >= 5 && hr < 12) return 'mattina';
+  if (hr >= 12 && hr < 18) return 'pomeriggio';
+  return 'sera';
+}
+
+function generateLocalAdvice({ profile, activeDiet, activeProgram, dailyState, partOfDay }) {
+  const name = profile?.name || 'Campione';
+  const steps = dailyState.steps || 0;
+  const goalSteps = profile?.steps_goal || 10000;
+  const tots = calcTotals();
+  const dayKey = dailyState.isTrainingDay ? 'day_on' : 'day_off';
+  const plan = activeDiet?.[dayKey];
+  const targetKcal = plan?.kcal || 2000;
+  const kcalDiff = targetKcal - tots.kcal;
+
+  if (partOfDay === 'mattina') {
+    if (dailyState.isTrainingDay) {
+      return `Buongiorno, **${name}**! Oggi è un giorno di **allenamento** (${activeProgram?.name || 'Sessione'}). Assicurati di fare una colazione proteica e idratati bene prima della sessione. 🏋️`;
+    } else {
+      return `Buongiorno, **${name}**! Oggi è un giorno di **riposo**. Concentrati sul recupero e mantieni attivi i tuoi passi di oggi: **${steps}/${goalSteps}**. 🛌`;
+    }
+  } else if (partOfDay === 'pomeriggio') {
+    if (dailyState.isTrainingDay) {
+      return `Buon pomeriggio! Hai completato **${steps} passi**. Ti attende la sessione d'allenamento. Assicurati di essere in linea con le calorie ed energia. ⚡`;
+    } else {
+      return `Buon pomeriggio! Ricorda di mantenere alta l'idratazione. Passi attuali: **${steps}/${goalSteps}**. Continua così! 👟`;
+    }
+  } else {
+    // Evening
+    if (kcalDiff > 100) {
+      return `Buonasera! Ti mancano ancora circa **${Math.round(kcalDiff)} kcal** per raggiungere il target giornaliero. Valuta uno spuntino pre-nanna proteico. 🥩`;
+    } else if (kcalDiff < -100) {
+      return `Buonasera! Hai superato il target calorico di **${Math.round(Math.abs(kcalDiff))} kcal**. Ottimo allenamento oggi, riposati e ricarica le energie. 💤`;
+    } else {
+      return `Buonasera! Sei perfettamente in target con le calorie oggi. Ottima costanza e disciplina! Buona notte. 🌟`;
+    }
+  }
+}
+
+async function buildSmartAdvisor() {
+  const box = document.getElementById('smart-advisor-box');
+  if (!box) return;
+
+  const partOfDay = getPartOfDay();
+  const cachedKey = `fittracker_advice_${TODAY}_${partOfDay}`;
+  const cachedText = localStorage.getItem(cachedKey);
+
+  if (cachedText) {
+    renderSmartAdvisorContent(cachedText);
+  } else {
+    // No cached advice. Show loading skeleton and trigger generation silently
+    box.innerHTML = `
+      <div class="card" style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); padding:16px; border-radius:var(--rs);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <div style="font-size:10px; font-weight:800; color:var(--accent); letter-spacing:1px; display:flex; align-items:center; gap:6px;">
+            <i class="ri-flashlight-fill"></i> KOVA SMART ADVISOR
+          </div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <div style="height:12px; background:rgba(255,255,255,0.05); width:80%; border-radius:4px; animation: pulse 1.5s infinite ease-in-out;"></div>
+          <div style="height:12px; background:rgba(255,255,255,0.05); width:95%; border-radius:4px; animation: pulse 1.5s infinite ease-in-out;"></div>
+          <div style="height:12px; background:rgba(255,255,255,0.05); width:50%; border-radius:4px; animation: pulse 1.5s infinite ease-in-out;"></div>
+        </div>
+      </div>
+      <style>
+        @keyframes pulse {
+          0% { opacity: 0.6; }
+          50% { opacity: 0.3; }
+          100% { opacity: 0.6; }
+        }
+      </style>
+    `;
+    setTimeout(() => {
+      window.refreshSmartAdvisor(true);
+    }, 100);
+  }
+}
+
+function renderSmartAdvisorContent(text) {
+  const box = document.getElementById('smart-advisor-box');
+  if (!box) return;
+
+  const formattedText = text
+    .replace(/\*\*(.*?)\*\*/g, '<b style="color:var(--t1)">$1</b>')
+    .replace(/\n/g, '<br>');
+
+  box.innerHTML = `
+    <div class="card" style="background:linear-gradient(135deg, rgba(124,111,255,0.09), rgba(0,0,0,0.25)); border:1px solid rgba(124,111,255,0.22); padding:16px; border-radius:var(--rs); position:relative; box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <div style="font-size:10px; font-weight:800; color:var(--accent); letter-spacing:1px; display:flex; align-items:center; gap:6px;">
+          <i class="ri-flashlight-fill" style="color:var(--accent); font-size:13px;"></i> KOVA SMART ADVISOR
+        </div>
+        <button onclick="window.refreshSmartAdvisor(false)" style="background:none; border:none; color:var(--t3); font-size:14px; cursor:pointer; display:flex; align-items:center; padding:2px; transition: color 0.2s;" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--t3)'">
+          <i class="ri-refresh-line" id="advisor-refresh-icon"></i>
+        </button>
+      </div>
+      <div id="smart-advisor-content" style="font-size:13px; line-height:1.6; color:var(--t2); font-weight:500;">
+        ${formattedText}
+      </div>
+    </div>
+  `;
+}
+
+window.refreshSmartAdvisor = async function(silent = false) {
+  if (isGeneratingAdvice) return;
+  isGeneratingAdvice = true;
+
+  const refreshIcon = document.getElementById('advisor-refresh-icon');
+  if (refreshIcon) refreshIcon.classList.add('ri-spin');
+
+  const partOfDay = getPartOfDay();
+  const tots = calcTotals();
+
+  const planMeals = activeDiet?.[isTrainingDay ? 'day_on' : 'day_off']?.meals || [];
+  const eatenMeals = planMeals
+    .filter((m, i) => logData.meals_state?.[i]?.eaten)
+    .map(m => m.label || m.type);
+  const eatenExtraMeals = (logData.extra_meals || [])
+    .filter(m => m.eaten !== false)
+    .map(m => m.name);
+  const allEaten = eatenMeals.concat(eatenExtraMeals);
+  const eatenMealsStr = allEaten.length ? allEaten.join(', ') : 'Nessuno';
+
+  const dailyState = {
+    steps: logData.steps || 0,
+    kcal: Math.round(tots.kcal),
+    protein: Math.round(tots.protein),
+    carbs: Math.round(tots.carbs),
+    fats: Math.round(tots.fats),
+    isTrainingDay,
+    eatenMealsStr
+  };
+
+  try {
+    const r = await generateSmartAdviceAI({
+      profile: appSettings?.profile,
+      currentWeight: latestCheck?.weight || null,
+      activeDiet,
+      activeProgram,
+      dailyState,
+      partOfDay
+    });
+
+    if (r.success && r.advice) {
+      const cachedKey = `fittracker_advice_${TODAY}_${partOfDay}`;
+      localStorage.setItem(cachedKey, r.advice);
+      renderSmartAdvisorContent(r.advice);
+    } else {
+      if (!silent && r.error && r.error.includes('Key')) {
+        showToast('Configura la Gemini API Key in Impostazioni per consigli AI avanzati!', 'info');
+      }
+      const localAdvice = generateLocalAdvice({
+        profile: appSettings?.profile,
+        activeDiet,
+        activeProgram,
+        dailyState,
+        partOfDay
+      });
+      const cachedKey = `fittracker_advice_${TODAY}_${partOfDay}`;
+      localStorage.setItem(cachedKey, localAdvice);
+      renderSmartAdvisorContent(localAdvice);
+    }
+  } catch(e) {
+    console.error('Advisor error:', e);
+    const localAdvice = generateLocalAdvice({
+      profile: appSettings?.profile,
+      activeDiet,
+      activeProgram,
+      dailyState,
+      partOfDay
+    });
+    renderSmartAdvisorContent(localAdvice);
+  } finally {
+    isGeneratingAdvice = false;
+    if (refreshIcon) refreshIcon.classList.remove('ri-spin');
+  }
 };
 
 (async function() {

@@ -340,3 +340,77 @@ Struttura JSON richiesta:
   }
   return { success: false, error: 'Errore analisi immagine food scanner' };
 }
+
+export async function generateSmartAdviceAI({ profile, currentWeight, activeDiet, activeProgram, dailyState, partOfDay }) {
+  const key = await getKey();
+  if (!key) return { success: false, error: 'API key mancante.' };
+
+  const p = profile || {};
+  const sexStr = p.sex === 'M' ? 'Uomo' : (p.sex === 'F' ? 'Donna' : '');
+  let age = '';
+  if (p.dob) {
+    const dob = new Date(p.dob);
+    const now = new Date();
+    age = now.getFullYear() - dob.getFullYear();
+    const m = now.getMonth() - dob.getMonth();
+    if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age--;
+  }
+
+  const dietTargetKcal = dailyState.isTrainingDay ? activeDiet?.day_on?.kcal : activeDiet?.day_off?.kcal;
+
+  const promptText = `Sei KOVA Smart Advisor, un assistente AI d'élite integrato in una app di fitness premium.
+Il tuo compito è generare un consiglio ultra-personalizzato, breve e motivante in italiano per guidare l'utente nel momento attuale della giornata: ${partOfDay.toUpperCase()}.
+
+Dati utente:
+- Profilo: ${p.name || 'Utente'} (${sexStr ? sexStr + ', ' : ''}${age ? age + ' anni, ' : ''}${p.height ? p.height + 'cm' : ''})
+- Peso attuale: ${currentWeight ? currentWeight + ' kg' : 'Non registrato'} (Target: ${p.weight_target || '?'} kg)
+- Dieta attiva: ${activeDiet ? activeDiet.name + ' (Target: ' + (dietTargetKcal || '?') + ' kcal)' : 'Nessuna'}
+- Scheda attiva: ${activeProgram ? activeProgram.name : 'Nessuna'}
+- Giorno di oggi: ${dailyState.isTrainingDay ? 'Allenamento (ON)' : 'Riposo (OFF)'}
+
+Stato odierno (fino ad ora):
+- Passi attivi: ${dailyState.steps || 0} / ${p.steps_goal || 10000} passi
+- Calorie consumate: ${dailyState.kcal || 0} kcal
+- Macro assunti: P:${dailyState.protein || 0}g, C:${dailyState.carbs || 0}g, F:${dailyState.fats || 0}g
+- Pasti spuntati / completati: ${dailyState.eatenMealsStr || 'Nessuno'}
+
+Momento della giornata: ${partOfDay.toUpperCase()}
+
+Regole fondamentali per la risposta:
+1. Sii estremamente diretto, pratico, motivante e conciso (massimo 40-50 parole). No introduzioni inutili, parti subito col consiglio.
+2. Basati sull'orario e sui dati. Se è sera ed è dietro coi passi o con le calorie/proteine, digli come rimediare con precisione numerica (es. "ti mancano X g di proteine"). Se è mattina, spronalo per la giornata ed evidenzia se oggi deve allenarsi.
+3. Mantieni un tono premium, d'élite, tecnico ed incoraggiante.
+4. Non usare markdown elaborato, usa solo grassetti (es. **questo**) ed emoji adatte.`;
+
+  const models = [
+    'gemini-3.1-flash-lite-preview',
+    'gemini-3.5-flash',
+    'gemini-2.5-flash',
+    'gemini-3-flash-preview',
+    'gemini-3-flash',
+    'gemini-2.5-flash-lite',
+    'gemini-1.5-flash'
+  ];
+  for (const model of models) {
+    try {
+      const r = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [{ text: promptText }] }],
+            generationConfig: { temperature: 0.7, maxOutputTokens: 256 }
+          })
+        }
+      );
+      if (r.status === 429) continue;
+      if (!r.ok) continue;
+      const d = await r.json();
+      const text = d.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) continue;
+      return { success: true, advice: text.trim() };
+    } catch(e) { continue; }
+  }
+  return { success: false, error: 'AI occupata. Usa fallback locale.' };
+}
