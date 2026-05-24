@@ -1,4 +1,4 @@
-const CACHE = 'ft-v52';
+const CACHE = 'ft-v53';
 const BASE = self.location.pathname.substring(0, self.location.pathname.lastIndexOf('/') + 1);
 const FILES = [
   '',
@@ -80,15 +80,21 @@ self.addEventListener('fetch', e => {
   if (!isSameOrigin) return;
 
   e.respondWith(
-    caches.match(e.request).then(cached => {
-      if (cached) return cached;
-      return fetch(e.request).then(res => {
+    fetch(e.request)
+      .then(res => {
         if (res.ok) {
           const clone = res.clone();
           caches.open(CACHE).then(c => c.put(e.request, clone));
         }
         return res;
-      }).catch(() => caches.match(BASE + 'index.html'));
-    })
+      })
+      .catch(() => {
+        return caches.match(e.request).then(cached => {
+          if (cached) return cached;
+          if (e.request.mode === 'navigate') {
+            return caches.match(BASE + 'index.html');
+          }
+        });
+      })
   );
 });

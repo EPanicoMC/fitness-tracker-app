@@ -88,9 +88,15 @@ async function loadContext() {
   } catch(e) {}
   try {
     const snap = await getDocs(collection(db, 'users', getUserId(), 'diet_plans'));
-    const active = snap.docs.find(d => d.data().active);
+    const activeDocs = snap.docs.filter(d => d.data().active);
+    activeDocs.sort((a, b) => new Date(b.data().updated_at || 0) - new Date(a.data().updated_at || 0));
+    const active = activeDocs[0];
     if (active) ctx.activeDiet = { id: active.id, ...active.data() };
-    else if (!snap.empty) ctx.activeDiet = { id: snap.docs[0].id, ...snap.docs[0].data() };
+    else if (!snap.empty) {
+      const allDiets = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      allDiets.sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
+      ctx.activeDiet = allDiets[0];
+    }
   } catch(e) {}
   try {
     const snap = await getDoc(doc(db, 'users', getUserId(), 'settings', 'app'));

@@ -168,7 +168,12 @@ async function init() {
       const [logSnap, progSnap, dietSnap, settSnap, checksSnap] = snaps;
       logData = logSnap.exists() ? logSnap.data() : {};
       activeProgram = progSnap.docs.find(d => d.data().active)?.data() || null;
-      activeDiet    = dietSnap.docs.find(d => d.data().active)?.data() || null;
+      
+      const activeDiets = dietSnap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(d => d.active);
+      activeDiets.sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
+      activeDiet = activeDiets[0] || null;
       appSettings   = settSnap.exists() ? settSnap.data() : {};
       latestCheck   = !checksSnap.empty ? checksSnap.docs[0].data() : null;
 
@@ -225,7 +230,11 @@ async function init() {
           loadSmart([fLogRef, fDietRef], (fSnaps) => {
             const [fSnap, fDietSnap] = fSnaps;
             friendLogData = fSnap.exists() ? fSnap.data() : null;
-            friendActiveDiet = fDietSnap.docs.find(d => d.data().active)?.data() || null;
+            const fDiets = fDietSnap.docs
+              .map(d => ({ id: d.id, ...d.data() }))
+              .filter(d => d.active);
+            fDiets.sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
+            friendActiveDiet = fDiets[0] || null;
             buildNutrition();
             buildMeals();
           }).catch((err) => {

@@ -321,46 +321,31 @@ async function fetchSmart(ref) {
 }
 
 export async function loadSmart(refs, callback) {
-  let snaps;
+  let cachedSnaps = null;
+  
+  // 1. Try cache-first fetch and callback immediately
   try {
-    snaps = await Promise.all(refs.map(ref => fetchSmart(ref)));
-    callback(snaps, false);
-  } catch (err) {
-    console.warn("loadSmart: cache-first fetch failed, falling back to server only", err);
-    try {
-      snaps = await Promise.all(refs.map(ref => {
-        const isDoc = ref.type === 'document' || (ref.path && ref.path.split('/').length % 2 === 0);
-        return isDoc ? getDoc(ref) : getDocs(ref);
-      }));
-      callback(snaps, false);
-    } catch (serverErr) {
-      console.error("loadSmart critical failure:", serverErr);
-      throw serverErr;
-    }
+    cachedSnaps = await Promise.all(refs.map(ref => {
+      const isDoc = ref.type === 'document' || (ref.path && ref.path.split('/').length % 2 === 0);
+      return isDoc ? getDocFromCache(ref) : getDocsFromCache(ref);
+    }));
+    callback(cachedSnaps, false);
+  } catch (cacheError) {
+    console.warn("loadSmart: cache load skipped or empty", cacheError.message);
   }
 
-  // Background server refresh
+  // 2. Fetch from server and trigger callback unconditionally to ensure freshness
   try {
     const serverSnaps = await Promise.all(refs.map(ref => {
       const isDoc = ref.type === 'document' || (ref.path && ref.path.split('/').length % 2 === 0);
       return isDoc ? getDoc(ref) : getDocs(ref);
     }));
-
-    let changed = false;
-    for (let i = 0; i < refs.length; i++) {
-      const cData = snaps[i].docs ? snaps[i].docs.map(d => d.data()) : snaps[i].data();
-      const sData = serverSnaps[i].docs ? serverSnaps[i].docs.map(d => d.data()) : serverSnaps[i].data();
-      if (JSON.stringify(cData) !== JSON.stringify(sData)) {
-        changed = true;
-        break;
-      }
-    }
-
-    if (changed) {
-      console.log("loadSmart: Background data changed, invoking callback");
-      callback(serverSnaps, false);
-    }
+    callback(serverSnaps, false);
   } catch (serverError) {
-    console.warn('Background server load failed:', serverError);
+    console.error("loadSmart: server load failed", serverError);
+    if (!cachedSnaps) {
+      // If we don't even have cached data, propagate the error
+      throw serverError;
+    }
   }
 }
