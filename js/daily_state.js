@@ -58,14 +58,16 @@ function saveToLocal() {
   if (!window.isServerLoaded) return;
   try {
     const key = 'fittracker_today_' + getTodayString();
-    const meals_state = {};
-    mealStates.forEach((m, i) => {
-      meals_state[i] = { eaten: m.eaten, variant: m.active_variant };
-    });
-    logData.meals_state = meals_state;
+    if (document.getElementById('meals-list')) {
+      const meals_state = {};
+      mealStates.forEach((m, i) => {
+        meals_state[i] = { eaten: m.eaten, variant: m.active_variant };
+      });
+      logData.meals_state = meals_state;
+    }
     logData.last_updated = Date.now();
     const payload = {
-      meals_state,
+      meals_state:     logData.meals_state || {},
       meals_overrides: logData.meals_overrides || {},
       extra_meals:     logData.extra_meals     || [],
       steps:           logData.steps           || null,
@@ -207,7 +209,7 @@ async function init() {
               steps:           logData.steps           || null,
               burned_kcal:     logData.burned_kcal     || null,
               daily_note:      logData.daily_note      || '',
-              is_training_day: isTrainingDay,
+              is_training_day: logData.is_training_day ?? logData.day_override ?? (activeProgram?.schedule?.[getDayOfWeek(TODAY)] ? true : false),
               day_override:    logData.day_override,
               smart_advice:    logData.smart_advice    || {},
               last_updated:    firestoreTime
@@ -770,7 +772,7 @@ function buildMeals() {
     let friendList = [];
     fMeals.forEach((fm, fi) => {
        const fsState = friendLogData ? (friendLogData.meals_state?.[fi] || friendLogData.meals_state?.[String(fi)]) : null;
-       const isEaten = friendLogData ? !!fsState?.eaten : true; // Show all if friend log data does not exist yet today
+       const isEaten = true; // Always show planned meals of the friend for copy purposes
        
        if (isEaten) {
           const ov = friendLogData ? (friendLogData.meals_overrides?.[fi] || friendLogData.meals_overrides?.[String(fi)]) : null;

@@ -349,3 +349,43 @@ export async function loadSmart(refs, callback) {
     }
   }
 }
+
+// ── Global Error Logger ──────────────────────────────────────
+async function logErrorToFirebase(type, errorData) {
+  try {
+    let email = null;
+    try {
+      email = auth?.currentUser?.email || null;
+    } catch (e) {}
+
+    const cleanEmail = email ? email.trim().toLowerCase() : 'anonymous';
+    const errorId = 'err_' + Date.now() + '_' + Math.random().toString(36).substring(2, 11);
+    await setDoc(doc(db, 'users', cleanEmail, 'errors', errorId), {
+      userId: cleanEmail,
+      type: type,
+      url: window.location.href,
+      userAgent: navigator.userAgent,
+      timestamp: new Date().toISOString(),
+      ...errorData
+    });
+  } catch (e) {
+    console.error('Failed to log error to Firebase:', e);
+  }
+}
+
+window.addEventListener('error', event => {
+  logErrorToFirebase('window.onerror', {
+    message: event.message,
+    source: event.filename,
+    lineno: event.lineno,
+    colno: event.colno,
+    stack: event.error?.stack || null
+  });
+});
+
+window.addEventListener('unhandledrejection', event => {
+  logErrorToFirebase('window.onunhandledrejection', {
+    reason: event.reason?.message || String(event.reason),
+    stack: event.reason?.stack || null
+  });
+});
