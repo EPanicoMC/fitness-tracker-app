@@ -69,6 +69,7 @@ function saveToLocal() {
       daily_note:      logData.daily_note      || '',
       is_training_day: isTrainingDay,
       day_override:    logData.day_override,
+      smart_advice:    logData.smart_advice    || {},
       last_updated:    logData.last_updated
     };
     safeLocalStorage.setItem(key, JSON.stringify(payload));
@@ -117,7 +118,19 @@ async function checkDayRollover() {
 
 // ── Init ───────────────────────────────────────────────────
 async function init() {
-  const dlabel = document.getElementById('date-label'); if(dlabel) dlabel.textContent = formatDateIT(TODAY);
+  const dlabel = document.getElementById('date-label');
+  if (dlabel) dlabel.textContent = formatDateIT(TODAY);
+  
+  const dietDlabel = document.getElementById('diet-date-label');
+  if (dietDlabel) dietDlabel.textContent = `(${formatDateShort(TODAY)})`;
+
+  // Controllo rollover periodico della data (ogni 30 secondi) per evitare viste congelate
+  setInterval(() => {
+    if (getTodayString() !== TODAY) {
+      console.log('Day changed! Reloading page safely...');
+      window.location.replace(window.location.href);
+    }
+  }, 30000);
 
   const userId = getUserId();
   if (!userId) {
@@ -162,6 +175,7 @@ async function init() {
             if (local.burned_kcal != null)  logData.burned_kcal  = local.burned_kcal;
             if (local.daily_note != null)   logData.daily_note   = local.daily_note;
             if (local.day_override != null) logData.day_override = local.day_override;
+            if (local.smart_advice)         logData.smart_advice = local.smart_advice;
             logData.last_updated = localTime;
           } else {
             // Local is outdated. Update local storage to match the newer Firestore data
@@ -174,6 +188,7 @@ async function init() {
               daily_note:      logData.daily_note      || '',
               is_training_day: isTrainingDay,
               day_override:    logData.day_override,
+              smart_advice:    logData.smart_advice    || {},
               last_updated:    firestoreTime
             };
             safeLocalStorage.setItem(lsKey, JSON.stringify(payload));
@@ -220,7 +235,7 @@ async function init() {
       syncToFirebase();
       return;
     }
-    if (getTodayString() !== TODAY) { window.location.reload(); return; }
+    if (getTodayString() !== TODAY) { window.location.replace(window.location.href); return; }
     const cached = safeLocalStorage.getItem('fittracker_today_' + TODAY);
     if (cached) {
       try {
@@ -1137,6 +1152,7 @@ async function syncToFirebase() {
     meals_state:     logData.meals_state     || {},
     meals_overrides: logData.meals_overrides || {},
     extra_meals:     logData.extra_meals     || [],
+    smart_advice:    logData.smart_advice    || {},
     last_updated:    logData.last_updated    || Date.now()
   };
   
@@ -1776,37 +1792,46 @@ async function buildSmartAdvisor() {
   if (!box) return;
 
   const partOfDay = getPartOfDay();
-  const cachedKey = `fittracker_advice_${TODAY}_${partOfDay}`;
-  const cachedText = safeLocalStorage.getItem(cachedKey);
+  const advice = logData.smart_advice?.[partOfDay];
 
-  if (cachedText) {
-    renderSmartAdvisorContent(cachedText);
+  if (advice) {
+    renderSmartAdvisorContent(advice);
   } else {
-    // No cached advice. Show loading skeleton and trigger generation silently
-    box.innerHTML = `
-      <div class="card" style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); padding:16px; border-radius:var(--rs);">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-          <div style="font-size:10px; font-weight:800; color:var(--accent); letter-spacing:1px; display:flex; align-items:center; gap:6px;">
-            <i class="ri-flashlight-fill"></i> KOVA SMART ADVISOR
+    const cachedKey = `fittracker_advice_${TODAY}_${partOfDay}`;
+    const cachedText = safeLocalStorage.getItem(cachedKey);
+
+    if (cachedText) {
+      if (!logData.smart_advice) logData.smart_advice = {};
+      logData.smart_advice[partOfDay] = cachedText;
+      saveToLocal();
+      renderSmartAdvisorContent(cachedText);
+    } else {
+      // Nessun consiglio caricato. Mostra lo skeleton e genera silente
+      box.innerHTML = `
+        <div class="card" style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); padding:16px; border-radius:var(--rs);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <div style="font-size:10px; font-weight:800; color:var(--accent); letter-spacing:1px; display:flex; align-items:center; gap:6px;">
+              <i class="ri-flashlight-fill"></i> KOVA SMART ADVISOR
+            </div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <div style="height:12px; background:rgba(255,255,255,0.05); width:80%; border-radius:4px; animation: pulse 1.5s infinite ease-in-out;"></div>
+            <div style="height:12px; background:rgba(255,255,255,0.05); width:95%; border-radius:4px; animation: pulse 1.5s infinite ease-in-out;"></div>
+            <div style="height:12px; background:rgba(255,255,255,0.05); width:50%; border-radius:4px; animation: pulse 1.5s infinite ease-in-out;"></div>
           </div>
         </div>
-        <div style="display:flex; flex-direction:column; gap:8px;">
-          <div style="height:12px; background:rgba(255,255,255,0.05); width:80%; border-radius:4px; animation: pulse 1.5s infinite ease-in-out;"></div>
-          <div style="height:12px; background:rgba(255,255,255,0.05); width:95%; border-radius:4px; animation: pulse 1.5s infinite ease-in-out;"></div>
-          <div style="height:12px; background:rgba(255,255,255,0.05); width:50%; border-radius:4px; animation: pulse 1.5s infinite ease-in-out;"></div>
-        </div>
-      </div>
-      <style>
-        @keyframes pulse {
-          0% { opacity: 0.6; }
-          50% { opacity: 0.3; }
-          100% { opacity: 0.6; }
-        }
-      </style>
-    `;
-    setTimeout(() => {
-      window.refreshSmartAdvisor(true);
-    }, 100);
+        <style>
+          @keyframes pulse {
+            0% { opacity: 0.6; }
+            50% { opacity: 0.3; }
+            100% { opacity: 0.6; }
+          }
+        </style>
+      `;
+      setTimeout(() => {
+        window.refreshSmartAdvisor(true);
+      }, 100);
+    }
   }
 }
 
@@ -1875,25 +1900,32 @@ window.refreshSmartAdvisor = async function(silent = false) {
       partOfDay
     });
 
+    let finalAdvice = '';
     if (r.success && r.advice) {
-      const cachedKey = `fittracker_advice_${TODAY}_${partOfDay}`;
-      safeLocalStorage.setItem(cachedKey, r.advice);
-      renderSmartAdvisorContent(r.advice);
+      finalAdvice = r.advice;
     } else {
       if (!silent && r.error && r.error.includes('Key')) {
         showToast('Configura la Gemini API Key in Impostazioni per consigli AI avanzati!', 'info');
       }
-      const localAdvice = generateLocalAdvice({
+      finalAdvice = generateLocalAdvice({
         profile: appSettings?.profile,
         activeDiet,
         activeProgram,
         dailyState,
         partOfDay
       });
-      const cachedKey = `fittracker_advice_${TODAY}_${partOfDay}`;
-      safeLocalStorage.setItem(cachedKey, localAdvice);
-      renderSmartAdvisorContent(localAdvice);
     }
+
+    if (!logData.smart_advice) logData.smart_advice = {};
+    logData.smart_advice[partOfDay] = finalAdvice;
+
+    const cachedKey = `fittracker_advice_${TODAY}_${partOfDay}`;
+    safeLocalStorage.setItem(cachedKey, finalAdvice);
+
+    saveToLocal();
+    await syncToFirebase();
+    renderSmartAdvisorContent(finalAdvice);
+
   } catch(e) {
     console.error('Advisor error:', e);
     const localAdvice = generateLocalAdvice({
@@ -1903,6 +1935,15 @@ window.refreshSmartAdvisor = async function(silent = false) {
       dailyState,
       partOfDay
     });
+
+    if (!logData.smart_advice) logData.smart_advice = {};
+    logData.smart_advice[partOfDay] = localAdvice;
+
+    const cachedKey = `fittracker_advice_${TODAY}_${partOfDay}`;
+    safeLocalStorage.setItem(cachedKey, localAdvice);
+
+    saveToLocal();
+    await syncToFirebase();
     renderSmartAdvisorContent(localAdvice);
   } finally {
     isGeneratingAdvice = false;
