@@ -1142,8 +1142,9 @@ window.generateWeeklyCoachReport = async function() {
 
 function markdownToHtml(md) {
   if (!md) return '';
-  // Normalize newlines
+  // Normalize newlines and strip markdown code blocks
   let text = md.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  text = text.replace(/```markdown/gi, '').replace(/```/g, '').trim();
   
   // Parse paragraphs
   const paragraphs = text.split(/\n\n+/);

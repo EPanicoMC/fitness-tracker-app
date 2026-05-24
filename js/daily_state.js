@@ -126,8 +126,8 @@ async function init() {
       logData.meals_overrides = local.meals_overrides || {};
       logData.meals_state     = local.meals_state     || {};
       logData.extra_meals     = local.extra_meals     || [];
-      if (local.steps != null)        logData.steps        = local.steps;
-      if (local.burned_kcal != null)  logData.burned_kcal  = local.burned_kcal;
+      if (local.steps != null && local.steps > (logData.steps || 0))        logData.steps        = local.steps;
+      if (local.burned_kcal != null && local.burned_kcal > (logData.burned_kcal || 0))  logData.burned_kcal  = local.burned_kcal;
       if (local.daily_note != null)   logData.daily_note   = local.daily_note;
       if (local.day_override != null) logData.day_override = local.day_override;
     } catch(e) {}
@@ -231,8 +231,8 @@ async function init() {
         logData.meals_overrides = local.meals_overrides || {};
         logData.meals_state     = local.meals_state     || {};
         logData.extra_meals     = local.extra_meals     || [];
-        if (local.steps != null)       logData.steps       = local.steps;
-        if (local.burned_kcal != null) logData.burned_kcal = local.burned_kcal;
+        if (local.steps != null && local.steps > (logData.steps || 0))       logData.steps       = local.steps;
+        if (local.burned_kcal != null && local.burned_kcal > (logData.burned_kcal || 0)) logData.burned_kcal = local.burned_kcal;
         if (local.daily_note != null)  logData.daily_note  = local.daily_note;
       } catch(e) {}
     }
@@ -901,27 +901,58 @@ function buildWorkout() {
   } else {
     el.innerHTML = `
       <div style="font-size:15px;font-weight:700;margin-bottom:10px">${session?.name || 'Sessione'}</div>
-      <a href="session.html" class="btn btn-o" style="text-decoration:none">🏋️ Vai ad Allenarti</a>`;
+      <a href="session.html" class="btn btn-o" style="text-decoration:none">🏋�// ── Stats ──────────────────────────────────────────────────
+function buildStats() {
+  const sf = document.getElementById('steps-in');
+  if(sf) {
+    sf.value = logData.steps || '';
+    if (!sf.dataset.listenerSet) {
+      sf.dataset.listenerSet = 'true';
+      sf.addEventListener('change', () => {
+        logData.steps = parseInt(sf.value) || null;
+        saveToLocal();
+        if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
+        syncToFirebase();
+        refreshStepsGoal();
+      });
+      sf.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') sf.blur();
+      });
+    }
   }
-}
 
-function refreshStepsGoal() {
-  const stepsGoal = appSettings?.steps_goal;
-  const row = document.getElementById('steps-goal-row');
-  if (!row) return;
-  row.style.display = 'block';
-  if (!stepsGoal) {
-    row.innerHTML = `<div style="font-size:11px;color:var(--t3);margin-top:4px">
-      <a href="settings.html" style="color:var(--accent)">⚙️ Imposta obiettivo</a> per la barra progresso</div>`;
-    return;
+  const kf = document.getElementById('burned-in');
+  if(kf) {
+    kf.value = logData.burned_kcal || '';
+    if (!kf.dataset.listenerSet) {
+      kf.dataset.listenerSet = 'true';
+      kf.addEventListener('change', () => {
+        logData.burned_kcal = parseInt(kf.value) || null;
+        saveToLocal();
+        if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
+        syncToFirebase();
+      });
+      kf.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') kf.blur();
+      });
+    }
   }
-  const steps = logData.steps || 0;
-  const pct = Math.min(100, Math.round((steps / stepsGoal) * 100));
-  const col = pct >= 100 ? 'var(--green)' : pct >= 70 ? 'var(--yellow)' : 'var(--t2)';
-  row.innerHTML = `
-    <div class="pbb h4" style="margin-top:6px"><div class="pbf pb-g" id="pb-steps" style="width:${pct}%"></div></div>
-    <div style="font-size:11px;color:${col};margin-top:3px;font-weight:600">
-      ${steps.toLocaleString('it-IT')} / ${stepsGoal.toLocaleString('it-IT')} passi (${pct}%)
+
+  const nf = document.getElementById('note-in');
+  if(nf) {
+    nf.value = logData.daily_note || '';
+    if (!nf.dataset.listenerSet) {
+      nf.dataset.listenerSet = 'true';
+      nf.addEventListener('input', () => { logData.daily_note = nf.value; });
+      nf.addEventListener('blur', () => {
+        logData.daily_note = nf.value;
+        saveToLocal();
+        if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
+        syncToFirebase();
+      });
+    }
+  }
+}si (${pct}%)
     </div>`;
 }
 

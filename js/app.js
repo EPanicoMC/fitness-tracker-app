@@ -12,7 +12,8 @@ export function requireAuth() {
         }
         resolve(user);
       } else {
-        window.location.href = 'auth.html';
+        const search = window.location.search;
+        window.location.href = 'auth.html' + search;
       }
     });
   });

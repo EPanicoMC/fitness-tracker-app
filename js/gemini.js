@@ -23,17 +23,16 @@ export async function calcMacrosFromText(text) {
     const prompt = `Analizza la seguente descrizione di un pasto e stima accuratamente i macronutrienti (Proteine, Carboidrati, Grassi) e le Calorie (kcal).
 Pasto: "${text}"
 
-Regole fondamentali di attendibilità:
-1. Se le quantità non sono specificate, ipotizza porzioni standard medie e ragionevoli (es. piatto di pasta = 80g a crudo, petto di pollo = 150g, 1 cucchiaio d'olio = 10g, uovo medio = 50g, 1 frutto = 150g).
-2. Valori nutrizionali di riferimento per 100g:
+Regole fondamentali e VINCOLANTI di attendibilità:
+1. Le calorie totali (kcal) DEVONO essere LA SOMMA MATEMATICA ESATTA dei macronutrienti calcolati usando questa formula: (Proteine * 4) + (Carboidrati * 4) + (Grassi * 9). Fai sempre un doppio check prima di rispondere. Se la somma non combacia, correggi i macronutrienti o le calorie.
+2. Se le quantità non sono specificate, ipotizza porzioni standard medie e ragionevoli (es. piatto di pasta = 80g a crudo, petto di pollo = 150g, 1 cucchiaio d'olio = 10g, uovo medio = 50g, 1 frutto = 150g).
+3. Valori nutrizionali di riferimento per 100g:
    - Pasta/Riso (crudo): ~350 kcal, 75g Carb, 10g Pro, 1g Fat
    - Petto di Pollo (crudo): ~110 kcal, 0g Carb, 23g Pro, 2g Fat
    - Olio Extravergine: ~880 kcal, 0g Carb, 0g Pro, 100g Fat
    - Salmone (fresco): ~180 kcal, 0g Carb, 20g Pro, 11g Fat
-   - Uovo intero: ~140 kcal, 1g Carb, 12g Pro, 10g Fat
    - Pane comune: ~260 kcal, 55g Carb, 8g Pro, 1g Fat
-3. Formula di controllo: le calorie totali (kcal) DEVONO essere matematicamente coerenti con i macronutrienti calcolati: (Proteine * 4) + (Carboidrati * 4) + (Grassi * 9) con una tolleranza massima del 10%.
-4. Rispondi esclusivamente con un oggetto JSON valido e nient'altro. Non includere blocchi di codice markdown (tipo \`\`\`json) o testo aggiuntivo.
+4. L'output deve essere SOLO un JSON valido, niente markup markdown.
 
 Struttura JSON richiesta:
 {
@@ -54,13 +53,9 @@ Struttura JSON richiesta:
 }`;
 
     const models = [
-      'gemini-3.1-flash-lite-preview',
-      'gemini-3.5-flash',
-      'gemini-2.5-flash',
-      'gemini-3-flash-preview',
-      'gemini-3-flash',
-      'gemini-2.5-flash-lite',
-      'gemini-1.5-flash'
+      'gemini-1.5-pro',
+      'gemini-1.5-flash',
+      'gemini-2.0-flash'
     ];
 
     for (const model of models) {
@@ -179,13 +174,9 @@ export async function analyzeCheckProgress({ prevCheck, newCheck }) {
   }
 
   const models = [
-    'gemini-3.1-flash-lite-preview',
-    'gemini-3.5-flash',
-    'gemini-2.5-flash',
-    'gemini-3-flash-preview',
-    'gemini-3-flash',
-    'gemini-2.5-flash-lite',
-    'gemini-1.5-flash'
+    'gemini-1.5-pro',
+    'gemini-1.5-flash',
+    'gemini-2.0-flash'
   ];
   for (const model of models) {
     try {
@@ -237,13 +228,9 @@ Struttura il report con le seguenti sezioni in markdown italiano pulito (usa emo
 Mantieni il report compatto ed efficace (circa 200-250 parole). Non aggiungere note esterne, rispondi solo in markdown.`;
 
   const models = [
-    'gemini-3.1-flash-lite-preview',
-    'gemini-3.5-flash',
-    'gemini-2.5-flash',
-    'gemini-3-flash-preview',
-    'gemini-3-flash',
-    'gemini-2.5-flash-lite',
-    'gemini-1.5-flash'
+    'gemini-1.5-pro',
+    'gemini-1.5-flash',
+    'gemini-2.0-flash'
   ];
   for (const model of models) {
     try {
@@ -296,13 +283,9 @@ Struttura JSON richiesta:
   ];
 
   const models = [
-    'gemini-3.1-flash-lite-preview',
-    'gemini-3.5-flash',
-    'gemini-2.5-flash',
-    'gemini-3-flash-preview',
-    'gemini-3-flash',
-    'gemini-2.5-flash-lite',
-    'gemini-1.5-flash'
+    'gemini-1.5-pro',
+    'gemini-1.5-flash',
+    'gemini-2.0-flash'
   ];
   for (const model of models) {
     try {

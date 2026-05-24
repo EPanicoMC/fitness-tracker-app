@@ -33,7 +33,7 @@ if (loginForm) {
     const password = document.getElementById('login-password').value;
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      window.location.href = 'index.html';
+      window.location.href = 'index.html' + window.location.search;
     } catch (error) {
       errorMsg.textContent = 'Errore di accesso: ' + error.message;
     }
@@ -47,7 +47,7 @@ if (registerForm) {
     const password = document.getElementById('register-password').value;
     try {
       await createUserWithEmailAndPassword(auth, email, password);
-      window.location.href = 'index.html';
+      window.location.href = 'index.html' + window.location.search;
     } catch (error) {
       errorMsg.textContent = 'Errore di registrazione: ' + error.message;
     }

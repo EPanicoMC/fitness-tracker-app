@@ -16,13 +16,9 @@ async function getApiKey() {
 }
 
 const MODELS = [
-  'gemini-3.1-flash-lite-preview',
-  'gemini-3.5-flash',
-  'gemini-2.5-flash',
-  'gemini-3-flash-preview',
-  'gemini-3-flash',
-  'gemini-2.5-flash-lite',
-  'gemini-1.5-flash'
+  'gemini-1.5-pro',
+  'gemini-1.5-flash',
+  'gemini-2.0-flash'
 ];
 
 async function callGemini(messages, systemPrompt) {
@@ -622,7 +618,10 @@ function switchToChatPhase() {
       <div id="coach-messages" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px"></div>
 
       <div id="coach-plan-banner" style="display:none" class="coach-plan-banner">
-        <div style="font-size:13px;font-weight:900;color:var(--accent);margin-bottom:10px">📋 Piano pronto — come vuoi salvarlo?</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div style="font-size:13px;font-weight:900;color:var(--accent)">📋 Piano pronto</div>
+          <button class="btn btn-ghost btn-sm" onclick="window._openFullPlanPreview()" style="font-size:11px;padding:4px 8px"><i class="ri-search-eye-line"></i> Vedi Piano Attuale</button>
+        </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           <button class="btn btn-ghost btn-sm" onclick="window._applyPlan(true)" style="font-size:12px;padding:10px">🔬 Bozza (inattiva)</button>
           <button class="btn btn-v btn-sm" onclick="window._applyPlan(false)" style="font-size:12px;padding:10px">✅ Salva (inattivo)</button>

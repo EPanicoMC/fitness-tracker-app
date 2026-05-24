@@ -73,15 +73,15 @@
     </div>
 
     <!-- PASSI -->
-    <div class="pano-card" onclick="location.href='programs.html'">
+    <div class="pano-card" id="steps-card" style="cursor:default">
       <div class="pano-icon"><i class="ri-time-line"></i></div>
-      <div class="pano-info">
+      <div class="pano-info" style="flex:1">
         <div class="pano-label">PASSI ATTIVI</div>
         <div class="pano-val" style="display:flex;align-items:center">
-          <input type="number" id="steps-in" readonly style="background:transparent;border:0;color:#fff;font-size:14px;font-weight:700;width:50px;text-align:right" placeholder="0">
+          <input type="number" id="steps-in" style="background:transparent;border:0;color:#fff;font-size:14px;font-weight:700;width:80px;text-align:right;outline:none" placeholder="Inserisci">
         </div>
       </div>
-      <i class="ri-arrow-right-s-line pano-arrow"></i>
+      <i class="ri-pencil-line" style="font-size:16px;color:var(--t3);margin-left:8px"></i>
     </div>
   </div>
 
@@ -117,6 +117,7 @@
     <div id="cring-box"></div>
     <input type="number" id="burned-in">
     <textarea id="note-in"></textarea>
+    <input type="file" id="meal-photo-input" accept="image/*">
   </div>
 
 </div>
