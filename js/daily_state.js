@@ -753,15 +753,18 @@ function buildMeals() {
   }
 
   let friendBannerHtml = '';
-  if (friendLogData) {
-    const fDayKey = friendLogData.is_training_day ? 'day_on' : 'day_off';
+  if (friendLogData || friendActiveDiet) {
+    const fIsTraining = friendLogData ? (friendLogData.is_training_day ?? false) : isTrainingDay;
+    const fDayKey = fIsTraining ? 'day_on' : 'day_off';
     const fMeals = friendActiveDiet ? (friendActiveDiet[fDayKey]?.meals || []) : [];
     
     let friendList = [];
     fMeals.forEach((fm, fi) => {
-       const fsState = friendLogData.meals_state?.[fi] || friendLogData.meals_state?.[String(fi)];
-       if (fsState?.eaten) {
-          const ov = friendLogData.meals_overrides?.[fi] || friendLogData.meals_overrides?.[String(fi)];
+       const fsState = friendLogData ? (friendLogData.meals_state?.[fi] || friendLogData.meals_state?.[String(fi)]) : null;
+       const isEaten = friendLogData ? !!fsState?.eaten : true; // Show all if friend log data does not exist yet today
+       
+       if (isEaten) {
+          const ov = friendLogData ? (friendLogData.meals_overrides?.[fi] || friendLogData.meals_overrides?.[String(fi)]) : null;
           friendList.push({
              name: fm.label || fm.type,
              kcal: ov?.kcal ?? fm.kcal,
@@ -773,23 +776,28 @@ function buildMeals() {
        }
     });
     
-    (friendLogData.extra_meals || []).forEach(em => {
-       friendList.push({
-           name: em.name,
-           kcal: em.kcal,
-           protein: em.protein,
-           carbs: em.carbs,
-           fats: em.fats,
-           ingredients: em.ingredients || ''
-       });
-    });
+    if (friendLogData) {
+      (friendLogData.extra_meals || []).forEach(em => {
+         friendList.push({
+             name: em.name,
+             kcal: em.kcal,
+             protein: em.protein,
+             carbs: em.carbs,
+             fats: em.fats,
+             ingredients: em.ingredients || ''
+         });
+      });
+    }
     
     window.currentFriendMeals = friendList;
     
     if (friendList.length > 0) {
+      const bannerTitle = friendLogData 
+        ? `🤝 Pasti di ${appSettings?.friend_email ? appSettings.friend_email.split('@')[0] : 'amico'} (Oggi)` 
+        : `🤝 Pasti di ${appSettings?.friend_email ? appSettings.friend_email.split('@')[0] : 'amico'} (Pianificati)`;
       friendBannerHtml = `
         <div class="card" style="margin-bottom:12px;background:rgba(124,111,255,0.05);border:1px solid rgba(124,111,255,0.3)">
-          <div style="font-size:12px;font-weight:800;color:var(--accent);margin-bottom:8px">🤝 Pasti mangiati da ${appSettings.friend_email.split('@')[0]}</div>
+          <div style="font-size:12px;font-weight:800;color:var(--accent);margin-bottom:8px">${bannerTitle}</div>
           <div style="display:flex;flex-direction:column;gap:6px">
             ${friendList.map((fm, idx) => `
               <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.05)">
