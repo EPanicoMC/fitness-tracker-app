@@ -50,6 +50,7 @@ let mealStates = [];
 let friendLogData = null;
 let friendActiveDiet = null;
 window.isServerLoaded = false;
+window.isMockData = true;
 
 let cloudSyncTimer = null;
 function saveToLocal() {
@@ -152,6 +153,7 @@ async function init() {
     ];
 
     window.isServerLoaded = false;
+    window.isMockData = true;
     const fallbackTimer = setTimeout(() => {
       if (!window.isServerLoaded) {
         console.log("Firestore server load timed out, forcing isServerLoaded = true");
@@ -160,7 +162,8 @@ async function init() {
       }
     }, 1500);
 
-    loadSmart(refs, (snaps) => {
+    loadSmart(refs, (snaps, isMock) => {
+      window.isMockData = !!isMock;
       const [logSnap, progSnap, dietSnap, settSnap, checksSnap] = snaps;
       logData = logSnap.exists() ? logSnap.data() : {};
       activeProgram = progSnap.docs.find(d => d.data().active)?.data() || null;
@@ -186,6 +189,7 @@ async function init() {
             if (local.burned_kcal != null)  logData.burned_kcal  = local.burned_kcal;
             if (local.daily_note != null)   logData.daily_note   = local.daily_note;
             if (local.day_override != null) logData.day_override = local.day_override;
+            if (local.is_training_day != null) logData.is_training_day = local.is_training_day;
             if (local.smart_advice)         logData.smart_advice = local.smart_advice;
             logData.last_updated = localTime;
           } else {
@@ -326,7 +330,9 @@ function renderDailyStateUI(local) {
 
   const dow = getDayOfWeek(TODAY);
   const progDay = activeProgram?.schedule?.[dow];
-  if (logData.day_override != null) {
+  if (logData.is_training_day != null) {
+    isTrainingDay = logData.is_training_day;
+  } else if (logData.day_override != null) {
     isTrainingDay = logData.day_override;
   } else if (local?.is_training_day != null) {
     isTrainingDay = local.is_training_day;
@@ -871,7 +877,7 @@ function renderMealRow(m, mi, originalMeals) {
         const lbl = typeof v === 'object' ? v.label : v;
         const det = typeof v === 'object' ? v.detail : v;
         return `<div class="var-chip ${m.active_variant === vi ? 'sel' : ''}"
-          onclick="selectVariant(${mi},${vi})">${lbl}</div>`;
+          onclick="window.selectVariant(${mi},${vi})">${lbl}</div>`;
       }).join('')}
     </div>` : '';
   const selVariantDetail = m.active_variant != null && m.variants?.[m.active_variant]
@@ -916,7 +922,7 @@ function renderMealRow(m, mi, originalMeals) {
 
   return `
     <div class="meal-item ${m.eaten ? 'eaten' : ''}" id="meal-${mi}">
-      <div class="meal-top" onclick="toggleMeal(${mi})" style="cursor:pointer">
+      <div class="meal-top" onclick="window.toggleMeal(${mi})" style="cursor:pointer">
         <div class="meal-chk">${m.eaten ? '✓' : ''}</div>
         ${m.time ? `<span class="meal-time">${m.time}</span>` : ''}
         <div class="meal-info">
@@ -935,7 +941,7 @@ function renderMealRow(m, mi, originalMeals) {
           <label class="fl"><i class="ri-edit-2-line"></i> Ingredienti (modifica)</label>
           <textarea id="meal-txt-${mi}" class="fi" rows="2" style="font-size:13px">${userTxt}</textarea>
           <div style="display:flex;gap:8px;margin-top:8px">
-            <button class="btn btn-ghost btn-sm" onclick="recalcMeal(${mi})" style="flex:1">✨ Ricalcola con AI</button>
+            <button class="btn btn-ghost btn-sm" onclick="window.recalcMeal(${mi})" style="flex:1">✨ Ricalcola con AI</button>
             <button class="btn btn-ghost btn-sm" onclick="window.startMealCamera(${mi})" style="flex:1">📸 Scansiona Cibo</button>
           </div>
           
@@ -950,13 +956,13 @@ function renderMealRow(m, mi, originalMeals) {
 
           <div id="meal-ai-${mi}" style="display:none;margin-top:8px"></div>
           <div style="margin-top:8px">
-            <button class="btn btn-ghost btn-sm" onclick="openManualMacro(${mi})"><i class="ri-pencil-line"></i> Inserisci manuale</button>
+            <button class="btn btn-ghost btn-sm" onclick="window.openManualMacro(${mi})"><i class="ri-pencil-line"></i> Inserisci manuale</button>
           </div>
         </div>
         <div class="meal-delta" id="meal-delta-${mi}"></div>
       </div>
     </div>
-    <div onclick="toggleMealDetail(${mi})" style="text-align:right;font-size:11px;color:var(--t3);cursor:pointer;padding:4px 0;margin-bottom:4px">▼ dettagli</div>`;
+    <div onclick="window.toggleMealDetail(${mi})" style="text-align:right;font-size:11px;color:var(--t3);cursor:pointer;padding:4px 0;margin-bottom:4px">▼ dettagli</div>`;
 }
 
 window.toggleMeal = function(mi) {
@@ -1010,7 +1016,7 @@ window.recalcMeal = async function(mi) {
         <div class="fmp-item"><div class="fmp-v" style="color:var(--yellow)">${r.carbs}g</div><div class="fmp-l">Carbo</div></div>
         <div class="fmp-item"><div class="fmp-v" style="color:var(--purple)">${r.fats}g</div><div class="fmp-l">Grassi</div></div>
       </div>
-      <button class="btn btn-v btn-sm" onclick="applyMealAI(${mi},${r.kcal},${r.protein},${r.carbs},${r.fats})" style="margin-top:8px">✅ Applica</button>`;
+      <button class="btn btn-v btn-sm" onclick="window.applyMealAI(${mi},${r.kcal},${r.protein},${r.carbs},${r.fats})" style="margin-top:8px">✅ Applica</button>`;
     const tgt = mealStates[mi].kcal;
     const diff = r.kcal - tgt;
     const deltaEl = document.getElementById(`meal-delta-${mi}`);
@@ -1144,7 +1150,7 @@ window.calcAI = async function() {
       <div class="fmp-item"><div class="fmp-v">${r.fats}g</div><div class="fmp-l">Grassi</div></div>
     </div>
     ${r.items.map(i => `<div style="font-size:12px;color:var(--t2);margin-top:4px">• ${i.name} (${i.grams}g) → ${i.kcal}kcal</div>`).join('')}
-    <button class="btn btn-v btn-sm" onclick="openAddMealFromAI(${r.kcal}, ${r.protein}, ${r.carbs}, ${r.fats}, '${text.replace(/'/g, "\\'")}')" style="margin-top:12px;width:100%"><i class="ri-add-circle-fill"></i> Aggiungi come Extra</button>`;
+    <button class="btn btn-v btn-sm" onclick="window.openAddMealFromAI(${r.kcal}, ${r.protein}, ${r.carbs}, ${r.fats}, '${text.replace(/'/g, "\\'")}')" style="margin-top:12px;width:100%"><i class="ri-add-circle-fill"></i> Aggiungi come Extra</button>`;
 };
 
 window.openAddMealFromAI = function(kcal, protein, carbs, fats, text) {
@@ -1161,6 +1167,10 @@ window.openAddMealFromAI = function(kcal, protein, carbs, fats, text) {
 // ── Cloud Sync (called by saveToLocal debouncer + manual saveDay) ───
 async function syncToFirebase() {
   if (!window.isServerLoaded) return;
+  if (window.isMockData) {
+    console.log("Skipping syncToFirebase because we only have mock/unloaded data");
+    return;
+  }
   if (!getUserId()) return;
 
   const sf = document.getElementById('steps-in');
@@ -1244,7 +1254,7 @@ async function checkYesterdayLog() {
       <div style="font-size:13px;font-weight:700;color:var(--orange)">📋 Ieri non hai registrato la giornata</div>
       <div style="font-size:12px;color:var(--t2);margin-top:2px">Vuoi recuperare i dati di ${formatDateShort(yesterday)}?</div>
     </div>
-    <button class="btn btn-o btn-xs" onclick="openRecoverDay('${yesterday}')">Recupera</button>
+    <button class="btn btn-o btn-xs" onclick="window.openRecoverDay('${yesterday}')">Recupera</button>
   `;
   const wrap = document.querySelector('.wrap');
   if (wrap?.firstChild) wrap.insertBefore(banner, wrap.firstChild);
@@ -1297,7 +1307,7 @@ window.openRecoverDay = function(dateStr) {
       </div>
       <div class="modal-btns">
         <button class="btn btn-flat" onclick="document.getElementById('recover-modal').remove()">Annulla</button>
-        <button class="btn btn-v" onclick="saveRecoveredDay('${dateStr}')">💾 Salva</button>
+        <button class="btn btn-v" onclick="window.saveRecoveredDay('${dateStr}')">💾 Salva</button>
       </div>
     </div>`;
   document.body.appendChild(bg);
@@ -1451,7 +1461,7 @@ window.openAddMeal = function(prefillData, editIndex) {
         <textarea class="fi" id="am-ingredients" rows="3"
           placeholder="Es: 150g pollo, 100g riso, 10g olio&#10;Oppure inserisci macro manualmente sotto">${prefillData?.ingredients || ''}</textarea>
         <div style="display:flex;gap:8px;margin-top:8px">
-          <button class="btn btn-ghost btn-sm" onclick="calcAIMeal()" style="flex:1">
+          <button class="btn btn-ghost btn-sm" onclick="window.calcAIMeal()" style="flex:1">
             ✨ Calcola con AI
           </button>
           <button class="btn btn-ghost btn-sm" onclick="window.startFoodCamera()" style="flex:1">
@@ -1512,7 +1522,7 @@ window.openAddMeal = function(prefillData, editIndex) {
         <button class="btn btn-ghost btn-sm" onclick="window.saveAsTemplate()">
           ⭐ Salva come Template
         </button>`}
-        <button class="btn btn-g btn-sm" onclick="saveExtraMeal(${isEdit ? editIndex : 'null'})">
+        <button class="btn btn-g btn-sm" onclick="window.saveExtraMeal(${isEdit ? editIndex : 'null'})">
           💾 Salva
         </button>
       </div>
@@ -1626,7 +1636,7 @@ window.openManualMacro = function(mealIndex) {
       </div>
       <div class="modal-btns" style="margin-top:16px">
         <button class="btn btn-flat" onclick="document.getElementById('manual-macro-modal').remove()">Annulla</button>
-        <button class="btn btn-g" onclick="saveManualMacro(${mealIndex})">✅ Salva</button>
+        <button class="btn btn-g" onclick="window.saveManualMacro(${mealIndex})">✅ Salva</button>
       </div>
     </div>`;
   document.body.appendChild(bg);
@@ -1795,7 +1805,7 @@ window.captureMealImage = async function(mi) {
           <div class="fmp-item"><div class="fmp-v" style="color:var(--yellow)">${r.carbs}g</div><div class="fmp-l">Carbo</div></div>
           <div class="fmp-item"><div class="fmp-v" style="color:var(--purple)">${r.fats}g</div><div class="fmp-l">Grassi</div></div>
         </div>
-        <button class="btn btn-v btn-sm" onclick="applyMealAI(${mi},${r.kcal},${r.protein},${r.carbs},${r.fats})" style="margin-top:8px">✅ Applica</button>`;
+        <button class="btn btn-v btn-sm" onclick="window.applyMealAI(${mi},${r.kcal},${r.protein},${r.carbs},${r.fats})" style="margin-top:8px">✅ Applica</button>`;
       
       const tgt = mealStates[mi].kcal;
       const diff = r.kcal - tgt;

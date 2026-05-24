@@ -1276,7 +1276,7 @@ window.openAddMealForDate = function(dateStr, prefillData) {
         <textarea class="fi" id="am-ingredients" rows="3"
           placeholder="Es: 150g pollo, 100g riso, 10g olio&#10;Oppure inserisci macro manualmente sotto">${prefillData?.ingredients || ''}</textarea>
         <div style="display:flex;gap:8px;margin-top:8px">
-          <button class="btn btn-ghost btn-sm" onclick="calcAIMealForDate()" style="flex:1">
+          <button class="btn btn-ghost btn-sm" onclick="window.calcAIMealForDate()" style="flex:1">
             ✨ Calcola con AI
           </button>
           <button class="btn btn-ghost btn-sm" onclick="window.startFoodCameraForDate()" style="flex:1">

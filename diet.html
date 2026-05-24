@@ -56,7 +56,7 @@
       </div>
       <div id="meals-list"><div class="spin"></div></div>
       <div style="display:flex;gap:8px;margin-top:12px">
-        <button class="btn btn-ghost btn-sm" onclick="openAddMeal()" style="flex:1">+ Pasto extra</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.openAddMeal()" style="flex:1">+ Pasto extra</button>
         <button class="btn btn-ghost btn-sm" onclick="window.openAddMealWithCamera()" style="flex:1">📸 Foto Scanner</button>
       </div>
     </div>
@@ -64,7 +64,7 @@
     <div class="ai-box">
       <span class="clabel"><i class="ri-magic-line"></i> Calcolo rapido AI</span>
       <textarea id="ai-input" placeholder="Es: 100g pollo, 200g verdure, 130g riso, 20g olio evo"></textarea>
-      <button class="btn btn-v btn-sm" onclick="calcAI()" id="ai-btn" style="margin-top:10px;width:auto"><i class="ri-robot-2-line"></i> Calcola Macro</button>
+      <button class="btn btn-v btn-sm" onclick="window.calcAI()" id="ai-btn" style="margin-top:10px;width:auto"><i class="ri-robot-2-line"></i> Calcola Macro</button>
       <div class="ai-result" id="ai-result"></div>
     </div>
   </div>
@@ -73,8 +73,8 @@
   <div class="ph">
     <h1>🥗 Dieta</h1>
     <div style="display:flex;gap:8px">
-      <button class="btn btn-ghost btn-sm" onclick="openCoachPanel('diet')">🤖 AI Coach</button>
-      <button class="btn btn-v btn-sm" onclick="openNewDiet()">＋ Nuovo</button>
+      <button class="btn btn-ghost btn-sm" onclick="window.openCoachPanel('diet')">🤖 AI Coach</button>
+      <button class="btn btn-v btn-sm" onclick="window.openNewDiet()">＋ Nuovo</button>
     </div>
   </div>
   <div id="diet-list"><div class="spin"></div></div>

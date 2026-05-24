@@ -313,7 +313,7 @@ export async function loadSmart(refs, callback) {
         return getDocsFromCache(ref);
       }
     }));
-    callback(cachedSnaps);
+    callback(cachedSnaps, false);
   } catch (cacheError) {
     // Ignore cache error, fallback to server but invoke callback with mock empty snapshots to prevent infinite loading spinner
     const mockSnaps = refs.map(ref => {
@@ -332,7 +332,7 @@ export async function loadSmart(refs, callback) {
       }
     });
     try {
-      callback(mockSnaps);
+      callback(mockSnaps, true);
     } catch (cbErr) {
       console.warn('Callback error on mock snaps:', cbErr);
     }
@@ -362,7 +362,7 @@ export async function loadSmart(refs, callback) {
     }
     
     if (changed) {
-      callback(serverSnaps);
+      callback(serverSnaps, false);
     }
   } catch (serverError) {
     console.warn('Background server load failed:', serverError);

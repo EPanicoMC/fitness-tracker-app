@@ -28,8 +28,8 @@
 
   <!-- TAB SWITCHER -->
   <div class="tab-sw">
-    <button class="tab-btn" onclick="showTab('week')">📊 7 Giorni</button>
-    <button class="tab-btn tab-active" onclick="showTab('cal')">🗓️ Mese</button>
+    <button class="tab-btn" onclick="window.showTab('week')">📊 7 Giorni</button>
+    <button class="tab-btn tab-active" onclick="window.showTab('cal')">🗓️ Mese</button>
   </div>
 
   <!-- WEEK VIEW -->
@@ -41,9 +41,9 @@
   <div id="cal-view" style="display:block">
     <!-- MONTH NAV -->
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-      <button class="btn-icon" onclick="changeMonth(-1)">←</button>
+      <button class="btn-icon" onclick="window.changeMonth(-1)">←</button>
       <span id="month-label" style="font-size:18px;font-weight:800"></span>
-      <button class="btn-icon" onclick="changeMonth(1)">→</button>
+      <button class="btn-icon" onclick="window.changeMonth(1)">→</button>
     </div>
 
     <!-- CALENDAR HEADER -->
