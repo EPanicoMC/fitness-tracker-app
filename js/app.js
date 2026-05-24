@@ -42,8 +42,8 @@ export function getTodayString() {
   });
   const parts = formatter.formatToParts(d);
   const year = parts.find(p => p.type === 'year').value;
-  const month = parts.find(p => p.type === 'month').value;
-  const day = parts.find(p => p.type === 'day').value;
+  const month = parts.find(p => p.type === 'month').value.padStart(2, '0');
+  const day = parts.find(p => p.type === 'day').value.padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
 
@@ -58,8 +58,8 @@ export function getYesterdayString() {
   });
   const parts = formatter.formatToParts(d);
   const year = parts.find(p => p.type === 'year').value;
-  const month = parts.find(p => p.type === 'month').value;
-  const day = parts.find(p => p.type === 'day').value;
+  const month = parts.find(p => p.type === 'month').value.padStart(2, '0');
+  const day = parts.find(p => p.type === 'day').value.padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
 
