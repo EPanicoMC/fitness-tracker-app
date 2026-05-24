@@ -14,7 +14,13 @@ async function loadPrograms() {
   const el = document.getElementById('prg-list');
   if (!el) return;
 
-  const coll = collection(db, 'users', getUserId(), 'programs');
+  const userId = getUserId();
+  if (!userId) {
+    console.warn("User ID is not defined yet.");
+    return;
+  }
+
+  const coll = collection(db, 'users', userId, 'programs');
 
   const render = (snap) => {
     programs = snap.docs.map(d => ({ id: d.id, ...d.data() }));

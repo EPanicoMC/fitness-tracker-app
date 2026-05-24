@@ -1,4 +1,16 @@
-import { auth, onAuthStateChanged, db, doc, setDoc } from './firebase-config.js';
+import {
+  auth,
+  onAuthStateChanged,
+  db,
+  doc,
+  setDoc,
+  getDoc,
+  getDocs,
+  getDocFromCache,
+  getDocsFromCache,
+  collection,
+  deleteDoc
+} from './firebase-config.js';
 
 export function requireAuth() {
   return new Promise((resolve) => {
@@ -258,7 +270,6 @@ export function calcSmartScore({
 
 export async function cleanOldLogs(db, userId, monthsToKeep=12) {
   try {
-    const { collection, getDocs, deleteDoc, doc } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
     const cutoff = new Date();
     cutoff.setMonth(cutoff.getMonth() - monthsToKeep);
     const cutoffStr = cutoff.toISOString().split('T')[0];
@@ -274,7 +285,6 @@ export async function cleanOldLogs(db, userId, monthsToKeep=12) {
 export async function loadSmart(refs, callback) {
   let cachedSnaps = null;
   try {
-    const { getDocFromCache, getDocsFromCache } = await import('./firebase-config.js');
     cachedSnaps = await Promise.all(refs.map(ref => {
       if (ref.type === 'document' || (ref.path && ref.path.split('/').length % 2 === 0)) {
         return getDocFromCache(ref);
@@ -284,11 +294,30 @@ export async function loadSmart(refs, callback) {
     }));
     callback(cachedSnaps);
   } catch (cacheError) {
-    // Ignore cache error, fallback to server
+    // Ignore cache error, fallback to server but invoke callback with mock empty snapshots to prevent infinite loading spinner
+    const mockSnaps = refs.map(ref => {
+      const isDoc = ref.type === 'document' || (ref.path && ref.path.split('/').length % 2 === 0);
+      if (isDoc) {
+        return {
+          exists: () => false,
+          data: () => ({}),
+          id: ref.id || (ref.path ? ref.path.split('/').pop() : '')
+        };
+      } else {
+        return {
+          empty: true,
+          docs: []
+        };
+      }
+    });
+    try {
+      callback(mockSnaps);
+    } catch (cbErr) {
+      console.warn('Callback error on mock snaps:', cbErr);
+    }
   }
 
   try {
-    const { getDoc, getDocs } = await import('./firebase-config.js');
     const serverSnaps = await Promise.all(refs.map(ref => {
       if (ref.type === 'document' || (ref.path && ref.path.split('/').length % 2 === 0)) {
         return getDoc(ref);

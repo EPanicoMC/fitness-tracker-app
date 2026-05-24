@@ -67,9 +67,14 @@ async function requestNotifPermission() {
 
 // ── Load select screen ─────────────────────────────────────
 async function loadSessionSelect() {
+  const userId = getUserId();
+  if (!userId) {
+    console.warn("User ID is not defined yet.");
+    return;
+  }
   const refs = [
-    collection(db, 'users', getUserId(), 'programs'),
-    query(collection(db, 'users', getUserId(), 'daily_logs'), orderBy('date', 'desc'), limit(30))
+    collection(db, 'users', userId, 'programs'),
+    query(collection(db, 'users', userId, 'daily_logs'), orderBy('date', 'desc'), limit(30))
   ];
 
   try {

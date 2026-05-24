@@ -89,11 +89,13 @@ async function checkDayRollover() {
   const yesterday = getYesterdayString();
   const yesterdayLS = safeLocalStorage.getItem('fittracker_today_' + yesterday);
   if (!yesterdayLS) return;
+  const userId = getUserId();
+  if (!userId) return;
   try {
     const data = JSON.parse(yesterdayLS);
-    const snap = await getDoc(doc(db, 'users', getUserId(), 'daily_logs', yesterday));
+    const snap = await getDoc(doc(db, 'users', userId, 'daily_logs', yesterday));
     if (!snap.exists()) {
-      await setDoc(doc(db, 'users', getUserId(), 'daily_logs', yesterday), {
+      await setDoc(doc(db, 'users', userId, 'daily_logs', yesterday), {
         date: yesterday,
         is_training_day: data.is_training_day || false,
         steps: data.steps || null,
@@ -105,7 +107,7 @@ async function checkDayRollover() {
       console.log('Auto-salvato giorno precedente:', yesterday);
     } else if (data.daily_note) {
       // Doc esiste ma la nota in localStorage potrebbe non essere stata sincronizzata
-      await setDoc(doc(db, 'users', getUserId(), 'daily_logs', yesterday), { daily_note: data.daily_note }, { merge: true });
+      await setDoc(doc(db, 'users', userId, 'daily_logs', yesterday), { daily_note: data.daily_note }, { merge: true });
     }
     safeLocalStorage.removeItem('fittracker_today_' + yesterday);
   } catch(e) {
@@ -117,15 +119,21 @@ async function checkDayRollover() {
 async function init() {
   const dlabel = document.getElementById('date-label'); if(dlabel) dlabel.textContent = formatDateIT(TODAY);
 
+  const userId = getUserId();
+  if (!userId) {
+    console.warn('User ID is not defined yet.');
+    return;
+  }
+
   await checkDayRollover();
 
   try {
     const refs = [
-      doc(db, 'users', getUserId(), 'daily_logs', TODAY),
-      collection(db, 'users', getUserId(), 'programs'),
-      collection(db, 'users', getUserId(), 'diet_plans'),
-      doc(db, 'users', getUserId(), 'settings', 'app'),
-      query(collection(db, 'users', getUserId(), 'checks'), orderBy('date', 'desc'), limit(1))
+      doc(db, 'users', userId, 'daily_logs', TODAY),
+      collection(db, 'users', userId, 'programs'),
+      collection(db, 'users', userId, 'diet_plans'),
+      doc(db, 'users', userId, 'settings', 'app'),
+      query(collection(db, 'users', userId, 'checks'), orderBy('date', 'desc'), limit(1))
     ];
 
     await loadSmart(refs, (snaps) => {
@@ -1033,59 +1041,8 @@ function buildWorkout() {
   } else {
     el.innerHTML = `
       <div style="font-size:15px;font-weight:700;margin-bottom:10px">${session?.name || 'Sessione'}</div>
-      <a href="session.html" class="btn btn-o" style="text-decoration:none">🏋 // ── Stats ──────────────────────────────────────────────────
-function buildStats() {
-  const sf = document.getElementById('steps-in');
-  if(sf) {
-    sf.value = logData.steps || '';
-    if (!sf.dataset.listenerSet) {
-      sf.dataset.listenerSet = 'true';
-      sf.addEventListener('change', () => {
-        logData.steps = parseInt(sf.value) || null;
-        saveToLocal();
-        if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
-        syncToFirebase();
-        refreshStepsGoal();
-      });
-      sf.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') sf.blur();
-      });
-    }
+      <a href="session.html" class="btn btn-o" style="text-decoration:none">🏋️ Vai ad Allenarti</a>`;
   }
-
-  const kf = document.getElementById('burned-in');
-  if(kf) {
-    kf.value = logData.burned_kcal || '';
-    if (!kf.dataset.listenerSet) {
-      kf.dataset.listenerSet = 'true';
-      kf.addEventListener('change', () => {
-        logData.burned_kcal = parseInt(kf.value) || null;
-        saveToLocal();
-        if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
-        syncToFirebase();
-      });
-      kf.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') kf.blur();
-      });
-    }
-  }
-
-  const nf = document.getElementById('note-in');
-  if(nf) {
-    nf.value = logData.daily_note || '';
-    if (!nf.dataset.listenerSet) {
-      nf.dataset.listenerSet = 'true';
-      nf.addEventListener('input', () => { logData.daily_note = nf.value; });
-      nf.addEventListener('blur', () => {
-        logData.daily_note = nf.value;
-        saveToLocal();
-        if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
-        syncToFirebase();
-      });
-    }
-  }
-}si (${pct}%)
-    </div>`;
 }
 
 // ── Stats ──────────────────────────────────────────────────
@@ -1371,7 +1328,36 @@ async function loadMealTemplatesForDropdown() {
     const snap = await getDocs(collection(db, 'users', getUserId(), 'meal_templates'));
     mealTemplates = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     
-    const container // ── Aggiungi pasto extra ───────────────────────────────────
+    const select = document.getElementById('am-template-select');
+    const container = document.getElementById('template-select-container');
+    if (!select || !container) return;
+    
+    if (mealTemplates.length === 0) {
+      container.style.display = 'none';
+      return;
+    }
+    
+    container.style.display = 'block';
+    select.innerHTML = '<option value="">-- Seleziona un template --</option>' + 
+      mealTemplates.map(t => `<option value="${t.id}">${t.name} (${t.kcal} kcal · P:${t.protein}g)</option>`).join('');
+  } catch(e) {
+    console.warn('Errore caricamento template per dropdown:', e);
+  }
+}
+
+window.loadMealTemplate = function(id) {
+  const t = mealTemplates.find(x => x.id === id);
+  if (!t) return;
+  const setVal = (id, val) => { const e = document.getElementById(id); if (e) e.value = val; };
+  setVal('am-name', t.name || '');
+  setVal('am-ingredients', t.ingredients || '');
+  setVal('am-kcal', t.kcal || 0);
+  setVal('am-protein', t.protein || 0);
+  setVal('am-carbs', t.carbs || 0);
+  setVal('am-fats', t.fats || 0);
+};
+
+// ── Aggiungi pasto extra ───────────────────────────────────
 window.openAddMeal = function(prefillData, editIndex) {
   const isEdit = editIndex !== undefined && editIndex !== null;
   const selectedType = prefillData?.type || 'extra';

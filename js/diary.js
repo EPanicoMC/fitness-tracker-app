@@ -15,15 +15,21 @@ let selectedDate = null;
 let settingsData = null;
 
 async function init() {
+  const userId = getUserId();
+  if (!userId) {
+    console.warn("User ID is not defined yet.");
+    return;
+  }
+
   const refs = [
-    collection(db, 'users', getUserId(), 'programs'),
+    collection(db, 'users', userId, 'programs'),
     query(
-      collection(db, 'users', getUserId(), 'daily_logs'),
+      collection(db, 'users', userId, 'daily_logs'),
       orderBy('date', 'desc'),
       limit(60)
     ),
-    doc(db, 'users', getUserId(), 'settings', 'app'),
-    collection(db, 'users', getUserId(), 'diet_plans')
+    doc(db, 'users', userId, 'settings', 'app'),
+    collection(db, 'users', userId, 'diet_plans')
   ];
 
   try {

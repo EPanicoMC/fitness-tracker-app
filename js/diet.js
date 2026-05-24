@@ -20,7 +20,13 @@ async function loadDiets() {
   const el = document.getElementById('diet-list');
   if (!el) return;
 
-  const coll = collection(db, 'users', getUserId(), 'diet_plans');
+  const userId = getUserId();
+  if (!userId) {
+    console.warn("User ID is not defined yet.");
+    return;
+  }
+
+  const coll = collection(db, 'users', userId, 'diet_plans');
 
   const processAndRender = async (snap) => {
     diets = await Promise.all(snap.docs.map(async d => {
