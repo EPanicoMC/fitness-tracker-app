@@ -326,6 +326,12 @@ function renderDailyStateUI(local) {
       }
     }
     if (updated) {
+      // Forziamo isServerLoaded=true perché siamo dentro renderDailyStateUI
+      // che viene chiamata DOPO il caricamento dati da Firestore
+      window.isServerLoaded = true;
+      // Aggiorna last_updated ora per garantire che i dati da shortcut
+      // vincano sul merge con Firestore al prossimo avvio
+      logData.last_updated = Date.now();
       saveToLocal();
       syncToFirebase();
       showToast('🍎 Dati Apple Health sincronizzati con successo! 👟');
@@ -758,7 +764,9 @@ function buildMeals() {
     let friendList = [];
     fMeals.forEach((fm, fi) => {
        const fsState = friendLogData ? (friendLogData.meals_state?.[fi] || friendLogData.meals_state?.[String(fi)]) : null;
-       const isEaten = true; // Always show planned meals of the friend for copy purposes
+       // Se abbiamo il log del giorno dell'amico, mostra solo i pasti che ha flaggato come mangiati.
+       // Se non abbiamo il log (solo piano dieta), mostra tutti i pasti pianificati.
+       const isEaten = friendLogData ? (fsState?.eaten === true) : true;
        
        if (isEaten) {
           const ov = friendLogData ? (friendLogData.meals_overrides?.[fi] || friendLogData.meals_overrides?.[String(fi)]) : null;
@@ -1881,68 +1889,54 @@ async function buildSmartAdvisor() {
 
   if (advice) {
     renderSmartAdvisorContent(advice);
-  } else {
-    const cachedKey = `fittracker_advice_${TODAY}_${partOfDay}`;
-    const cachedText = safeLocalStorage.getItem(cachedKey);
-
-    if (cachedText) {
-      if (!logData.smart_advice) logData.smart_advice = {};
-      logData.smart_advice[partOfDay] = cachedText;
-      saveToLocal();
-      renderSmartAdvisorContent(cachedText);
-    } else {
-      if (!window.isServerLoaded) {
-        box.innerHTML = `
-          <div class="card" style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); padding:16px; border-radius:var(--rs);">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-              <div style="font-size:10px; font-weight:800; color:var(--accent); letter-spacing:1px; display:flex; align-items:center; gap:6px;">
-                <i class="ri-flashlight-fill"></i> KOVA SMART ADVISOR
-              </div>
-            </div>
-            <div style="display:flex; flex-direction:column; gap:8px;">
-              <div style="height:12px; background:rgba(255,255,255,0.05); width:80%; border-radius:4px; animation: pulse 1.5s infinite ease-in-out;"></div>
-              <div style="height:12px; background:rgba(255,255,255,0.05); width:95%; border-radius:4px; animation: pulse 1.5s infinite ease-in-out;"></div>
-              <div style="height:12px; background:rgba(255,255,255,0.05); width:50%; border-radius:4px; animation: pulse 1.5s infinite ease-in-out;"></div>
-            </div>
-          </div>
-          <style>
-            @keyframes pulse {
-              0% { opacity: 0.6; }
-              50% { opacity: 0.3; }
-              100% { opacity: 0.6; }
-            }
-          </style>
-        `;
-        return;
-      }
-
-      // Nessun consiglio caricato. Mostra lo skeleton e genera silente
-      box.innerHTML = `
-        <div class="card" style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); padding:16px; border-radius:var(--rs);">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <div style="font-size:10px; font-weight:800; color:var(--accent); letter-spacing:1px; display:flex; align-items:center; gap:6px;">
-              <i class="ri-flashlight-fill"></i> KOVA SMART ADVISOR
-            </div>
-          </div>
-          <div style="display:flex; flex-direction:column; gap:8px;">
-            <div style="height:12px; background:rgba(255,255,255,0.05); width:80%; border-radius:4px; animation: pulse 1.5s infinite ease-in-out;"></div>
-            <div style="height:12px; background:rgba(255,255,255,0.05); width:95%; border-radius:4px; animation: pulse 1.5s infinite ease-in-out;"></div>
-            <div style="height:12px; background:rgba(255,255,255,0.05); width:50%; border-radius:4px; animation: pulse 1.5s infinite ease-in-out;"></div>
-          </div>
-        </div>
-        <style>
-          @keyframes pulse {
-            0% { opacity: 0.6; }
-            50% { opacity: 0.3; }
-            100% { opacity: 0.6; }
-          }
-        </style>
-      `;
-      setTimeout(() => {
-        window.refreshSmartAdvisor(true);
-      }, 100);
-    }
+    return;
   }
+
+  const cachedKey = `fittracker_advice_${TODAY}_${partOfDay}`;
+  const cachedText = safeLocalStorage.getItem(cachedKey);
+
+  if (cachedText) {
+    if (!logData.smart_advice) logData.smart_advice = {};
+    logData.smart_advice[partOfDay] = cachedText;
+    saveToLocal();
+    renderSmartAdvisorContent(cachedText);
+    return;
+  }
+
+  // Mostra skeleton in attesa
+  const skeletonHtml = `
+    <div class="card" style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); padding:16px; border-radius:var(--rs);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <div style="font-size:10px; font-weight:800; color:var(--accent); letter-spacing:1px; display:flex; align-items:center; gap:6px;">
+          <i class="ri-flashlight-fill"></i> KOVA SMART ADVISOR
+        </div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <div style="height:12px; background:rgba(255,255,255,0.05); width:80%; border-radius:4px; animation: pulse 1.5s infinite ease-in-out;"></div>
+        <div style="height:12px; background:rgba(255,255,255,0.05); width:95%; border-radius:4px; animation: pulse 1.5s infinite ease-in-out;"></div>
+        <div style="height:12px; background:rgba(255,255,255,0.05); width:50%; border-radius:4px; animation: pulse 1.5s infinite ease-in-out;"></div>
+      </div>
+    </div>
+    <style>
+      @keyframes pulse {
+        0% { opacity: 0.6; }
+        50% { opacity: 0.3; }
+        100% { opacity: 0.6; }
+      }
+    </style>
+  `;
+  box.innerHTML = skeletonHtml;
+
+  if (!window.isServerLoaded) {
+    // Non ancora caricato: aspetta il caricamento server prima di generare
+    // La chiamata verrà fatta dalla init() dopo loadSmart
+    return;
+  }
+
+  // Server caricato e nessun consiglio: genera
+  setTimeout(() => {
+    window.refreshSmartAdvisor(true);
+  }, 200);
 }
 
 function renderSmartAdvisorContent(text) {
