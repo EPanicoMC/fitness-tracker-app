@@ -1294,11 +1294,11 @@ function showWeeklyReportModal(reportMarkdown) {
         </div>
       </div>
       
-      <div style="background:rgba(255,255,255,0.01);border:1px solid rgba(255,255,255,0.04);border-radius:16px;padding:16px;margin-bottom:20px;max-height:50vh;overflow-y:auto;text-align:left">
+      <div style="background:rgba(255,255,255,0.01);border:1px solid rgba(255,255,255,0.04);border-radius:16px;padding:16px;margin-bottom:20px;text-align:left">
         ${htmlContent}
       </div>
       
-      <div class="modal-btns">
+      <div style="display:block;margin-top:20px">
         <button class="btn btn-v" style="width:100%" onclick="document.getElementById('weekly-report-modal').remove()">
           Ho capito, grazie Coach! 💪
         </button>
