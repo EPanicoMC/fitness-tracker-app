@@ -1,4 +1,4 @@
-const CACHE = 'ft-v56';
+const CACHE = 'ft-v57';
 const BASE = self.location.pathname.substring(0, self.location.pathname.lastIndexOf('/') + 1);
 const FILES = [
   '',
@@ -21,6 +21,7 @@ const FILES = [
   'js/checks.js',
   'js/settings.js',
   'js/gemini.js',
+  'js/coach_chat.js',
   'js/autocomplete.js',
   'js/ai_coach.js',
   'js/firebase-config.js',

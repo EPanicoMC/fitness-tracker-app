@@ -376,6 +376,7 @@ function renderDailyStateUI(local) {
   buildMeals();
   buildWorkout();
   buildStats();
+  buildStepsCard();
   buildFitScore();
   buildSmartAdvisor();
 
@@ -588,6 +589,27 @@ function updateNutritionTotals() {
 }
 
 // ── SmartScore ─────────────────────────────────────────────
+let _weeklyLogsCache = null;
+let _weeklyScoreCache = null;
+let _weeklyLoadedDate = null;
+
+async function loadWeeklyLogsForScore() {
+  const today = getTodayString();
+  if (_weeklyLoadedDate === today && _weeklyLogsCache !== null) return;
+  try {
+    const q = query(
+      collection(db, 'users', getUserId(), 'daily_logs'),
+      orderBy('date', 'desc'),
+      limit(7)
+    );
+    const snap = await getDocs(q);
+    _weeklyLogsCache = snap.docs.map(d => d.data());
+    _weeklyLoadedDate = today;
+  } catch(e) {
+    _weeklyLogsCache = [];
+  }
+}
+
 function buildFitScore() {
   const box = document.getElementById('fitscore-box');
   if (!box) return;
@@ -626,6 +648,8 @@ function buildFitScore() {
     stepsGoal: appSettings?.steps_goal || 0,
     planProtein: plan.protein || 0,
     actualProtein: tots.protein,
+    weeklyLogs: _weeklyLogsCache || [],
+    weeklyScore: _weeklyScoreCache,
   });
 
   if (!result) { box.innerHTML = ''; return; }
@@ -664,7 +688,7 @@ function buildFitScore() {
 
       <!-- Label + subtitle -->
       <div style="margin-top:10px;font-size:16px;font-weight:900;color:${col};letter-spacing:-0.3px">${icon} ${label}</div>
-      <div style="font-size:11px;color:var(--t3);margin-top:4px;letter-spacing:0.2px">calcolato in tempo reale</div>
+      <div style="font-size:11px;color:var(--t3);margin-top:4px;letter-spacing:0.2px">aggiornato in tempo reale</div>
 
       <!-- Breakdown bars -->
       <div style="width:100%;margin-top:24px;display:flex;flex-direction:column;gap:10px">
@@ -689,17 +713,15 @@ function buildFitScore() {
         <div style="font-size:12px;font-weight:800;color:var(--t2);cursor:pointer;display:flex;justify-content:space-between;align-items:center;letter-spacing:0.3px"
           onclick="const l=this.nextElementSibling;const a=this.querySelector('.tipchev');l.style.display=l.style.display==='none'?'block':'none';a.style.transform=l.style.display==='none'?'':'rotate(180deg)'">
           <span>Come si legge lo SmartScore</span>
-          <span class="tipchev" style="transition:transform 0.2s;font-size:10px;color:var(--t3)">▼</span>
+          <span class="tipchev" style="transition:transform 0.2s;font-size:10px;color:var(--t3)">&#9660;</span>
         </div>
         <div style="display:none;margin-top:10px;font-size:12px;color:var(--t2);line-height:1.75;text-align:left">
-          <div style="display:flex;gap:8px;margin-bottom:4px"><span>🍽️</span><span><b>Pasti (40pt)</b> — pasti spuntati rispetto all'orario attuale</span></div>
-          <div style="display:flex;gap:8px;margin-bottom:4px"><span>💪</span><span><b>Allenamento (35pt)</b> — sessione completata o programmata per oggi</span></div>
-          <div style="display:flex;gap:8px;margin-bottom:4px"><span>👟</span><span><b>Passi (15pt)</b> — progressi verso il tuo obiettivo passi</span></div>
-          <div style="display:flex;gap:8px;margin-bottom:10px"><span>🥩</span><span><b>Proteine (10pt)</b> — apporto proteico rispetto al target</span></div>
+          <div style="display:flex;gap:8px;margin-bottom:4px"><span>&#127869;&#65039;</span><span><b>Pasti (35pt)</b> — pasti spuntati rispetto all'orario attuale</span></div>
+          <div style="display:flex;gap:8px;margin-bottom:4px"><span>&#128170;</span><span><b>Allenamento (30pt)</b> — sessione completata o programmata per oggi</span></div>
+          <div style="display:flex;gap:8px;margin-bottom:4px"><span>&#129385;</span><span><b>Proteine (15pt)</b> — apporto proteico rispetto al target proporzionale</span></div>
+          <div style="display:flex;gap:8px;margin-bottom:4px"><span>&#128200;</span><span><b>Trend 7gg (10pt)</b> — costanza settimanale: quanti giorni hai loggato e allenato</span></div>
+          <div style="display:flex;gap:8px;margin-bottom:10px"><span>&#128087;</span><span><b>Passi (10pt)</b> — solo se hai impostato un obiettivo passi</span></div>
           <div style="padding:8px 12px;background:rgba(255,255,255,0.04);border-radius:8px;font-size:11px;color:var(--t3);line-height:1.6">
-            Il punteggio è calibrato sull'orario attuale: valuta solo ciò che dovevi fare fino ad ora, non l'intera giornata.
-          </div>
-        </div>
       </div>
 
     </div>`;
@@ -1127,7 +1149,7 @@ function buildStats() {
     sf.addEventListener('change', () => {
       logData.steps = parseInt(sf.value) || null;
       saveToLocal();
-      refreshStepsGoal();
+      refreshStepsCard();
     });
   }
 
@@ -1151,6 +1173,102 @@ function buildStats() {
     });
   }
 }
+
+// ── Steps Card (nuova pano-card clickabile) ─────────────────
+function buildStepsCard() {
+  const card = document.getElementById('steps-card');
+  if (!card) return;
+
+  const steps = logData.steps || 0;
+  const goal = appSettings?.steps_goal || 0;
+  const pct = goal > 0 ? Math.min(100, Math.round(steps / goal * 100)) : 0;
+
+  let ringHtml = '';
+  if (goal > 0) {
+    const R = 12, CX = 16, CY = 16;
+    const C = 2 * Math.PI * R;
+    const off = C * (1 - pct / 100);
+    const ringCol = pct >= 100 ? '#1ce370' : pct >= 70 ? '#fbbf24' : 'var(--accent)';
+    ringHtml = `
+      <svg width="32" height="32" viewBox="0 0 32 32" style="flex-shrink:0">
+        <circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="3"/>
+        <circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="${ringCol}" stroke-width="3"
+          stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"
+          stroke-linecap="round" transform="rotate(-90 ${CX} ${CY})"/>
+      </svg>`;
+  } else {
+    ringHtml = `<i class="ri-walk-line" style="font-size:20px;color:var(--t3)"></i>`;
+  }
+
+  const valHtml = steps > 0
+    ? `<span style="font-weight:700;color:#fff">${steps.toLocaleString('it-IT')}</span>${goal > 0 ? ` <span style="font-size:11px;color:var(--t3)">/ ${goal.toLocaleString('it-IT')}</span>` : ''}`
+    : `<span style="font-size:12px;color:var(--t3)">Aggiungi passi</span>`;
+
+  card.innerHTML = `
+    <div class="pano-icon" style="width:32px;display:flex;align-items:center;justify-content:center">${ringHtml}</div>
+    <div class="pano-info" style="flex:1">
+      <div class="pano-label">ATTIVIT&Agrave;</div>
+      <div class="pano-val">${valHtml}</div>
+    </div>
+    <i class="ri-add-circle-line pano-arrow" style="font-size:20px"></i>`;
+
+  card.onclick = () => openStepsModal();
+  card.style.cursor = 'pointer';
+}
+
+function refreshStepsCard() {
+  buildStepsCard();
+  buildFitScore();
+  buildSmartAdvisor();
+}
+
+window.openStepsModal = function() {
+  const steps = logData.steps || '';
+  const burned = logData.burned_kcal || '';
+
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg';
+  bg.id = 'steps-modal';
+  bg.innerHTML = `
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <h3>&#128694; Attivit&agrave; Fisica</h3>
+      <p style="color:var(--t2);font-size:13px;margin-bottom:20px">Inserisci i tuoi dati di attivit&agrave; per oggi</p>
+      <div class="fg">
+        <label class="fl">&#128694; Passi</label>
+        <input type="number" class="fi" id="sm-steps" placeholder="Es. 8500" value="${steps}" inputmode="numeric">
+      </div>
+      <div class="fg">
+        <label class="fl">&#128293; Kcal bruciate (opzionale)</label>
+        <input type="number" class="fi" id="sm-burned" placeholder="Es. 350" value="${burned}" inputmode="numeric">
+      </div>
+      <div class="modal-btns">
+        <button class="btn btn-flat" onclick="document.getElementById('steps-modal').remove()">Annulla</button>
+        <button class="btn btn-v" onclick="window.saveStepsModal()">&#10003; Salva</button>
+      </div>
+    </div>`;
+  document.body.appendChild(bg);
+  bg.onclick = e => { if (e.target === bg) bg.remove(); };
+  setTimeout(() => document.getElementById('sm-steps')?.focus(), 100);
+};
+
+window.saveStepsModal = function() {
+  const steps = parseInt(document.getElementById('sm-steps')?.value) || null;
+  const burned = parseInt(document.getElementById('sm-burned')?.value) || null;
+  if (steps !== null) logData.steps = steps;
+  if (burned !== null) logData.burned_kcal = burned;
+  const sf = document.getElementById('steps-in');
+  const kf = document.getElementById('burned-in');
+  if (sf && steps !== null) sf.value = steps;
+  if (kf && burned !== null) kf.value = burned;
+  logData.last_updated = Date.now();
+  saveToLocal();
+  document.getElementById('steps-modal')?.remove();
+  buildStepsCard();
+  buildFitScore();
+  buildSmartAdvisor();
+  showToast('&#128694; Attivit\u00e0 salvata!');
+};
 
 // ── AI ─────────────────────────────────────────────────────
 window.calcAI = async function() {
@@ -1812,7 +1930,7 @@ window.captureMealImage = async function(mi) {
           <div class="fmp-item"><div class="fmp-v" style="color:var(--purple)">${r.fats}g</div><div class="fmp-l">Grassi</div></div>
         </div>
         <button class="btn btn-v btn-sm" onclick="window.applyMealAI(${mi},${r.kcal},${r.protein},${r.carbs},${r.fats})" style="margin-top:8px">✅ Applica</button>`;
-      
+
       const tgt = mealStates[mi].kcal;
       const diff = r.kcal - tgt;
       const deltaEl = document.getElementById(`meal-delta-${mi}`);
@@ -1836,7 +1954,7 @@ window.openAddMealWithCamera = function() {
   }, 250);
 };
 
-// ── Smart Advisor ──────────────────────────────────────────
+// ── Smart Advisor ──────────────────────────────
 let isGeneratingAdvice = false;
 
 function getPartOfDay() {
@@ -1849,7 +1967,7 @@ function getPartOfDay() {
 function generateLocalAdvice({ profile, activeDiet, activeProgram, dailyState, partOfDay }) {
   const name = profile?.name || 'Campione';
   const steps = dailyState.steps || 0;
-  const goalSteps = profile?.steps_goal || 10000;
+  const goalSteps = profile?.steps_goal || 0;
   const tots = calcTotals();
   const dayKey = dailyState.isTrainingDay ? 'day_on' : 'day_off';
   const plan = activeDiet?.[dayKey];
@@ -1858,25 +1976,32 @@ function generateLocalAdvice({ profile, activeDiet, activeProgram, dailyState, p
 
   if (partOfDay === 'mattina') {
     if (dailyState.isTrainingDay) {
-      return `Buongiorno, **${name}**! Oggi è un giorno di **allenamento** (${activeProgram?.name || 'Sessione'}). Assicurati di fare una colazione proteica e idratati bene prima della sessione. 🏋️`;
+      return `Buongiorno, **${name}**! Oggi è giorno di **allenamento**. Assicurati di fare una colazione proteica e idratati bene. Target calorico: **${targetKcal} kcal**. Forza! 🏋️`;
     } else {
-      return `Buongiorno, **${name}**! Oggi è un giorno di **riposo**. Concentrati sul recupero e mantieni attivi i tuoi passi di oggi: **${steps}/${goalSteps}**. 🛌`;
+      return `Buongiorno, **${name}**! Oggi è un giorno di **riposo**. Concentrati sul recupero, mantieni l'alimentazione in target (**${targetKcal} kcal**) e goditi il relax. 🛀`;
     }
   } else if (partOfDay === 'pomeriggio') {
-    if (dailyState.isTrainingDay) {
-      return `Buon pomeriggio! Hai completato **${steps} passi**. Ti attende la sessione d'allenamento. Assicurati di essere in linea con le calorie ed energia. ⚡`;
+    const kcalSoFar = Math.round(tots.kcal);
+    if (kcalDiff > 200) {
+      return `Buon pomeriggio! Hai consumato **${kcalSoFar} kcal** su ${targetKcal}. Ti mancano circa **${Math.round(kcalDiff)} kcal** al target. ${dailyState.isTrainingDay && !dailyState.workoutDone ? "Ricorda l'allenamento! 💪" : 'Continua così! ⚡'}`;
     } else {
-      return `Buon pomeriggio! Ricorda di mantenere alta l'idratazione. Passi attuali: **${steps}/${goalSteps}**. Continua così! 👟`;
+      return `Buon pomeriggio, **${name}**! Sei sulla strada giusta con **${kcalSoFar} kcal**. ${dailyState.isTrainingDay && !dailyState.workoutDone ? "Hai ancora l'allenamento da completare! 🏋️" : 'Ottima gestione delle calorie! ✅'}`;
     }
   } else {
-    // Evening
+    // Sera — include passi
+    const parts = [];
     if (kcalDiff > 100) {
-      return `Buonasera! Ti mancano ancora circa **${Math.round(kcalDiff)} kcal** per raggiungere il target giornaliero. Valuta uno spuntino pre-nanna proteico. 🥩`;
+      parts.push(`Ti mancano **${Math.round(kcalDiff)} kcal** per raggiungere il target`);
     } else if (kcalDiff < -100) {
-      return `Buonasera! Hai superato il target calorico di **${Math.round(Math.abs(kcalDiff))} kcal**. Ottimo allenamento oggi, riposati e ricarica le energie. 💤`;
+      parts.push(`Hai superato il target di **${Math.round(Math.abs(kcalDiff))} kcal**`);
     } else {
-      return `Buonasera! Sei perfettamente in target con le calorie oggi. Ottima costanza e disciplina! Buona notte. 🌟`;
+      parts.push(`Sei perfettamente in target con le calorie`);
     }
+    if (goalSteps > 0) {
+      if (steps >= goalSteps) parts.push(`obiettivo passi raggiunto 🏅`);
+      else parts.push(`**${steps}/${goalSteps} passi** completati`);
+    }
+    return `Buonasera, **${name}**! ${parts.join(', ')}. ${kcalDiff > 100 ? 'Valuta uno spuntino proteico pre-nanna. 🥩' : 'Buona notte e recupero! 🌟'}`;
   }
 }
 
@@ -1991,7 +2116,9 @@ window.refreshSmartAdvisor = async function(silent = false) {
     carbs: Math.round(tots.carbs),
     fats: Math.round(tots.fats),
     isTrainingDay,
-    eatenMealsStr
+    workoutDone: !!logData.workout?.completed,
+    eatenMealsStr,
+    weeklyScore: _weeklyScoreCache,
   };
 
   try {

@@ -198,6 +198,7 @@ export function calcFitScore({ log, plan, isOn, objective = 'recomposizione', st
 /**
  * calcSmartScore — score contestuale all'ora del giorno (0-100)
  * Risponde a: "sto andando bene rispetto a quello che dovevo fare FINO A ORA?"
+ * Include pillar Trend Settimanale per un punteggio più intelligente.
  */
 export function calcSmartScore({
   meals = [],
@@ -209,18 +210,21 @@ export function calcSmartScore({
   stepsGoal = 0,
   planProtein = 0,
   actualProtein = 0,
+  weeklyLogs = [],        // ultimi 7 log per il pillar Trend
+  weeklyScore = null,     // score settimanale pre-calcolato (opzionale)
 }) {
   const now = new Date();
   const nowStr = now.toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit' });
   const [nowH, nowM] = nowStr.split(':').map(Number);
   const nowMin = nowH * 60 + (isNaN(nowM) ? 0 : nowM);
+  const isEvening = nowMin >= 18 * 60; // dalle 18 in poi
 
   const toMin = t => { if (!t || !t.includes(':')) return null; const [h, m] = t.split(':').map(Number); return h * 60 + m; };
 
   const breakdown = [];
   let total = 0, maxTotal = 0;
 
-  // 1. PASTI (40pt): quanti dei pasti "attesi" entro ora sono stati mangiati
+  // 1. PASTI (35pt): quanti dei pasti "attesi" entro ora sono stati mangiati
   const mealsT = meals.map((m, i) => ({
     ...m,
     timeMin: toMin(m.time) ?? (420 + Math.round((900 / Math.max(meals.length - 1, 1)) * i)),
@@ -228,50 +232,68 @@ export function calcSmartScore({
   }));
   const expected = mealsT.filter(m => m.timeMin <= nowMin);
   const eatenExp = expected.filter(m => m.eaten).length;
-  const mealPt = expected.length === 0 ? 40 : Math.round((eatenExp / expected.length) * 40);
+  const mealPt = expected.length === 0 ? 35 : Math.round((eatenExp / expected.length) * 35);
   const mealNote = expected.length === 0 ? 'In anticipo' : `${eatenExp}/${expected.length} pasti previsti`;
-  breakdown.push({ label: 'Pasti', score: mealPt, max: 40, note: mealNote, ok: mealPt >= 32 });
-  total += mealPt; maxTotal += 40;
+  breakdown.push({ label: 'Pasti', score: mealPt, max: 35, note: mealNote, ok: mealPt >= 28 });
+  total += mealPt; maxTotal += 35;
 
-  // 2. ALLENAMENTO (35pt): se non ancora l'ora → pieno punteggio, non penalizza
+  // 2. ALLENAMENTO (30pt): se non ancora l'ora → pieno punteggio, non penalizza
   const wDone = !!workout?.completed;
   let wPt, wNote;
   if (!isTrainingDay) {
-    wPt = 35; wNote = 'Riposo programmato';
+    wPt = 30; wNote = 'Riposo programmato';
   } else if (wDone) {
-    wPt = 35; wNote = 'Completato';
+    wPt = 30; wNote = 'Completato';
   } else {
     const schMin = toMin(workoutScheduledTime);
     if (schMin !== null && nowMin < schMin) {
-      wPt = 35; wNote = `Programmato alle ${workoutScheduledTime}`;
+      wPt = 30; wNote = `Programmato alle ${workoutScheduledTime}`;
     } else if (nowMin < 22 * 60) {
-      wPt = 15; wNote = 'Da completare oggi';
+      wPt = 12; wNote = 'Da completare oggi';
     } else {
       wPt = 0; wNote = 'Saltato';
     }
   }
-  breakdown.push({ label: 'Allenamento', score: wPt, max: 35, note: wNote, ok: wPt >= 30 });
-  total += wPt; maxTotal += 35;
+  breakdown.push({ label: 'Allenamento', score: wPt, max: 30, note: wNote, ok: wPt >= 25 });
+  total += wPt; maxTotal += 30;
 
-  // 3. PASSI (15pt): proporzionale all'ora (fascia 7:00-23:00)
+  // 3. PROTEINE (15pt): proporzionale ai pasti attesi vs totali
+  if (planProtein > 0 && meals.length > 0) {
+    const mRatio = expected.length > 0 ? expected.length / meals.length : 1;
+    const expProt = planProtein * mRatio;
+    const pPt = Math.min(15, Math.round(Math.min(1.2, actualProtein / Math.max(expProt, 1)) * 15));
+    breakdown.push({ label: 'Proteine', score: pPt, max: 15, note: `${Math.round(actualProtein)}g / ~${Math.round(expProt)}g attesi`, ok: pPt >= 11 });
+    total += pPt; maxTotal += 15;
+  }
+
+  // 4. TREND SETTIMANALE (10pt): costanza degli ultimi 7 giorni
+  if (weeklyLogs.length > 0 || weeklyScore !== null) {
+    let trendPt;
+    let trendNote;
+    if (weeklyScore !== null) {
+      trendPt = Math.round(weeklyScore / 100 * 10);
+      trendNote = `Score sett. ${weeklyScore}/100`;
+    } else {
+      // Calcola dalla lista log
+      const withData = weeklyLogs.filter(l => l && (l.nutrition?.totals?.kcal > 0 || l.workout?.completed || l.steps > 0));
+      const consistency = weeklyLogs.length > 0 ? withData.length / weeklyLogs.length : 0;
+      trendPt = Math.round(consistency * 10);
+      trendNote = `${withData.length}/${weeklyLogs.length} giorni loggati`;
+    }
+    breakdown.push({ label: 'Trend 7gg', score: trendPt, max: 10, note: trendNote, ok: trendPt >= 7 });
+    total += trendPt; maxTotal += 10;
+  }
+
+  // 5. PASSI (10pt): solo se goal impostato, proporzionale all'ora
   if (stepsGoal > 0) {
     const actStart = 7 * 60, actEnd = 23 * 60;
     const elapsed = Math.max(0, Math.min(nowMin, actEnd) - actStart);
     const ratioT = elapsed / (actEnd - actStart);
     const expSteps = Math.round(stepsGoal * ratioT);
-    const sPt = expSteps <= 0 ? 15 : Math.round(Math.min(1, steps / expSteps) * 15);
+    const sPt = expSteps <= 0 ? 10 : Math.round(Math.min(1, steps / expSteps) * 10);
     const sNote = expSteps <= 0 ? '—' : `${steps.toLocaleString('it-IT')} / ~${expSteps.toLocaleString('it-IT')} attesi`;
-    breakdown.push({ label: 'Passi', score: sPt, max: 15, note: sNote, ok: sPt >= 10 });
-    total += sPt; maxTotal += 15;
-  }
-
-  // 4. PROTEINE (10pt): proporzionale ai pasti attesi vs totali
-  if (planProtein > 0 && meals.length > 0) {
-    const mRatio = expected.length > 0 ? expected.length / meals.length : 1;
-    const expProt = planProtein * mRatio;
-    const pPt = Math.min(10, Math.round(Math.min(1.2, actualProtein / Math.max(expProt, 1)) * 10));
-    breakdown.push({ label: 'Proteine', score: pPt, max: 10, note: `${Math.round(actualProtein)}g / ~${Math.round(expProt)}g attesi`, ok: pPt >= 7 });
-    total += pPt; maxTotal += 10;
+    breakdown.push({ label: 'Passi', score: sPt, max: 10, note: sNote, ok: sPt >= 7 });
+    total += sPt; maxTotal += 10;
   }
 
   if (maxTotal === 0) return null;

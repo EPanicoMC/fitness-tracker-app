@@ -13,6 +13,43 @@ async function getKey() {
   return cachedKey;
 }
 
+// ── Model list ──────────────────────────────────────────────
+const MODELS = [
+  'gemini-2.5-flash-preview-05-20',
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash'
+];
+
+async function callGemini(key, prompt, opts = {}) {
+  const { temperature = 0.7, maxOutputTokens = 1024, parts } = opts;
+  const contentParts = parts || [{ text: prompt }];
+
+  for (const model of MODELS) {
+    try {
+      const r = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: contentParts }],
+            generationConfig: { temperature, maxOutputTokens }
+          })
+        }
+      );
+      if (r.status === 429) { console.warn(model, '429'); continue; }
+      if (!r.ok) { console.warn(model, 'error', r.status); continue; }
+      const d = await r.json();
+      const text = d.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('');
+      if (!text) continue;
+      return { success: true, text: text.trim(), model };
+    } catch(e) { console.warn(model, 'failed:', e.message); continue; }
+  }
+  return { success: false, error: 'Tutti i modelli occupati. Riprova tra 1 minuto.' };
+}
+
+// ── Calcola macros da testo ─────────────────────────────────
 export async function calcMacrosFromText(text) {
   if (busy) return { success: false, error: 'Calcolo in corso...' };
   busy = true;
@@ -52,78 +89,31 @@ Struttura JSON richiesta:
   ]
 }`;
 
-    const models = [
-      'gemini-3.1-flash-lite-preview',
-      'gemini-3.5-flash',
-      'gemini-2.5-flash',
-      'gemini-3-flash-preview',
-      'gemini-3-flash',
-      'gemini-2.5-flash-lite',
-      'gemini-1.5-flash'
-    ];
+    const res = await callGemini(key, prompt, { temperature: 0.1, maxOutputTokens: 1024 });
+    if (!res.success) return { success: false, error: res.error };
 
-    for (const model of models) {
-      try {
-        console.log('Trying:', model);
-        const r = await fetch(
-          'https://generativelanguage.googleapis.com/v1beta/models/' +
-          model + ':generateContent?key=' + key,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ role: 'user', parts: [{ text: prompt }] }],
-              generationConfig: { temperature: 0.1, maxOutputTokens: 1024 }
-            })
-          }
-        );
+    const raw = res.text;
+    const s1 = raw.indexOf('{');
+    const s2 = raw.lastIndexOf('}');
+    if (s1 === -1 || s2 === -1) return { success: false, error: 'Risposta AI non valida.' };
 
-        console.log(model, 'status:', r.status);
-
-        if (r.status === 429) {
-          console.warn(model, '429, next model...');
-          continue;
-        }
-
-        if (!r.ok) {
-          console.warn(model, 'error', r.status);
-          continue;
-        }
-
-        const d = await r.json();
-        const parts = d.candidates?.[0]?.content?.parts || [];
-        let raw = '';
-        for (const p of parts) { if (p.text) raw += p.text; }
-
-        console.log('Raw:', raw.slice(0, 200));
-        if (!raw) continue;
-
-        const s1 = raw.indexOf('{');
-        const s2 = raw.lastIndexOf('}');
-        if (s1 === -1 || s2 === -1) continue;
-
-        const res = JSON.parse(raw.slice(s1, s2 + 1));
-        return {
-          success: true,
-          kcal: Math.round(res.kcal || 0),
-          protein: parseFloat((res.protein || 0).toFixed(1)),
-          carbs: parseFloat((res.carbs || 0).toFixed(1)),
-          fats: parseFloat((res.fats || 0).toFixed(1)),
-          items: res.items || []
-        };
-
-      } catch(e) {
-        console.warn(model, 'failed:', e.message);
-        continue;
-      }
-    }
-
-    return { success: false, error: 'Tutti i modelli occupati. Riprova tra 1 minuto.' };
+    const parsed = JSON.parse(raw.slice(s1, s2 + 1));
+    return {
+      success: true,
+      kcal: Math.round(parsed.kcal || 0),
+      protein: parseFloat((parsed.protein || 0).toFixed(1)),
+      carbs: parseFloat((parsed.carbs || 0).toFixed(1)),
+      fats: parseFloat((parsed.fats || 0).toFixed(1)),
+      items: parsed.items || []
+    };
+  } catch(e) {
+    return { success: false, error: 'Errore parsing risposta AI.' };
   } finally {
     busy = false;
   }
 }
 
+// ── Analizza progressione check ─────────────────────────────
 export async function analyzeCheckProgress({ prevCheck, newCheck }) {
   const key = await getKey();
   if (!key) return { success: false, error: 'API key mancante' };
@@ -177,97 +167,65 @@ export async function analyzeCheckProgress({ prevCheck, newCheck }) {
     }
   }
 
-  const models = [
-    'gemini-3.1-flash-lite-preview',
-    'gemini-3.5-flash',
-    'gemini-2.5-flash',
-    'gemini-3-flash-preview',
-    'gemini-3-flash',
-    'gemini-2.5-flash-lite',
-    'gemini-1.5-flash'
-  ];
-  for (const model of models) {
-    try {
-      const r = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ role: 'user', parts }],
-            generationConfig: { temperature: 0.7, maxOutputTokens: 512 }
-          })
-        }
-      );
-      if (r.status === 429) continue;
-      if (!r.ok) continue;
-      const d = await r.json();
-      const text = d.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) continue;
-      return { success: true, analysis: text.trim() };
-    } catch(e) { continue; }
-  }
-  return { success: false, error: 'Analisi non disponibile' };
+  const res = await callGemini(key, null, { temperature: 0.7, maxOutputTokens: 512, parts });
+  if (!res.success) return { success: false, error: 'Analisi non disponibile' };
+  return { success: true, analysis: res.text };
 }
 
+// ── Report settimanale AI (con dati ricchi per giorno) ──────
 export async function generateWeeklyCoachReportAI(data) {
   const key = await getKey();
   if (!key) return { success: false, error: 'API key mancante.' };
 
+  // Costruisci il breakdown giornaliero
+  const dayBreakdownText = (data.dailyBreakdown || []).map(d => {
+    const parts = [`  ${d.date} (${d.dayLabel})`];
+    if (d.kcal > 0) parts.push(`    Kcal: ${d.kcal}${d.kcalTarget > 0 ? ` / ${d.kcalTarget} target (${Math.round(d.kcal/d.kcalTarget*100)}%)` : ''}`);
+    if (d.protein > 0) parts.push(`    Proteine: ${d.protein}g${d.proteinTarget > 0 ? ` / ${d.proteinTarget}g target` : ''}`);
+    if (d.isTraining !== null) parts.push(`    Allenamento: ${d.workoutDone ? `✅ ${d.workoutName || 'Completato'}` : (d.isTraining ? '❌ Saltato' : '😴 Riposo')}`);
+    if (d.steps > 0) parts.push(`    Passi: ${d.steps.toLocaleString('it-IT')}`);
+    if (d.note) parts.push(`    Nota: "${d.note}"`);
+    return parts.join('\n');
+  }).join('\n');
+
   const promptText = `Sei l'AI Weekly Coach dell'app di fitness KOVA. Analizza i dati degli ultimi 7 giorni dell'utente e genera un report di feedback settimanale in italiano.
 Sii estremamente professionale, motivante e orientato al risultato, rispecchiando i valori di eccellenza di KOVA.
 
-Dati settimanali dell'utente:
+PROFILO UTENTE:
+- Nome: ${data.userName || 'Atleta'}
+- Obiettivo peso: ${data.weightTarget ? data.weightTarget + ' kg' : 'Non specificato'}
+- Peso attuale: ${data.currentWeight ? data.currentWeight + ' kg' : 'Non misurato di recente'}
+- Scheda attiva: ${data.programName || 'Nessuna'}
+- Piano dieta: ${data.dietName || 'Nessuno'}
+
+DATI SETTIMANALI AGGREGATI:
 - Aderenza calorica media: ${data.avgCalorieAdherence}%
 - Calorie consumate medie: ${data.avgCalories} kcal / giorno (vs target ${data.targetCalories} kcal)
-- Proteine medie: ${data.avgProtein}g / giorno
+- Proteine medie: ${data.avgProtein}g / giorno (target: ${data.targetProtein || '?'}g)
 - Carboidrati medi: ${data.avgCarbs}g / giorno
 - Grassi medi: ${data.avgFats}g / giorno
 - Passi totali settimanali: ${data.totalSteps} (media giornaliera: ${data.avgSteps})
 - Sessioni completate: ${data.completedWorkouts} su ${data.totalWorkoutsPlanned} pianificate
+- Giorni con dati loggati: ${data.loggedDays} su 7
 - Smart Score Settimanale: ${data.weeklyScore}/100
 
+BREAKDOWN GIORNALIERO DETTAGLIATO:
+${dayBreakdownText || '  (nessun dato)'}
+
 Struttura il report con le seguenti sezioni in markdown italiano pulito (usa emoji adatte):
-1. **Analisi della Settimana**: Una panoramica critica del comportamento nutrizionale e motorio.
+1. **Analisi della Settimana**: Una panoramica critica del comportamento nutrizionale e motorio. Fai riferimento ai giorni specifici dove utile.
 2. **I Tuoi Punti di Forza**: Cosa ha funzionato davvero bene (es. costanza, aderenza macro, passi).
-3. **Aree di Miglioramento**: Cosa tenere d'occhio per ottimizzare la composizione corporea e le performance.
+3. **Aree di Miglioramento**: Cosa tenere d'occhio per ottimizzare la composizione corporea e le performance. Sii specifico con i numeri.
 4. **Action Plan per la Prossima Settimana**: 2-3 indicazioni ultra-pratiche e numeriche su cui focalizzarsi.
 
-Mantieni il report compatto ed efficace (circa 200-250 parole). Non aggiungere note esterne, rispondi solo in markdown.`;
+Mantieni il report compatto ed efficace (circa 220-280 parole). Non aggiungere note esterne, rispondi solo in markdown.`;
 
-  const models = [
-    'gemini-3.1-flash-lite-preview',
-    'gemini-3.5-flash',
-    'gemini-2.5-flash',
-    'gemini-3-flash-preview',
-    'gemini-3-flash',
-    'gemini-2.5-flash-lite',
-    'gemini-1.5-flash'
-  ];
-  for (const model of models) {
-    try {
-      const r = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ role: 'user', parts: [{ text: promptText }] }],
-            generationConfig: { temperature: 0.7, maxOutputTokens: 1024 }
-          })
-        }
-      );
-      if (r.status === 429) continue;
-      if (!r.ok) continue;
-      const d = await r.json();
-      const text = d.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) continue;
-      return { success: true, report: text.trim() };
-    } catch(e) { continue; }
-  }
-  return { success: false, error: 'AI weekly report non disponibile al momento. Riprova più tardi.' };
+  const res = await callGemini(key, promptText, { temperature: 0.7, maxOutputTokens: 1200 });
+  if (!res.success) return { success: false, error: 'AI weekly report non disponibile al momento. Riprova più tardi.' };
+  return { success: true, report: res.text };
 }
 
+// ── Analisi immagine cibo ───────────────────────────────────
 export async function analyzeFoodImageAI(base64Image, mimeType = 'image/jpeg') {
   const key = await getKey();
   if (!key) return { success: false, error: 'API key mancante.' };
@@ -294,53 +252,31 @@ Struttura JSON richiesta:
     { inlineData: { mimeType, data: base64Image } }
   ];
 
-  const models = [
-    'gemini-3.1-flash-lite-preview',
-    'gemini-3.5-flash',
-    'gemini-2.5-flash',
-    'gemini-3-flash-preview',
-    'gemini-3-flash',
-    'gemini-2.5-flash-lite',
-    'gemini-1.5-flash'
-  ];
-  for (const model of models) {
-    try {
-      const r = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ role: 'user', parts }],
-            generationConfig: { temperature: 0.1, maxOutputTokens: 512 }
-          })
-        }
-      );
-      if (r.status === 429) continue;
-      if (!r.ok) continue;
-      const d = await r.json();
-      const rawText = d.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!rawText) continue;
+  const res = await callGemini(key, null, { temperature: 0.1, maxOutputTokens: 512, parts });
+  if (!res.success) return { success: false, error: 'Errore analisi immagine food scanner' };
 
-      const s1 = rawText.indexOf('{');
-      const s2 = rawText.lastIndexOf('}');
-      if (s1 === -1 || s2 === -1) continue;
+  const raw = res.text;
+  const s1 = raw.indexOf('{');
+  const s2 = raw.lastIndexOf('}');
+  if (s1 === -1 || s2 === -1) return { success: false, error: 'Risposta AI non valida.' };
 
-      const res = JSON.parse(rawText.slice(s1, s2 + 1));
-      return {
-        success: true,
-        name: res.name || 'Pasto Scansionato',
-        kcal: Math.round(res.kcal || 0),
-        protein: parseFloat((res.protein || 0).toFixed(1)),
-        carbs: parseFloat((res.carbs || 0).toFixed(1)),
-        fats: parseFloat((res.fats || 0).toFixed(1)),
-        ingredients: res.ingredients || ''
-      };
-    } catch(e) { continue; }
+  try {
+    const parsed = JSON.parse(raw.slice(s1, s2 + 1));
+    return {
+      success: true,
+      name: parsed.name || 'Pasto Scansionato',
+      kcal: Math.round(parsed.kcal || 0),
+      protein: parseFloat((parsed.protein || 0).toFixed(1)),
+      carbs: parseFloat((parsed.carbs || 0).toFixed(1)),
+      fats: parseFloat((parsed.fats || 0).toFixed(1)),
+      ingredients: parsed.ingredients || ''
+    };
+  } catch(e) {
+    return { success: false, error: 'Errore parsing risposta AI.' };
   }
-  return { success: false, error: 'Errore analisi immagine food scanner' };
 }
 
+// ── Smart Advisor (per parte del giorno, passi solo sera) ───
 export async function generateSmartAdviceAI({ profile, currentWeight, activeDiet, activeProgram, dailyState, partOfDay }) {
   const key = await getKey();
   if (!key) return { success: false, error: 'API key mancante.' };
@@ -357,41 +293,81 @@ export async function generateSmartAdviceAI({ profile, currentWeight, activeDiet
   }
 
   const dietTargetKcal = dailyState.isTrainingDay ? activeDiet?.day_on?.kcal : activeDiet?.day_off?.kcal;
+  const dietTargetPro = dailyState.isTrainingDay ? activeDiet?.day_on?.protein : activeDiet?.day_off?.protein;
 
-  const promptText = `Sei KOVA Smart Advisor, un assistente AI d'élite integrato in una app di fitness premium.
+  // Solo la sera include i passi
+  const includeSteps = partOfDay === 'sera';
+
+  // Dati comuni
+  const baseContext = `Sei KOVA Smart Advisor, un assistente AI d'élite integrato in una app di fitness premium.
 Il tuo compito è generare un consiglio ultra-personalizzato, breve e motivante in italiano per guidare l'utente nel momento attuale della giornata: ${partOfDay.toUpperCase()}.
 
 Dati utente:
 - Profilo: ${p.name || 'Utente'} (${sexStr ? sexStr + ', ' : ''}${age ? age + ' anni, ' : ''}${p.height ? p.height + 'cm' : ''})
 - Peso attuale: ${currentWeight ? currentWeight + ' kg' : 'Non registrato'} (Target: ${p.weight_target || '?'} kg)
-- Dieta attiva: ${activeDiet ? activeDiet.name + ' (Target: ' + (dietTargetKcal || '?') + ' kcal)' : 'Nessuna'}
+- Dieta attiva: ${activeDiet ? activeDiet.name + ' (Target: ' + (dietTargetKcal || '?') + ' kcal, Pro: ' + (dietTargetPro || '?') + 'g)' : 'Nessuna'}
 - Scheda attiva: ${activeProgram ? activeProgram.name : 'Nessuna'}
 - Giorno di oggi: ${dailyState.isTrainingDay ? 'Allenamento (ON)' : 'Riposo (OFF)'}
+${dailyState.weeklyScore != null ? `- SmartScore settimanale: ${dailyState.weeklyScore}/100` : ''}
 
 Stato odierno (fino ad ora):
-- Passi attivi: ${dailyState.steps || 0} / ${p.steps_goal || 10000} passi
-- Calorie consumate: ${dailyState.kcal || 0} kcal
-- Macro assunti: P:${dailyState.protein || 0}g, C:${dailyState.carbs || 0}g, F:${dailyState.fats || 0}g
-- Pasti spuntati / completati: ${dailyState.eatenMealsStr || 'Nessuno'}
+- Calorie consumate: ${dailyState.kcal || 0} kcal ${dietTargetKcal ? '/ ' + dietTargetKcal + ' target' : ''}
+- Macro: P:${dailyState.protein || 0}g${dietTargetPro ? ' / ' + dietTargetPro + 'g target' : ''}, C:${dailyState.carbs || 0}g, F:${dailyState.fats || 0}g
+- Pasti: ${dailyState.eatenMealsStr || 'Nessuno'}
+${dailyState.workoutDone ? '- Allenamento: ✅ COMPLETATO' : (dailyState.isTrainingDay ? '- Allenamento: ❌ Non ancora completato' : '')}
+${includeSteps ? `- Passi: ${dailyState.steps || 0} / ${p.steps_goal || 10000} obiettivo` : ''}`;
 
-Momento della giornata: ${partOfDay.toUpperCase()}
+  let specificInstructions = '';
+  if (partOfDay === 'mattina') {
+    specificInstructions = `È mattina presto. Motiva l'utente per la giornata, ricordagli il tipo di giorno (allenamento o riposo) e cosa mangiare per iniziare bene. NON menzionare i passi. Focusizza su: piano alimentare della mattina, allenamento se previsto oggi, carica di energia.`;
+  } else if (partOfDay === 'pomeriggio') {
+    specificInstructions = `È pomeriggio. Valuta i pasti fatti finora vs il piano, dai indicazioni su cosa ancora mangiare, ricordagli dell'allenamento se non fatto. NON menzionare i passi. Sii preciso sui macro/kcal mancanti se rilevante.`;
+  } else {
+    specificInstructions = `È sera. Valuta l'intera giornata: kcal totali, proteine, passi e allenamento. Dai feedback precisi e numerici su come è andata, cosa recuperare domani se qualcosa è mancato.`;
+  }
+
+  const promptText = `${baseContext}
+
+Momento: ${partOfDay.toUpperCase()}
+${specificInstructions}
 
 Regole fondamentali per la risposta:
-1. Sii estremamente diretto, pratico, motivante e conciso (massimo 40-50 parole). No introduzioni inutili, parti subito col consiglio.
-2. Basati sull'orario e sui dati. Se è sera ed è dietro coi passi o con le calorie/proteine, digli come rimediare con precisione numerica (es. "ti mancano X g di proteine"). Se è mattina, spronalo per la giornata ed evidenzia se oggi deve allenarsi.
-3. Mantieni un tono premium, d'élite, tecnico ed incoraggiante.
-4. Non usare markdown elaborato, usa solo grassetti (es. **questo**) ed emoji adatte.`;
+1. Sii estremamente diretto, pratico, motivante e conciso (massimo 45-55 parole).
+2. No introduzioni inutili ("Certo!", "Ecco il consiglio" ecc.), parti subito col contenuto.
+3. Usa numeri precisi quando disponibili (es. "ti mancano 48g di proteine").
+4. Tono premium, d'élite, tecnico ed incoraggiante.
+5. Usa grassetti **così** ed emoji adatte. No markdown elaborato.`;
 
-  const models = [
-    'gemini-3.1-flash-lite-preview',
-    'gemini-3.5-flash',
-    'gemini-2.5-flash',
-    'gemini-3-flash-preview',
-    'gemini-3-flash',
-    'gemini-2.5-flash-lite',
-    'gemini-1.5-flash'
+  const res = await callGemini(key, promptText, { temperature: 0.75, maxOutputTokens: 256 });
+  if (!res.success) return { success: false, error: 'AI occupata. Usa fallback locale.' };
+  return { success: true, advice: res.text };
+}
+
+// ── Chat with Coach (multi-turno) ───────────────────────────
+export async function chatWithCoach(messages, userContext) {
+  const key = await getKey();
+  if (!key) return { success: false, error: 'API key mancante. Configurala nelle Impostazioni.' };
+
+  const systemPrompt = `Sei KOVA Coach, l'assistente AI personale integrato nell'app di fitness KOVA.
+Sei un coach d'élite, esperto di nutrizione sportiva, allenamento e composizione corporea.
+Rispondi sempre in italiano, con tono professionale ma diretto e motivante.
+Hai accesso completo al profilo e ai dati dell'atleta — usali per dare consigli ultra-personalizzati.
+Rispondi in modo conciso ma completo. Usa emoji con moderazione. Puoi usare grassetti **parola** per enfasi.
+
+PROFILO ATLETA:
+${userContext || 'Dati non disponibili in questo momento.'}`;
+
+  // Costruisci i turns della conversazione
+  const contents = [
+    { role: 'user', parts: [{ text: systemPrompt + '\n\n---\nINIZIA LA CONVERSAZIONE. Il coach è pronto.' }] },
+    { role: 'model', parts: [{ text: 'Ciao! Sono KOVA Coach, il tuo assistente personale. Ho accesso a tutti i tuoi dati — chiedimi pure quello che vuoi: nutrizione, allenamento, progressi, strategie. Come posso aiutarti? 💪' }] },
+    ...messages.map(m => ({
+      role: m.role === 'user' ? 'user' : 'model',
+      parts: [{ text: m.content }]
+    }))
   ];
-  for (const model of models) {
+
+  for (const model of MODELS) {
     try {
       const r = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
@@ -399,18 +375,18 @@ Regole fondamentali per la risposta:
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            contents: [{ role: 'user', parts: [{ text: promptText }] }],
-            generationConfig: { temperature: 0.7, maxOutputTokens: 256 }
+            contents,
+            generationConfig: { temperature: 0.7, maxOutputTokens: 512 }
           })
         }
       );
       if (r.status === 429) continue;
       if (!r.ok) continue;
       const d = await r.json();
-      const text = d.candidates?.[0]?.content?.parts?.[0]?.text;
+      const text = d.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('');
       if (!text) continue;
-      return { success: true, advice: text.trim() };
+      return { success: true, reply: text.trim() };
     } catch(e) { continue; }
   }
-  return { success: false, error: 'AI occupata. Usa fallback locale.' };
+  return { success: false, error: 'Coach non disponibile al momento. Riprova tra qualche secondo.' };
 }

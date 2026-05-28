@@ -13,6 +13,8 @@ let monthLogs    = {};
 let allRecentLogs = {};
 let selectedDate = null;
 let settingsData = null;
+let _dietPlanCache = null;
+let latestCheckWeight = null;
 
 async function init() {
   const userId = getUserId();
@@ -50,6 +52,20 @@ async function init() {
       buildWeekView();
       loadCalendar();
     });
+
+    // Load latest body check weight in background
+    try {
+      const userId = getUserId();
+      const checkSnap = await getDocs(query(
+        collection(db, 'users', userId, 'body_checks'),
+        orderBy('date', 'desc'),
+        limit(1)
+      ));
+      if (!checkSnap.empty) {
+        latestCheckWeight = checkSnap.docs[0].data().weight || null;
+      }
+    } catch(e) { /* non-critical */ }
+
   } catch (e) {
     console.error('diary init error:', e);
     showToast('Errore caricamento diario dal cloud', 'err');
@@ -358,8 +374,9 @@ window.showDay = async function(dateStr) {
     </div>`;
 };
 
-let _dietPlanCache = null;
+
 async function getActiveDietPlan() {
+
   if (_dietPlanCache) return _dietPlanCache;
   const coll = collection(db, 'users', getUserId(), 'diet_plans');
   try {
@@ -1062,9 +1079,20 @@ window.deleteWorkout = async function(dateStr, modalBg) {
 };
 
 window.generateWeeklyCoachReport = async function() {
+  // Check API key
   const keySnap = await getDoc(doc(db, 'users', getUserId(), 'settings', 'gemini'));
   if (!keySnap.exists() || !keySnap.data().api_key) {
     showToast('⚠️ Per favore, imposta la tua Gemini API Key nelle Impostazioni!', 'err');
+    return;
+  }
+
+  // Check cache (6 hours)
+  const CACHE_KEY = `kova_weekly_report_${TODAY}`;
+  const CACHE_TS_KEY = `${CACHE_KEY}_ts`;
+  const cachedReport = localStorage.getItem(CACHE_KEY);
+  const cachedTs = parseInt(localStorage.getItem(CACHE_TS_KEY) || '0');
+  if (cachedReport && (Date.now() - cachedTs) < 6 * 60 * 60 * 1000) {
+    showWeeklyReportModal(cachedReport);
     return;
   }
 
@@ -1073,6 +1101,8 @@ window.generateWeeklyCoachReport = async function() {
   const todayDate = new Date(TODAY + 'T12:00:00');
   const startDate = new Date(todayDate);
   startDate.setDate(todayDate.getDate() - 6);
+
+  const DAYS_IT_SHORT = { mon: 'Lun', tue: 'Mar', wed: 'Mer', thu: 'Gio', fri: 'Ven', sat: 'Sab', sun: 'Dom' };
 
   const dates = [];
   for (let i = 0; i < 7; i++) {
@@ -1083,45 +1113,59 @@ window.generateWeeklyCoachReport = async function() {
 
   let totalKcal = 0, totalProtein = 0, totalCarbs = 0, totalFats = 0;
   let loggedDays = 0;
-  let totalSteps = 0;
-  let stepDays = 0;
-  let completedWorkouts = 0;
-  let totalWorkoutsPlanned = 0;
+  let totalSteps = 0, stepDays = 0;
+  let completedWorkouts = 0, totalWorkoutsPlanned = 0;
   let totalCalorieAdherenceSum = 0;
+
+  const dailyBreakdown = [];
 
   dates.forEach(dateStr => {
     const log = allRecentLogs[dateStr];
-    if (log && log.steps > 0) {
-      totalSteps += log.steps;
-      stepDays++;
-    }
-    
+    if (log && log.steps > 0) { totalSteps += log.steps; stepDays++; }
+
     const dow = getDayOfWeek(dateStr);
     let isTrainingPlanned = !!(programData?.schedule?.[dow]);
     if (log?.is_training_day != null) isTrainingPlanned = log.is_training_day;
     if (isTrainingPlanned) {
       totalWorkoutsPlanned++;
-      if (log?.workout?.completed) {
-        completedWorkouts++;
-      }
+      if (log?.workout?.completed) completedWorkouts++;
     }
-    
+
+    const targetDayPlan = isTrainingPlanned ? _dietPlanCache?.day_on : _dietPlanCache?.day_off;
+    const targetKcal = targetDayPlan?.kcal || 0;
+    const targetProtein = targetDayPlan?.protein || 0;
+
+    let dayKcal = 0, dayPro = 0, dayCarb = 0, dayFat = 0;
     if (log && log.nutrition?.totals?.kcal > 0) {
-      totalKcal += log.nutrition.totals.kcal;
-      totalProtein += log.nutrition.totals.protein || 0;
-      totalCarbs += log.nutrition.totals.carbs || 0;
-      totalFats += log.nutrition.totals.fats || 0;
+      dayKcal = Math.round(log.nutrition.totals.kcal);
+      dayPro = Math.round(log.nutrition.totals.protein || 0);
+      dayCarb = Math.round(log.nutrition.totals.carbs || 0);
+      dayFat = Math.round(log.nutrition.totals.fats || 0);
+      totalKcal += dayKcal;
+      totalProtein += dayPro;
+      totalCarbs += dayCarb;
+      totalFats += dayFat;
       loggedDays++;
-      
-      const targetDayPlan = isTrainingPlanned ? _dietPlanCache?.day_on : _dietPlanCache?.day_off;
-      const targetKcal = targetDayPlan?.kcal || 0;
       if (targetKcal > 0) {
-        const ratio = log.nutrition.totals.kcal / targetKcal;
+        const ratio = dayKcal / targetKcal;
         const diff = Math.abs(1 - ratio);
-        const dayAdherence = Math.max(0, Math.round((1 - diff) * 100));
-        totalCalorieAdherenceSum += dayAdherence;
+        totalCalorieAdherenceSum += Math.max(0, Math.round((1 - diff) * 100));
       }
     }
+
+    dailyBreakdown.push({
+      date: dateStr,
+      dayLabel: DAYS_IT_SHORT[dow] || dow,
+      kcal: dayKcal,
+      kcalTarget: targetKcal,
+      protein: dayPro,
+      proteinTarget: targetProtein,
+      isTraining: isTrainingPlanned,
+      workoutDone: !!(log?.workout?.completed),
+      workoutName: log?.workout?.session_name || null,
+      steps: log?.steps || 0,
+      note: log?.daily_note || null,
+    });
   });
 
   const avgCalories = loggedDays > 0 ? Math.round(totalKcal / loggedDays) : 0;
@@ -1134,14 +1178,19 @@ window.generateWeeklyCoachReport = async function() {
   const isTodayTraining = !!(programData?.schedule?.[getDayOfWeek(TODAY)]);
   const defaultTargetPlan = isTodayTraining ? _dietPlanCache?.day_on : _dietPlanCache?.day_off;
   const targetCalories = defaultTargetPlan?.kcal || 2000;
+  const targetProtein = defaultTargetPlan?.protein || 0;
 
   const wss = calcWeeklySmartScore(dates, allRecentLogs, programData, _dietPlanCache, settingsData);
   const weeklyScore = wss.finalScore || 0;
 
+  const profile = settingsData?.profile || {};
+
   const dataForAI = {
+    // Aggregati
     avgCalorieAdherence,
     avgCalories,
     targetCalories,
+    targetProtein,
     avgProtein,
     avgCarbs,
     avgFats,
@@ -1149,7 +1198,17 @@ window.generateWeeklyCoachReport = async function() {
     avgSteps,
     completedWorkouts,
     totalWorkoutsPlanned,
-    weeklyScore
+    loggedDays,
+    weeklyScore,
+    // Profilo
+    userName: profile.name || null,
+    weightTarget: profile.weight_target || null,
+    currentWeight: latestCheckWeight || null,
+    // Piano
+    programName: programData?.name || null,
+    dietName: _dietPlanCache?.name || null,
+    // Breakdown giornaliero
+    dailyBreakdown,
   };
 
   showToast('🧠 AI Coach sta elaborando il report...', 'info');
@@ -1160,6 +1219,11 @@ window.generateWeeklyCoachReport = async function() {
       showToast(aiResult.error, 'err');
       return;
     }
+    // Cache the result
+    try {
+      localStorage.setItem(CACHE_KEY, aiResult.report);
+      localStorage.setItem(CACHE_TS_KEY, Date.now().toString());
+    } catch(e) { /* storage full, ignore */ }
     showWeeklyReportModal(aiResult.report);
   } catch(e) {
     showToast('Errore generazione report', 'err');
