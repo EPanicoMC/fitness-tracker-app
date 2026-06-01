@@ -618,7 +618,29 @@ function updateNutritionTotals() {
   if (recapFat) recapFat.textContent = Math.round(tots.fats) + 'g';
 }
 
-// ── SmartScore ──────────────────────function buildFitScore() {
+// ── SmartScore ─────────────────────────────────────────────
+let _weeklyLogsCache = null;
+let _weeklyScoreCache = null;
+let _weeklyLoadedDate = null;
+
+async function loadWeeklyLogsForScore() {
+  const today = getTodayString();
+  if (_weeklyLoadedDate === today && _weeklyLogsCache !== null) return;
+  try {
+    const q = query(
+      collection(db, 'users', getUserId(), 'daily_logs'),
+      orderBy('date', 'desc'),
+      limit(7)
+    );
+    const snap = await getDocs(q);
+    _weeklyLogsCache = snap.docs.map(d => d.data());
+    _weeklyLoadedDate = today;
+  } catch(e) {
+    _weeklyLogsCache = [];
+  }
+}
+
+function buildFitScore() {
   const box = document.getElementById('fitscore-box');
   if (!box) return;
   const dayKey = isTrainingDay ? 'day_on' : 'day_off';
@@ -756,13 +778,6 @@ function updateNutritionTotals() {
       </div>
     </div>
   `;
-}span><span><b>Proteine (15pt)</b> — apporto proteico rispetto al target proporzionale</span></div>
-          <div style="display:flex;gap:8px;margin-bottom:4px"><span>&#128200;</span><span><b>Trend 7gg (10pt)</b> — costanza settimanale: quanti giorni hai loggato e allenato</span></div>
-          <div style="display:flex;gap:8px;margin-bottom:10px"><span>&#128087;</span><span><b>Passi (10pt)</b> — solo se hai impostato un obiettivo passi</span></div>
-          <div style="padding:8px 12px;background:rgba(255,255,255,0.04);border-radius:8px;font-size:11px;color:var(--t3);line-height:1.6">
-      </div>
-
-    </div>`;
 }
 
 // ── Macro compare helper ───────────────────────────────────
@@ -2140,20 +2155,20 @@ function renderSmartAdvisorContent(text, recoveryPlan = null) {
         <div style="margin-top: 14px; margin-bottom: 4px;">
           <div style="font-size: 10px; font-weight: 800; color: var(--t3); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px;">Azioni di Recupero</div>
           <div class="advisor-actions">
-            \${recoveryPlan.actions.map(act => {
+            ${recoveryPlan.actions.map(act => {
               let clickJs = '';
               if (act.type === 'meal') clickJs = `location.href='diet.html'`;
               else if (act.type === 'activity') clickJs = `window.openStepsModal ? window.openStepsModal() : document.getElementById('steps-card').click()`;
               else clickJs = `location.href='session.html'`;
 
               return `
-                <div class="action-item" onclick="\${clickJs}">
+                <div class="action-item" onclick="${clickJs}">
                   <div class="action-left">
-                    <span class="action-icon">\${act.icon}</span>
-                    <span class="action-label">\${act.label}</span>
+                    <span class="action-icon">${act.icon}</span>
+                    <span class="action-label">${act.label}</span>
                   </div>
                   <div class="action-right">
-                    <span class="action-value">\${act.value}</span>
+                    <span class="action-value">${act.value}</span>
                     <div class="action-btn-mini"><i class="ri-arrow-right-s-line"></i></div>
                   </div>
                 </div>`;
@@ -2164,15 +2179,15 @@ function renderSmartAdvisorContent(text, recoveryPlan = null) {
   }
 
   box.innerHTML = `
-    <div class="advisor-card \${statusClass}">
+    <div class="advisor-card ${statusClass}">
       <div class="advisor-header">
         <div class="advisor-title">KOVA SMART ADVISOR</div>
-        <div class="recovery-badge">\${badgeText}</div>
+        <div class="recovery-badge">${badgeText}</div>
       </div>
       <div id="smart-advisor-content" class="advisor-body">
-        \${formattedText}
+        ${formattedText}
       </div>
-      \${actionsHtml}
+      ${actionsHtml}
       <div class="advisor-footer">
         <button onclick="window.refreshSmartAdvisor(false)" style="background:none; border:none; color:var(--t3); font-size:12px; font-weight:700; cursor:pointer; display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:6px; background:rgba(255,255,255,0.03); border:1px solid var(--border); transition: all 0.2s;" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--t3)'">
           <i class="ri-refresh-line" id="advisor-refresh-icon"></i> Aggiorna
@@ -2278,7 +2293,7 @@ window.refreshSmartAdvisor = async function(silent = false) {
     if (!logData.smart_advice) logData.smart_advice = {};
     logData.smart_advice[partOfDay] = finalAdvice;
 
-    const cachedKey = `fittracker_advice_\${TODAY}_\${partOfDay}`;
+    const cachedKey = `fittracker_advice_${TODAY}_${partOfDay}`;
     safeLocalStorage.setItem(cachedKey, finalAdvice);
 
     saveToLocal();
@@ -2298,7 +2313,7 @@ window.refreshSmartAdvisor = async function(silent = false) {
     if (!logData.smart_advice) logData.smart_advice = {};
     logData.smart_advice[partOfDay] = localAdvice;
 
-    const cachedKey = `fittracker_advice_\${TODAY}_\${partOfDay}`;
+    const cachedKey = `fittracker_advice_${TODAY}_${partOfDay}`;
     safeLocalStorage.setItem(cachedKey, localAdvice);
 
     saveToLocal();
