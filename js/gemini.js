@@ -393,3 +393,59 @@ ${userContext || 'Dati non disponibili in questo momento.'}`;
   }
   return { success: false, error: 'Coach non disponibile al momento. Riprova tra qualche secondo.' };
 }
+
+/**
+ * generateRecoveryAdviceAI — genera consigli e un messaggio di recupero via Gemini
+ */
+export async function generateRecoveryAdviceAI({ profile, currentWeight, activeDiet, activeProgram, recoveryPlan, partOfDay }) {
+  const key = await getKey();
+  if (!key) return { success: false, error: 'Configura la chiave Gemini nelle impostazioni per usare il Coach.' };
+
+  const prompt = `Sei KOVA Coach, un assistente AI di fitness e nutrizione estremamente preciso e proattivo.
+Il tuo compito è analizzare lo stato di recupero (Recovery Engine) degli ultimi 7 giorni di un utente e proporre un piano per rimettersi in carreggiata.
+
+DATI UTENTE:
+- Nome: ${profile?.name || 'Atleta'}
+- Peso attuale: ${currentWeight || profile?.weight || 'N/D'} kg
+- Obiettivo: ${profile?.target || 'N/D'}
+
+STATO DI RECUPERO (Recovery Plan - Ultimi 7 Giorni):
+- Stato complessivo: ${recoveryPlan.recoveryStatus} (${recoveryPlan.daysToRecover} giorni necessari per il recupero)
+- Delta Calorie Settimanale: ${recoveryPlan.kcalWeeklyDelta} kcal (surplus/deficit totale)
+- Delta Proteine Settimanale: ${recoveryPlan.proteinWeeklyDelta}g
+- Delta Carboidrati Settimanale: ${recoveryPlan.carbsWeeklyDelta}g
+- Delta Grassi Settimanale: ${recoveryPlan.fatsWeeklyDelta}g
+- Allenamenti saltati: ${recoveryPlan.workoutsMissed} su ${recoveryPlan.workoutsPlanned} pianificati (completati: ${recoveryPlan.workoutsCompleted})
+- Delta Passi Settimanale: ${recoveryPlan.stepsWeeklyDelta} passi (media giornaliera: ${recoveryPlan.avgDailySteps})
+
+REGOLAZIONE PER OGGI:
+- Calorie consigliate oggi (aggiustate): ${recoveryPlan.todayAdjustedKcal} kcal
+- Proteine extra consigliate oggi: ${recoveryPlan.todayExtraProtein}g
+- Passi extra consigliati oggi: ${recoveryPlan.todayExtraSteps}
+
+CONTESTO TEMPORALE:
+- Momento della giornata: ${partOfDay} (es: mattina, pomeriggio, sera)
+
+ISTRUZIONI PER LA RISPOSTA:
+1. Genera un messaggio di risposta SHORT (massimo 60-80 parole), diretto, chiaro e motivante in lingua italiana.
+2. Usa il grassetto (**testo**) per mettere in evidenza i numeri chiave (es: **350 kcal**, **45g di proteine**, **10000 passi**).
+3. Suggerisci 2 azioni pratiche concrete di recupero all'interno del testo coerenti con i deficit riscontrati.
+4. ATTENZIONE: Se il momento della giornata è "mattina" o "pomeriggio", NON menzionare i passi extra da fare (puoi parlarne solo se è "sera").
+5. Rispondi solo con il messaggio del coach. Non aggiungere prefazioni o altre spiegazioni.`;
+
+  try {
+    const result = await callGemini(key, prompt, { temperature: 0.7, maxOutputTokens: 350 });
+    if (result.success) {
+      return {
+        success: true,
+        advice: result.text,
+        actions: recoveryPlan.actions || []
+      };
+    } else {
+      return { success: false, error: result.error || 'Errore nella generazione dei consigli AI.' };
+    }
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+

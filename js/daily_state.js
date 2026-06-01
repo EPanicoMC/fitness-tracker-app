@@ -3,9 +3,9 @@ import {
   db, getUserId, doc, getDoc, setDoc, getDocs, collection, query, orderBy, limit
 } from './firebase-config.js';
 import {
-  getTodayString, getYesterdayString, getDayOfWeek, formatDateIT, formatDateShort, addDays, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER, cleanOldLogs, calcFitScore, calcSmartScore
+  getTodayString, getYesterdayString, getDayOfWeek, formatDateIT, formatDateShort, addDays, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER, cleanOldLogs, calcFitScore, calcSmartScore, calcRecoveryPlan
 } from './app.js';
-import { calcMacrosFromText, analyzeFoodImageAI, generateSmartAdviceAI } from './gemini.js';
+import { calcMacrosFromText, analyzeFoodImageAI, generateSmartAdviceAI, generateRecoveryAdviceAI } from './gemini.js';
 
 const TODAY = getTodayString();
 
@@ -145,6 +145,7 @@ async function init() {
   }
 
   await checkDayRollover();
+  await loadWeeklyLogsForScore();
 
   try {
     const refs = [
@@ -342,7 +343,19 @@ function renderDailyStateUI(local) {
 
   const name = appSettings?.profile?.name || appSettings?.name || '';
   const welcomeEl = document.getElementById('welcome-name');
-  if (welcomeEl) welcomeEl.textContent = name ? `BENVENUTO, ${name.toUpperCase()}` : 'BENVENUTO';
+  if (welcomeEl) {
+    welcomeEl.innerHTML = name ? `Ciao, <b>${name}</b>` : 'Benvenuto';
+  }
+  
+  const dateLabelEl = document.getElementById('date-label');
+  if (dateLabelEl) {
+    dateLabelEl.textContent = formatDateIT(TODAY);
+  }
+  
+  const avatarEl = document.getElementById('home-avatar');
+  if (avatarEl) {
+    avatarEl.textContent = name ? name.charAt(0).toUpperCase() : 'K';
+  }
 
   const dow = getDayOfWeek(TODAY);
   const progDay = activeProgram?.schedule?.[dow];
@@ -588,51 +601,22 @@ function updateNutritionTotals() {
   if (recapFat) recapFat.textContent = Math.round(tots.fats) + 'g';
 }
 
-// ── SmartScore ─────────────────────────────────────────────
-let _weeklyLogsCache = null;
-let _weeklyScoreCache = null;
-let _weeklyLoadedDate = null;
-
-async function loadWeeklyLogsForScore() {
-  const today = getTodayString();
-  if (_weeklyLoadedDate === today && _weeklyLogsCache !== null) return;
-  try {
-    const q = query(
-      collection(db, 'users', getUserId(), 'daily_logs'),
-      orderBy('date', 'desc'),
-      limit(7)
-    );
-    const snap = await getDocs(q);
-    _weeklyLogsCache = snap.docs.map(d => d.data());
-    _weeklyLoadedDate = today;
-  } catch(e) {
-    _weeklyLogsCache = [];
-  }
-}
-
-function buildFitScore() {
+// ── SmartScore ──────────────────────function buildFitScore() {
   const box = document.getElementById('fitscore-box');
   if (!box) return;
   const dayKey = isTrainingDay ? 'day_on' : 'day_off';
   const plan   = activeDiet?.[dayKey] || null;
   const tots   = calcTotals();
 
-  // No plan: show neutral hero ring with setup prompt
+  // No plan: show neutral card
   if (!plan) {
-    const S = 180, R = 72, SW = 9;
-    const C = 2 * Math.PI * R;
     box.innerHTML = `
-      <div style="display:flex;flex-direction:column;align-items:center;text-align:center">
-        <div style="position:relative;width:${S}px;height:${S}px">
-          <svg width="${S}" height="${S}" viewBox="0 0 ${S} ${S}" style="transform:rotate(-90deg)">
-            <circle cx="${S/2}" cy="${S/2}" r="${R}" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="${SW}"/>
-          </svg>
-          <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px">
-            <div style="font-size:36px;font-weight:700;color:var(--t3);letter-spacing:-1px">—</div>
-            <div style="font-size:8px;letter-spacing:2px;color:var(--t3);font-weight:800">SMARTSCORE</div>
-          </div>
+      <div class="score-compact-card">
+        <div style="text-align:center; padding:10px 0; color:var(--t3);">
+          <div style="font-size:32px; margin-bottom:8px;">📊</div>
+          <div style="font-size:12px; font-weight:700; color:var(--t2);">Nessun piano dieta attivo</div>
+          <div style="font-size:11px; margin-top:4px;">Configura la dieta per visualizzare lo SmartScore</div>
         </div>
-        <div style="font-size:13px;color:var(--t2);margin-top:12px">Configura un piano dieta per attivare lo SmartScore</div>
       </div>`;
     return;
   }
@@ -657,68 +641,72 @@ function buildFitScore() {
   const { score, label, icon, breakdown } = result;
 
   // Color + glow by score band
-  let col, glowRGB;
-  if      (score >= 90) { col = '#00dc78'; glowRGB = '0,220,120'; }
-  else if (score >= 75) { col = '#4ade80'; glowRGB = '74,222,128'; }
-  else if (score >= 55) { col = '#fbbf24'; glowRGB = '251,191,36'; }
-  else if (score >= 35) { col = '#ff6a00'; glowRGB = '255,106,0'; }
-  else                  { col = '#ff3b3b'; glowRGB = '255,59,59'; }
+  let col;
+  if      (score >= 90) { col = '#00dc78'; }
+  else if (score >= 75) { col = '#4ade80'; }
+  else if (score >= 55) { col = '#fbbf24'; }
+  else if (score >= 35) { col = '#ff6a00'; }
+  else                  { col = '#ff3b3b'; }
 
-  const S = 180, R = 72, SW = 9;
-  const C = 2 * Math.PI * R;
-  const dash = (score / 100) * C;
+  // Set the badge in index.html if it exists
+  const badgeEl = document.getElementById('smartscore-badge');
+  if (badgeEl) {
+    badgeEl.textContent = `${icon} ${label}`;
+    badgeEl.style.borderColor = col;
+    badgeEl.style.color = col;
+  }
 
+  // Draw the compact score flex container
   box.innerHTML = `
-    <div style="display:flex;flex-direction:column;align-items:center;text-align:center">
-
-      <!-- Hero ring -->
-      <div style="position:relative;width:${S}px;height:${S}px">
-        <svg width="${S}" height="${S}" viewBox="0 0 ${S} ${S}"
-          style="transform:rotate(-90deg);filter:drop-shadow(0 0 14px rgba(${glowRGB},0.38))">
-          <circle cx="${S/2}" cy="${S/2}" r="${R}" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="${SW}"/>
-          <circle cx="${S/2}" cy="${S/2}" r="${R}" fill="none" stroke="${col}" stroke-width="${SW}"
-            stroke-dasharray="${dash.toFixed(1)} ${C.toFixed(1)}" stroke-linecap="round"
-            style="transition:stroke-dasharray 0.9s cubic-bezier(.4,0,.2,1)"/>
-        </svg>
-        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px">
-          <div style="font-size:52px;font-weight:700;letter-spacing:-3px;color:${col};line-height:1">${score}</div>
-          <div style="font-size:8px;letter-spacing:2.5px;color:var(--t3);font-weight:800;text-transform:uppercase">SmartScore</div>
+    <div class="score-compact-card">
+      <div class="score-compact-flex">
+        <div class="score-compact-left">
+          <div class="score-compact-circle" style="border-color:${col}; box-shadow: 0 0 12px ${col}40;">
+            <div class="score-compact-num" style="color:${col};">${score}</div>
+            <div class="score-compact-lbl">SCORE</div>
+          </div>
+          <div class="score-compact-info">
+            <div class="score-compact-status">${label}</div>
+            <div class="score-compact-desc">Stato giornaliero basato sulle tue attività</div>
+          </div>
+        </div>
+        
+        <div class="score-compact-metrics">
+          <div class="score-mini-metric">
+            <div class="score-mini-val">${breakdown.find(b => b.label.toLowerCase().includes('past'))?.score || 0}/35</div>
+            <div class="score-mini-lbl">Pasti</div>
+          </div>
+          <div class="score-mini-metric">
+            <div class="score-mini-val">${breakdown.find(b => b.label.toLowerCase().includes('allen'))?.score || 0}/30</div>
+            <div class="score-mini-lbl">Wkt</div>
+          </div>
+          <div class="score-mini-metric">
+            <div class="score-mini-val">${breakdown.find(b => b.label.toLowerCase().includes('prot'))?.score || 0}/15</div>
+            <div class="score-mini-lbl">Pro</div>
+          </div>
         </div>
       </div>
-
-      <!-- Label + subtitle -->
-      <div style="margin-top:10px;font-size:16px;font-weight:900;color:${col};letter-spacing:-0.3px">${icon} ${label}</div>
-      <div style="font-size:11px;color:var(--t3);margin-top:4px;letter-spacing:0.2px">aggiornato in tempo reale</div>
-
-      <!-- Breakdown bars -->
-      <div style="width:100%;margin-top:24px;display:flex;flex-direction:column;gap:10px">
+      
+      <!-- Mini progress bar breakdown details -->
+      <div style="width:100%; margin-top:16px; border-top:1px solid rgba(255,255,255,0.04); padding-top:14px; display:flex; flex-direction:column; gap:8px">
         ${breakdown.map(b => {
           const pct = Math.round(b.score / b.max * 100);
           const barCol = b.ok ? '#00dc78' : b.score > 0 ? '#fbbf24' : 'rgba(255,255,255,0.08)';
           return `
             <div>
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
-                <span style="font-size:12px;font-weight:700;color:var(--t1)">${b.label}</span>
-                <span style="font-size:11px;color:var(--t3);font-variant-numeric:tabular-nums">${b.score}/${b.max} — ${b.note}</span>
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <span style="font-size:11px; color:var(--t2); font-weight:600;">${b.label}</span>
+                <span style="font-size:11px; color:var(--t3); font-weight:700;">${b.score}/${b.max} <span style="font-weight:400; font-size:10px;">(${b.note})</span></span>
               </div>
-              <div style="height:4px;background:rgba(255,255,255,0.06);border-radius:99px;overflow:hidden">
-                <div style="height:100%;width:${pct}%;background:${barCol};border-radius:99px;transition:width 0.7s ease;box-shadow:${b.ok ? `0 0 6px rgba(0,220,120,0.5)` : 'none'}"></div>
+              <div style="height:3px; background:rgba(255,255,255,0.04); border-radius:99px; overflow:hidden;">
+                <div style="height:100%; width:${pct}%; background:${barCol}; border-radius:99px; transition:width 0.7s ease;"></div>
               </div>
             </div>`;
         }).join('')}
       </div>
-
-      <!-- Tips collapsible -->
-      <div style="width:100%;margin-top:20px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.06);text-align:left">
-        <div style="font-size:12px;font-weight:800;color:var(--t2);cursor:pointer;display:flex;justify-content:space-between;align-items:center;letter-spacing:0.3px"
-          onclick="const l=this.nextElementSibling;const a=this.querySelector('.tipchev');l.style.display=l.style.display==='none'?'block':'none';a.style.transform=l.style.display==='none'?'':'rotate(180deg)'">
-          <span>Come si legge lo SmartScore</span>
-          <span class="tipchev" style="transition:transform 0.2s;font-size:10px;color:var(--t3)">&#9660;</span>
-        </div>
-        <div style="display:none;margin-top:10px;font-size:12px;color:var(--t2);line-height:1.75;text-align:left">
-          <div style="display:flex;gap:8px;margin-bottom:4px"><span>&#127869;&#65039;</span><span><b>Pasti (35pt)</b> — pasti spuntati rispetto all'orario attuale</span></div>
-          <div style="display:flex;gap:8px;margin-bottom:4px"><span>&#128170;</span><span><b>Allenamento (30pt)</b> — sessione completata o programmata per oggi</span></div>
-          <div style="display:flex;gap:8px;margin-bottom:4px"><span>&#129385;</span><span><b>Proteine (15pt)</b> — apporto proteico rispetto al target proporzionale</span></div>
+    </div>
+  `;
+}span><span><b>Proteine (15pt)</b> — apporto proteico rispetto al target proporzionale</span></div>
           <div style="display:flex;gap:8px;margin-bottom:4px"><span>&#128200;</span><span><b>Trend 7gg (10pt)</b> — costanza settimanale: quanti giorni hai loggato e allenato</span></div>
           <div style="display:flex;gap:8px;margin-bottom:10px"><span>&#128087;</span><span><b>Passi (10pt)</b> — solo se hai impostato un obiettivo passi</span></div>
           <div style="padding:8px 12px;background:rgba(255,255,255,0.04);border-radius:8px;font-size:11px;color:var(--t3);line-height:1.6">
@@ -2012,8 +2000,19 @@ async function buildSmartAdvisor() {
   const partOfDay = getPartOfDay();
   const advice = logData.smart_advice?.[partOfDay];
 
+  // We need to load weekly logs first to compute the plan
+  await loadWeeklyLogsForScore();
+
+  const recoveryPlan = calcRecoveryPlan({
+    weeklyLogs: _weeklyLogsCache || [],
+    activeDiet,
+    activeProgram,
+    appSettings,
+    today: TODAY
+  });
+
   if (advice) {
-    renderSmartAdvisorContent(advice);
+    renderSmartAdvisorContent(advice, recoveryPlan);
     return;
   }
 
@@ -2024,7 +2023,7 @@ async function buildSmartAdvisor() {
     if (!logData.smart_advice) logData.smart_advice = {};
     logData.smart_advice[partOfDay] = cachedText;
     saveToLocal();
-    renderSmartAdvisorContent(cachedText);
+    renderSmartAdvisorContent(cachedText, recoveryPlan);
     return;
   }
 
@@ -2064,7 +2063,7 @@ async function buildSmartAdvisor() {
   }, 200);
 }
 
-function renderSmartAdvisorContent(text) {
+function renderSmartAdvisorContent(text, recoveryPlan = null) {
   const box = document.getElementById('smart-advisor-box');
   if (!box) return;
 
@@ -2072,18 +2071,62 @@ function renderSmartAdvisorContent(text) {
     .replace(/\*\*(.*?)\*\*/g, '<b style="color:var(--t1)">$1</b>')
     .replace(/\n/g, '<br>');
 
+  let statusClass = 'status-on_track';
+  let badgeText = 'IN CARREGGIATA';
+  let actionsHtml = '';
+
+  if (recoveryPlan) {
+    statusClass = `status-${recoveryPlan.recoveryStatus}`;
+    if (recoveryPlan.recoveryStatus === 'critical') {
+      badgeText = 'RECUPERO CRITICO';
+    } else if (recoveryPlan.recoveryStatus === 'needs_recovery') {
+      badgeText = 'RECUPERO CONSIGLIATO';
+    } else if (recoveryPlan.recoveryStatus === 'slight_deviation') {
+      badgeText = 'DEVIAZIONE LIEVE';
+    }
+
+    if (recoveryPlan.actions && recoveryPlan.actions.length > 0) {
+      actionsHtml = `
+        <div style="margin-top: 14px; margin-bottom: 4px;">
+          <div style="font-size: 10px; font-weight: 800; color: var(--t3); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px;">Azioni di Recupero</div>
+          <div class="advisor-actions">
+            \${recoveryPlan.actions.map(act => {
+              let clickJs = '';
+              if (act.type === 'meal') clickJs = `location.href='diet.html'`;
+              else if (act.type === 'activity') clickJs = `window.openStepsModal ? window.openStepsModal() : document.getElementById('steps-card').click()`;
+              else clickJs = `location.href='session.html'`;
+
+              return `
+                <div class="action-item" onclick="\${clickJs}">
+                  <div class="action-left">
+                    <span class="action-icon">\${act.icon}</span>
+                    <span class="action-label">\${act.label}</span>
+                  </div>
+                  <div class="action-right">
+                    <span class="action-value">\${act.value}</span>
+                    <div class="action-btn-mini"><i class="ri-arrow-right-s-line"></i></div>
+                  </div>
+                </div>`;
+            }).join('')}
+          </div>
+        </div>`;
+    }
+  }
+
   box.innerHTML = `
-    <div class="card" style="background:linear-gradient(135deg, rgba(124,111,255,0.09), rgba(0,0,0,0.25)); border:1px solid rgba(124,111,255,0.22); padding:16px; border-radius:var(--rs); position:relative; box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-        <div style="font-size:10px; font-weight:800; color:var(--accent); letter-spacing:1px; display:flex; align-items:center; gap:6px;">
-          <i class="ri-flashlight-fill" style="color:var(--accent); font-size:13px;"></i> KOVA SMART ADVISOR
-        </div>
-        <button onclick="window.refreshSmartAdvisor(false)" style="background:none; border:none; color:var(--t3); font-size:14px; cursor:pointer; display:flex; align-items:center; padding:2px; transition: color 0.2s;" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--t3)'">
-          <i class="ri-refresh-line" id="advisor-refresh-icon"></i>
-        </button>
+    <div class="advisor-card \${statusClass}">
+      <div class="advisor-header">
+        <div class="advisor-title">KOVA SMART ADVISOR</div>
+        <div class="recovery-badge">\${badgeText}</div>
       </div>
-      <div id="smart-advisor-content" style="font-size:13px; line-height:1.6; color:var(--t2); font-weight:500;">
-        ${formattedText}
+      <div id="smart-advisor-content" class="advisor-body">
+        \${formattedText}
+      </div>
+      \${actionsHtml}
+      <div class="advisor-footer">
+        <button onclick="window.refreshSmartAdvisor(false)" style="background:none; border:none; color:var(--t3); font-size:12px; font-weight:700; cursor:pointer; display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:6px; background:rgba(255,255,255,0.03); border:1px solid var(--border); transition: all 0.2s;" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--t3)'">
+          <i class="ri-refresh-line" id="advisor-refresh-icon"></i> Aggiorna
+        </button>
       </div>
     </div>
   `;
@@ -2098,6 +2141,17 @@ window.refreshSmartAdvisor = async function(silent = false) {
 
   const partOfDay = getPartOfDay();
   const tots = calcTotals();
+
+  // Load weekly logs to ensure data is updated
+  await loadWeeklyLogsForScore();
+
+  const recoveryPlan = calcRecoveryPlan({
+    weeklyLogs: _weeklyLogsCache || [],
+    activeDiet,
+    activeProgram,
+    appSettings,
+    today: TODAY
+  });
 
   const planMeals = activeDiet?.[isTrainingDay ? 'day_on' : 'day_off']?.meals || [];
   const eatenMeals = planMeals
@@ -2122,40 +2176,64 @@ window.refreshSmartAdvisor = async function(silent = false) {
   };
 
   try {
-    const r = await generateSmartAdviceAI({
-      profile: appSettings?.profile,
-      currentWeight: latestCheck?.weight || null,
-      activeDiet,
-      activeProgram,
-      dailyState,
-      partOfDay
-    });
-
     let finalAdvice = '';
-    if (r.success && r.advice) {
-      finalAdvice = r.advice;
-    } else {
-      if (!silent && r.error && r.error.includes('Key')) {
-        showToast('Configura la Gemini API Key in Impostazioni per consigli AI avanzati!', 'info');
-      }
-      finalAdvice = generateLocalAdvice({
+    
+    if (recoveryPlan) {
+      const r = await generateRecoveryAdviceAI({
         profile: appSettings?.profile,
+        currentWeight: latestCheck?.weight || null,
+        activeDiet,
+        activeProgram,
+        recoveryPlan,
+        partOfDay
+      });
+
+      if (r.success && r.advice) {
+        finalAdvice = r.advice;
+      } else {
+        if (!silent && r.error && r.error.includes('Key')) {
+          showToast('Configura la Gemini API Key in Impostazioni per consigli AI avanzati!', 'info');
+        }
+        finalAdvice = generateLocalAdvice({
+          profile: appSettings?.profile,
+          activeDiet,
+          activeProgram,
+          dailyState,
+          partOfDay
+        });
+      }
+    } else {
+      const r = await generateSmartAdviceAI({
+        profile: appSettings?.profile,
+        currentWeight: latestCheck?.weight || null,
         activeDiet,
         activeProgram,
         dailyState,
         partOfDay
       });
+
+      if (r.success && r.advice) {
+        finalAdvice = r.advice;
+      } else {
+        finalAdvice = generateLocalAdvice({
+          profile: appSettings?.profile,
+          activeDiet,
+          activeProgram,
+          dailyState,
+          partOfDay
+        });
+      }
     }
 
     if (!logData.smart_advice) logData.smart_advice = {};
     logData.smart_advice[partOfDay] = finalAdvice;
 
-    const cachedKey = `fittracker_advice_${TODAY}_${partOfDay}`;
+    const cachedKey = `fittracker_advice_\${TODAY}_\${partOfDay}`;
     safeLocalStorage.setItem(cachedKey, finalAdvice);
 
     saveToLocal();
     await syncToFirebase();
-    renderSmartAdvisorContent(finalAdvice);
+    renderSmartAdvisorContent(finalAdvice, recoveryPlan);
 
   } catch(e) {
     console.error('Advisor error:', e);
@@ -2170,12 +2248,12 @@ window.refreshSmartAdvisor = async function(silent = false) {
     if (!logData.smart_advice) logData.smart_advice = {};
     logData.smart_advice[partOfDay] = localAdvice;
 
-    const cachedKey = `fittracker_advice_${TODAY}_${partOfDay}`;
+    const cachedKey = `fittracker_advice_\${TODAY}_\${partOfDay}`;
     safeLocalStorage.setItem(cachedKey, localAdvice);
 
     saveToLocal();
     await syncToFirebase();
-    renderSmartAdvisorContent(localAdvice);
+    renderSmartAdvisorContent(localAdvice, recoveryPlan);
   } finally {
     isGeneratingAdvice = false;
     if (refreshIcon) refreshIcon.classList.remove('ri-spin');

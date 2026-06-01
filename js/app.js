@@ -309,6 +309,184 @@ export function calcSmartScore({
   return { score, label, icon, breakdown };
 }
 
+/**
+ * calcRecoveryPlan — analizza gli ultimi 7 giorni e genera un piano di recupero
+ * @param {object}  params
+ * @param {object[]} params.weeklyLogs    — array di daily_log docs (ultimi 7 gg)
+ * @param {object}   params.activeDiet    — piano dieta attivo (con day_on / day_off)
+ * @param {object}   params.activeProgram — scheda attiva (con schedule)
+ * @param {object}   params.appSettings   — settings utente (steps_goal, ecc.)
+ * @param {string}   params.today         — data odierna "YYYY-MM-DD"
+ * @returns {object|null}
+ */
+export function calcRecoveryPlan({ weeklyLogs, activeDiet, activeProgram, appSettings, today }) {
+  if (!weeklyLogs || weeklyLogs.length === 0 || !activeDiet) return null;
+
+  let kcalWeeklyDelta = 0;
+  let proteinWeeklyDelta = 0;
+  let carbsWeeklyDelta = 0;
+  let fatsWeeklyDelta = 0;
+  let stepsWeeklyDelta = 0;
+  let totalSteps = 0;
+  let stepsLoggedDays = 0;
+  let workoutsMissed = 0;
+  let workoutsCompleted = 0;
+  let workoutsPlanned = 0;
+  let lastMissedSession = '';
+  let daysWithData = 0;
+
+  const stepsGoal = appSettings?.steps_goal || 0;
+
+  for (const logEntry of weeklyLogs) {
+    if (!logEntry) continue;
+    const dateStr = logEntry.date || logEntry.id || '';
+    const dayOfWeek = getDayOfWeek(dateStr);
+    const scheduleDay = activeProgram?.schedule?.[dayOfWeek];
+    const isTrainingDay = !!(scheduleDay && scheduleDay !== 'off' && scheduleDay !== 'rest');
+    const dayKey = isTrainingDay ? 'day_on' : 'day_off';
+    const plan = activeDiet?.[dayKey];
+
+    // ── Macro deltas ──
+    const targetKcal = plan?.kcal || 0;
+    const targetProtein = plan?.macros?.protein || plan?.protein || 0;
+    const targetCarbs = plan?.macros?.carbs || plan?.carbs || 0;
+    const targetFats = plan?.macros?.fats || plan?.fats || 0;
+
+    const actualKcal = logEntry.nutrition?.totals?.kcal || logEntry.nutrition?.kcal || 0;
+    const actualProtein = logEntry.nutrition?.totals?.protein || logEntry.nutrition?.protein || 0;
+    const actualCarbs = logEntry.nutrition?.totals?.carbs || logEntry.nutrition?.carbs || 0;
+    const actualFats = logEntry.nutrition?.totals?.fats || logEntry.nutrition?.fats || 0;
+
+    if (actualKcal > 0 || actualProtein > 0) daysWithData++;
+
+    kcalWeeklyDelta += (actualKcal - targetKcal);
+    proteinWeeklyDelta += (actualProtein - targetProtein);
+    carbsWeeklyDelta += (actualCarbs - targetCarbs);
+    fatsWeeklyDelta += (actualFats - targetFats);
+
+    // ── Workouts ──
+    if (isTrainingDay) {
+      workoutsPlanned++;
+      const wDone = !!(logEntry.workout?.completed);
+      if (wDone) {
+        workoutsCompleted++;
+      } else {
+        workoutsMissed++;
+        const sessionName = typeof scheduleDay === 'string' ? scheduleDay : (scheduleDay?.name || 'Sessione');
+        lastMissedSession = sessionName;
+      }
+    }
+
+    // ── Steps ──
+    const daySteps = logEntry.steps || 0;
+    totalSteps += daySteps;
+    if (daySteps > 0) stepsLoggedDays++;
+    if (stepsGoal > 0) {
+      stepsWeeklyDelta += (daySteps - stepsGoal);
+    }
+  }
+
+  const avgDailySteps = stepsLoggedDays > 0 ? Math.round(totalSteps / stepsLoggedDays) : 0;
+
+  // ── Recovery status ──
+  const absKcalDelta = Math.abs(kcalWeeklyDelta);
+  const absProteinDelta = Math.abs(proteinWeeklyDelta);
+  let recoveryStatus;
+  if (absKcalDelta > 3000 || workoutsMissed >= 3) {
+    recoveryStatus = 'critical';
+  } else if (absKcalDelta > 1500 || workoutsMissed >= 2) {
+    recoveryStatus = 'needs_recovery';
+  } else if (absKcalDelta > 500 || absProteinDelta > 50 || workoutsMissed >= 1) {
+    recoveryStatus = 'slight_deviation';
+  } else {
+    recoveryStatus = 'on_track';
+  }
+
+  // ── Adjusted targets for today ──
+  const todayDow = getDayOfWeek(today);
+  const todaySchedule = activeProgram?.schedule?.[todayDow];
+  const isTodayTraining = !!(todaySchedule && todaySchedule !== 'off' && todaySchedule !== 'rest');
+  const todayPlan = activeDiet?.[isTodayTraining ? 'day_on' : 'day_off'];
+  const todayBaseKcal = todayPlan?.kcal || 0;
+  const todayBaseProtein = todayPlan?.macros?.protein || todayPlan?.protein || 0;
+
+  // Spread deficit over remaining days (max 7)
+  const remainingDays = Math.max(1, 7 - daysWithData);
+  const kcalAdjustPerDay = kcalWeeklyDelta < 0 ? Math.round(Math.abs(kcalWeeklyDelta) / remainingDays) : 0;
+  const proteinAdjustPerDay = proteinWeeklyDelta < 0 ? Math.round(Math.abs(proteinWeeklyDelta) / remainingDays) : 0;
+
+  const todayAdjustedKcal = todayBaseKcal + kcalAdjustPerDay;
+  const todayExtraProtein = proteinAdjustPerDay;
+  const todayExtraSteps = stepsGoal > 0 && stepsWeeklyDelta < 0
+    ? Math.round(Math.abs(stepsWeeklyDelta) / remainingDays)
+    : 0;
+
+  // ── Days to recover estimate ──
+  let daysToRecover = 0;
+  if (recoveryStatus === 'critical') daysToRecover = 5;
+  else if (recoveryStatus === 'needs_recovery') daysToRecover = 3;
+  else if (recoveryStatus === 'slight_deviation') daysToRecover = 2;
+  else daysToRecover = 0;
+
+  // ── Actions ──
+  const actions = [];
+
+  if (kcalWeeklyDelta < -200) {
+    actions.push({
+      type: 'meal',
+      icon: '🥩',
+      label: 'Spuntino proteico',
+      value: `${Math.abs(kcalAdjustPerDay)} kcal`
+    });
+  }
+
+  if (stepsGoal > 0 && stepsWeeklyDelta < -1000) {
+    actions.push({
+      type: 'activity',
+      icon: '🚶',
+      label: 'Camminata 30 min',
+      value: `~${todayExtraSteps} passi`
+    });
+  }
+
+  if (workoutsMissed > 0 && lastMissedSession) {
+    actions.push({
+      type: 'workout',
+      icon: '💪',
+      label: 'Recupera sessione',
+      value: lastMissedSession
+    });
+  }
+
+  // If we have fewer than 2 actions, add a generic macro-catch-up
+  if (actions.length < 2 && proteinWeeklyDelta < -30) {
+    actions.push({
+      type: 'meal',
+      icon: '🥚',
+      label: 'Integra proteine',
+      value: `+${todayExtraProtein}g oggi`
+    });
+  }
+
+  return {
+    kcalWeeklyDelta: Math.round(kcalWeeklyDelta),
+    proteinWeeklyDelta: Math.round(proteinWeeklyDelta),
+    carbsWeeklyDelta: Math.round(carbsWeeklyDelta),
+    fatsWeeklyDelta: Math.round(fatsWeeklyDelta),
+    workoutsMissed,
+    workoutsCompleted,
+    workoutsPlanned,
+    stepsWeeklyDelta: Math.round(stepsWeeklyDelta),
+    avgDailySteps,
+    todayAdjustedKcal,
+    todayExtraProtein,
+    todayExtraSteps,
+    recoveryStatus,
+    daysToRecover,
+    actions
+  };
+}
+
 export async function cleanOldLogs(db, userId, monthsToKeep=12) {
   try {
     const cutoff = new Date();

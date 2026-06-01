@@ -16,40 +16,58 @@
 <body class="minimal-dark">
 <div class="wrap" style="padding-top:20px; padding-bottom:100px;">
 
-  <!-- HEADER DOGMA STYLE -->
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-    <h1 style="font-size:18px;font-weight:900;letter-spacing:1px;color:var(--t1)">KOVA.</h1>
-    <div style="display:flex;align-items:center;gap:16px">
+  <!-- HEADER — FIGMA STYLE -->
+  <div class="home-header">
+    <div class="home-header-left">
+      <div class="home-avatar" id="home-avatar">K</div>
+      <div class="home-header-info">
+        <div class="home-date-label" id="date-label"></div>
+        <h1 id="active-workout-info" class="home-day-title">Giorno di riposo</h1>
+      </div>
+    </div>
+    <div class="home-header-right">
       <div id="streak-box"></div>
-      <a href="settings.html" style="color:var(--t2);font-size:20px"><i class="ri-notification-3-line"></i></a>
+      <a href="settings.html" class="home-bell"><i class="ri-notification-3-line"></i></a>
     </div>
   </div>
 
-  <div style="margin-top:40px;">
-    <p id="welcome-name" style="font-size:10px;color:var(--t3);font-weight:800;letter-spacing:2px;text-transform:uppercase">BENVENUTO</p>
-    <h2 id="active-workout-info" style="font-size:38px;font-weight:500;letter-spacing:-1.5px;line-height:1.05;margin-top:8px;color:#fff">
-      Sei più forte<br>di quanto pensi.
-    </h2>
-    <div id="date-label" style="font-size:12px;color:var(--t3);font-weight:700;margin-top:8px;text-transform:uppercase;letter-spacing:1px"></div>
+  <!-- WELCOME SUBTITLE -->
+  <div id="welcome-name" class="home-subtitle">Benvenuto — recupera le energie.</div>
+
+  <!-- SMARTSCORE CARD -->
+  <div class="smartscore-card" style="margin-top:24px;">
+    <div class="smartscore-card-header">
+      <div class="smartscore-label">SMARTSCORE</div>
+      <div class="smartscore-badge" id="smartscore-badge">⚠ ATTENZIONE</div>
+    </div>
+    <div class="smartscore-body">
+      <div id="fitscore-box" class="smartscore-ring-wrap"></div>
+    </div>
+    <div class="smartscore-footer">
+      <span>calcolato in tempo reale</span>
+      <span class="smartscore-link" id="smartscore-howto-toggle" onclick="const h = document.getElementById('smartscore-howto'); h.style.display = h.style.display === 'none' ? 'block' : 'none';" style="cursor:pointer">· come si legge</span>
+    </div>
+    <div id="smartscore-howto" class="smartscore-howto" style="display:none">
+      <div style="display:flex;gap:8px;margin-bottom:4px"><span>🍽️</span><span><b>Pasti (35pt)</b> — pasti spuntati rispetto all'orario attuale</span></div>
+      <div style="display:flex;gap:8px;margin-bottom:4px"><span>💪</span><span><b>Allenamento (30pt)</b> — sessione completata o programmata</span></div>
+      <div style="display:flex;gap:8px;margin-bottom:4px"><span>🥩</span><span><b>Proteine (15pt)</b> — apporto proteico proporzionale</span></div>
+      <div style="display:flex;gap:8px;margin-bottom:4px"><span>📈</span><span><b>Trend 7gg (10pt)</b> — costanza settimanale</span></div>
+      <div style="display:flex;gap:8px"><span>👏</span><span><b>Passi (10pt)</b> — solo se hai un obiettivo passi</span></div>
+    </div>
   </div>
 
-  <!-- SMARTSCORE HERO -->
-  <div style="margin:40px 0 48px;">
-    <div id="fitscore-box"></div>
-  </div>
+  <!-- SMART ADVISOR / RECOVERY WIDGET -->
+  <div id="smart-advisor-box" style="margin-bottom:24px;"></div>
 
-  <!-- SMART ADVISOR WIDGET -->
-  <div id="smart-advisor-box" style="margin-bottom:35px;"></div>
-
-  <!-- OVERVIEW / PANORAMICA TITLE -->
+  <!-- PANORAMICA -->
   <div style="font-size:10px;font-weight:800;color:var(--t3);letter-spacing:2px;margin-bottom:16px">PANORAMICA</div>
   
   <div class="pano-list">
     <!-- DAY TYPE -->
     <div class="pano-card tgl-row">
-      <div class="pano-icon"><i class="ri-calendar-event-fill"></i></div>
+      <div class="pano-icon"><i class="ri-moon-fill"></i></div>
       <div class="pano-info" style="flex:1">
-        <div class="pano-label" id="dtype-label">GIORNO</div>
+        <div class="pano-label" id="dtype-label">OGGI</div>
         <div class="pano-val" id="dtype-sub" style="font-size:10px;color:var(--t3);margin-top:2px;text-transform:none"></div>
       </div>
       <label class="tgl"><input type="checkbox" id="override-tgl"><span class="tgl-s"></span></label>
@@ -57,7 +75,7 @@
 
     <!-- ALLENAMENTI -->
     <div class="pano-card" onclick="location.href='programs.html'">
-      <div class="pano-icon"><i class="ri-line-chart-line"></i></div>
+      <div class="pano-icon"><i class="ri-boxing-fill"></i></div>
       <div class="pano-info">
         <div class="pano-label">ALLENAMENTO</div>
         <div class="pano-val" id="active-program-name">Nessuna scheda</div>
@@ -67,7 +85,7 @@
 
     <!-- CALORIE -->
     <div class="pano-card" onclick="location.href='diet.html'">
-      <div class="pano-icon"><i class="ri-drop-line"></i></div>
+      <div class="pano-icon"><i class="ri-fire-fill"></i></div>
       <div class="pano-info">
         <div class="pano-label">CALORIE</div>
         <div class="pano-val"><span id="kcal-now" style="color:#fff;font-weight:700">0</span> <span style="font-size:11px;color:var(--t3)">/ <span id="kcal-tgt">0</span></span></div>
@@ -127,7 +145,7 @@
 
 <nav class="bnav">
   <a href="index.html" class="on"><i class="ri-home-5-fill ni"></i><span>Home</span></a>
-  <a href="programs.html"><i class="ri-file-list-3-fill ni"></i><span>Schede</span></a>
+  <a href="programs.html"><i class="ri-boxing-fill ni"></i><span>Schede</span></a>
   <a href="diet.html"><i class="ri-restaurant-fill ni"></i><span>Dieta</span></a>
 
   <a href="diary.html"><i class="ri-calendar-todo-fill ni"></i><span>Diario</span></a>
