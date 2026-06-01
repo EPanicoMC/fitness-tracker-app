@@ -344,12 +344,12 @@ function renderDailyStateUI(local) {
   const name = appSettings?.profile?.name || appSettings?.name || '';
   const welcomeEl = document.getElementById('welcome-name');
   if (welcomeEl) {
-    welcomeEl.innerHTML = name ? `Ciao, <b>${name}</b>` : 'Benvenuto';
+    welcomeEl.textContent = name ? `Benvenuto, ${name} — recupera le energie.` : 'Benvenuto — recupera le energie.';
   }
   
   const dateLabelEl = document.getElementById('date-label');
   if (dateLabelEl) {
-    dateLabelEl.textContent = formatDateIT(TODAY);
+    dateLabelEl.textContent = formatDateIT(TODAY).toUpperCase();
   }
   
   const avatarEl = document.getElementById('home-avatar');
@@ -372,9 +372,9 @@ function renderDailyStateUI(local) {
   const activeWorkoutEl = document.getElementById('active-workout-info');
   if (activeWorkoutEl) {
     if (isTrainingDay && progDay) {
-      activeWorkoutEl.innerHTML = `${progDay.name}<br><span style="font-size:20px;color:var(--accent)">${progDay.exercises?.length || 0} Esercizi</span>`;
+      activeWorkoutEl.textContent = progDay.name || 'Giorno ON';
     } else {
-      activeWorkoutEl.innerHTML = `Giorno di riposo.<br><span style="font-size:20px;color:var(--t2)">Recupera le energie</span>`;
+      activeWorkoutEl.textContent = 'Giorno di riposo';
     }
   }
   
@@ -415,9 +415,9 @@ async function buildStreak() {
     const weeklyDone = logs.filter(l => l.date >= weekAgoStr && l.workout?.completed).length;
     const totalDone  = logs.filter(l => l.workout?.completed).length;
     if (weeklyDone > 0) {
-      box.innerHTML = `<div class="streak">${weeklyDone} <span style="font-size:10px;opacity:.7">/ sett.</span></div>`;
+      box.innerHTML = `<div class="streak"><span class="num">${weeklyDone}</span> <span style="font-size:9px;color:var(--t3);text-transform:lowercase;font-weight:600;">/ sett.</span></div>`;
     } else if (totalDone > 0) {
-      box.innerHTML = `<div class="streak">0 <span style="font-size:10px;opacity:.7">/ sett.</span></div>`;
+      box.innerHTML = `<div class="streak"><span class="num">0</span> <span style="font-size:9px;color:var(--t3);text-transform:lowercase;font-weight:600;">/ sett.</span></div>`;
     } else {
       box.innerHTML = '';
     }
@@ -479,16 +479,28 @@ function buildDayType() {
   const session = activeProgram?.schedule?.[dow];
   const lbl = document.getElementById('dtype-label');
   const sub = document.getElementById('dtype-sub');
+  const desc = document.getElementById('dtype-desc');
+  const icon = document.getElementById('dtype-icon');
   const tgl = document.getElementById('override-tgl');
   if(!lbl || !sub || !tgl) return;
 
   if (isTrainingDay) {
-    lbl.innerHTML = `<i class="ri-checkbox-circle-fill" style="color:var(--green)"></i> Giorno ON`;
-    sub.textContent = session?.name || 'Allenamento';
+    if (lbl) lbl.textContent = 'OGGI';
+    if (sub) sub.textContent = 'Giorno ON — allenamento';
+    if (desc) desc.textContent = session?.name || 'Sessione programmata';
+    if (icon) {
+      icon.className = 'ri-boxing-fill';
+      icon.style.color = 'var(--accent)';
+    }
     tgl.checked = true;
   } else {
-    lbl.innerHTML = `<i class="ri-moon-fill" style="color:var(--t3)"></i> Giorno OFF — Riposo`;
-    sub.textContent = 'Nessuna sessione programmata';
+    if (lbl) lbl.textContent = 'OGGI';
+    if (sub) sub.textContent = 'Giorno off — riposo';
+    if (desc) desc.textContent = 'Nessuna sessione programmata';
+    if (icon) {
+      icon.className = 'ri-moon-fill';
+      icon.style.color = 'var(--t3)';
+    }
     tgl.checked = false;
   }
 
@@ -611,12 +623,10 @@ function updateNutritionTotals() {
   // No plan: show neutral card
   if (!plan) {
     box.innerHTML = `
-      <div class="score-compact-card">
-        <div style="text-align:center; padding:10px 0; color:var(--t3);">
-          <div style="font-size:32px; margin-bottom:8px;">📊</div>
-          <div style="font-size:12px; font-weight:700; color:var(--t2);">Nessun piano dieta attivo</div>
-          <div style="font-size:11px; margin-top:4px;">Configura la dieta per visualizzare lo SmartScore</div>
-        </div>
+      <div style="text-align:center; padding:10px 0; color:var(--t3);">
+        <div style="font-size:32px; margin-bottom:8px;">📊</div>
+        <div style="font-size:12px; font-weight:700; color:var(--t2);">Nessun piano dieta attivo</div>
+        <div style="font-size:11px; margin-top:4px;">Configura la dieta per visualizzare lo SmartScore</div>
       </div>`;
     return;
   }
@@ -642,11 +652,11 @@ function updateNutritionTotals() {
 
   // Color + glow by score band
   let col;
-  if      (score >= 90) { col = '#00dc78'; }
-  else if (score >= 75) { col = '#4ade80'; }
-  else if (score >= 55) { col = '#fbbf24'; }
-  else if (score >= 35) { col = '#ff6a00'; }
-  else                  { col = '#ff3b3b'; }
+  if      (score >= 90) col = '#00dc78';
+  else if (score >= 75) col = '#4ade80';
+  else if (score >= 55) col = '#fbbf24';
+  else if (score >= 35) col = '#ff6a00';
+  else                  col = '#ff3b3b';
 
   // Set the badge in index.html if it exists
   const badgeEl = document.getElementById('smartscore-badge');
@@ -656,53 +666,88 @@ function updateNutritionTotals() {
     badgeEl.style.color = col;
   }
 
-  // Draw the compact score flex container
+  // Draw the split card (Left ring chart, Right metrics list)
+  const totalMeals = plan.meals?.length || 0;
+  const eatenMealsCount = mealStates.filter(m => m.eaten).length;
+  const targetKcal = plan.kcal || 0;
+  const actualKcal = Math.round(tots.kcal);
+  
+  const workoutBreakdown = breakdown.find(b => b.label.toLowerCase().includes('allen'));
+  const scheduleDay = activeProgram?.schedule?.[todayKey];
+  const sessionName = isTrainingDay 
+    ? (typeof scheduleDay === 'string' ? scheduleDay : (scheduleDay?.name || 'Workout')) 
+    : 'riposo';
+  const workoutScore = workoutBreakdown?.score || 0;
+  const workoutMax = workoutBreakdown?.max || 30;
+  const workoutPct = Math.round((workoutScore / workoutMax) * 100);
+  
+  const stepsGoal = appSettings?.steps_goal || 0;
+  const actualSteps = logData.steps || 0;
+  
+  const targetProtein = plan.protein || 0;
+  const actualProtein = Math.round(tots.protein);
+
+  const S = 110, R = 44, SW = 7;
+  const C = 2 * Math.PI * R;
+  const dash = (score / 100) * C;
+
   box.innerHTML = `
-    <div class="score-compact-card">
-      <div class="score-compact-flex">
-        <div class="score-compact-left">
-          <div class="score-compact-circle" style="border-color:${col}; box-shadow: 0 0 12px ${col}40;">
-            <div class="score-compact-num" style="color:${col};">${score}</div>
-            <div class="score-compact-lbl">SCORE</div>
-          </div>
-          <div class="score-compact-info">
-            <div class="score-compact-status">${label}</div>
-            <div class="score-compact-desc">Stato giornaliero basato sulle tue attività</div>
-          </div>
-        </div>
-        
-        <div class="score-compact-metrics">
-          <div class="score-mini-metric">
-            <div class="score-mini-val">${breakdown.find(b => b.label.toLowerCase().includes('past'))?.score || 0}/35</div>
-            <div class="score-mini-lbl">Pasti</div>
-          </div>
-          <div class="score-mini-metric">
-            <div class="score-mini-val">${breakdown.find(b => b.label.toLowerCase().includes('allen'))?.score || 0}/30</div>
-            <div class="score-mini-lbl">Wkt</div>
-          </div>
-          <div class="score-mini-metric">
-            <div class="score-mini-val">${breakdown.find(b => b.label.toLowerCase().includes('prot'))?.score || 0}/15</div>
-            <div class="score-mini-lbl">Pro</div>
-          </div>
+    <div style="display:flex; gap:20px; align-items:center; width:100%; margin-top:8px;">
+      
+      <!-- Left Column: Circular chart -->
+      <div style="position:relative; width:${S}px; height:${S}px; flex-shrink:0;">
+        <svg width="${S}" height="${S}" viewBox="0 0 ${S} ${S}" style="transform:rotate(-90deg); filter:drop-shadow(0 0 10px ${col}25);">
+          <circle cx="${S/2}" cy="${S/2}" r="${R}" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="${SW}"/>
+          <circle cx="${S/2}" cy="${S/2}" r="${R}" fill="none" stroke="${col}" stroke-width="${SW}"
+            stroke-dasharray="${dash} ${C}" stroke-linecap="round"
+            style="transition:stroke-dasharray 0.8s cubic-bezier(.4,0,.2,1)"/>
+        </svg>
+        <div style="position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;">
+          <div style="font-size:30px; font-weight:800; color:#fff; line-height:1;">${score}</div>
+          <div style="font-size:10px; color:var(--t3); font-weight:700;">/ 100</div>
         </div>
       </div>
       
-      <!-- Mini progress bar breakdown details -->
-      <div style="width:100%; margin-top:16px; border-top:1px solid rgba(255,255,255,0.04); padding-top:14px; display:flex; flex-direction:column; gap:8px">
-        ${breakdown.map(b => {
-          const pct = Math.round(b.score / b.max * 100);
-          const barCol = b.ok ? '#00dc78' : b.score > 0 ? '#fbbf24' : 'rgba(255,255,255,0.08)';
-          return `
-            <div>
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                <span style="font-size:11px; color:var(--t2); font-weight:600;">${b.label}</span>
-                <span style="font-size:11px; color:var(--t3); font-weight:700;">${b.score}/${b.max} <span style="font-weight:400; font-size:10px;">(${b.note})</span></span>
-              </div>
-              <div style="height:3px; background:rgba(255,255,255,0.04); border-radius:99px; overflow:hidden;">
-                <div style="height:100%; width:${pct}%; background:${barCol}; border-radius:99px; transition:width 0.7s ease;"></div>
-              </div>
-            </div>`;
-        }).join('')}
+      <!-- Right Column: Metrics list -->
+      <div style="flex:1; display:flex; flex-direction:column; gap:10px;">
+        
+        <!-- Pasti -->
+        <div style="display:flex; justify-content:space-between; align-items:baseline;">
+          <span style="font-size:13px; font-weight:700; color:#fff;">Pasti</span>
+          <span style="font-size:12px; color:var(--t2); font-weight:500;">
+            ${eatenMealsCount}/${totalMeals} <span style="color:var(--t3); margin:0 4px;">·</span> ${actualKcal}/${targetKcal} kcal
+          </span>
+        </div>
+        
+        <!-- Allenamento -->
+        <div>
+          <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px;">
+            <span style="font-size:13px; font-weight:700; color:#fff;">Allenamento</span>
+            <span style="font-size:12px; color:var(--t2); font-weight:500;">
+              ${sessionName} <span style="color:var(--t3); margin:0 4px;">·</span> ${workoutScore}/${workoutMax}
+            </span>
+          </div>
+          <div style="height:3px; background:rgba(255,255,255,0.04); border-radius:99px; overflow:hidden;">
+            <div style="height:100%; width:${workoutPct}%; background:${workoutScore > 0 ? 'var(--green)' : 'rgba(255,255,255,0.08)'}; border-radius:99px; transition:width 0.5s ease;"></div>
+          </div>
+        </div>
+        
+        <!-- Passi -->
+        <div style="display:flex; justify-content:space-between; align-items:baseline; border-top:1px solid rgba(255,255,255,0.03); padding-top:6px;">
+          <span style="font-size:13px; font-weight:700; color:#fff;">Passi</span>
+          <span style="font-size:12px; color:var(--t2); font-weight:500;">
+            ${actualSteps.toLocaleString('it-IT')} <span style="color:var(--t3); margin:0 4px;">·</span> ${stepsGoal.toLocaleString('it-IT')}
+          </span>
+        </div>
+        
+        <!-- Proteine -->
+        <div style="display:flex; justify-content:space-between; align-items:baseline; border-top:1px solid rgba(255,255,255,0.03); padding-top:6px;">
+          <span style="font-size:13px; font-weight:700; color:#fff;">Proteine</span>
+          <span style="font-size:12px; color:var(--t2); font-weight:500;">
+            ${actualProtein} g <span style="color:var(--t3); margin:0 4px;">·</span> ${targetProtein} g
+          </span>
+        </div>
+
       </div>
     </div>
   `;

@@ -32,22 +32,23 @@
   </div>
 
   <!-- WELCOME SUBTITLE -->
-  <div id="welcome-name" class="home-subtitle">Benvenuto — recupera le energie.</div>
+  <div id="welcome-name" class="home-subtitle" style="font-size:14px; color:var(--t2); margin-top:-10px; margin-bottom:24px;">Benvenuto, Enrico — recupera le energie.</div>
 
   <!-- SMARTSCORE CARD -->
-  <div class="smartscore-card" style="margin-top:24px;">
-    <div class="smartscore-card-header">
-      <div class="smartscore-label">SMARTSCORE</div>
-      <div class="smartscore-badge" id="smartscore-badge">⚠ ATTENZIONE</div>
+  <div class="smartscore-card" style="margin-top:24px; background:linear-gradient(135deg, var(--bg2), #141416); border-radius:20px; padding:20px; border:1px solid var(--border); position:relative; overflow:hidden;">
+    <div class="smartscore-card-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <div class="smartscore-label" style="font-size:10px; font-weight:800; color:var(--t3); letter-spacing:1.5px; text-transform:uppercase;">SMARTSCORE</div>
+      <div class="smartscore-badge" id="smartscore-badge" style="font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:0.8px; padding:3px 8px; border-radius:6px; border:1px solid rgba(251,191,36,0.3); color:#fbbf24; background:rgba(251,191,36,0.06);">⚠ ATTENZIONE</div>
     </div>
-    <div class="smartscore-body">
-      <div id="fitscore-box" class="smartscore-ring-wrap"></div>
-    </div>
-    <div class="smartscore-footer">
+    
+    <!-- Split columns -->
+    <div id="fitscore-box"></div>
+
+    <div class="smartscore-footer" style="margin-top:16px; border-top:1px solid rgba(255,255,255,0.03); padding-top:12px; display:flex; justify-content:space-between; font-size:11px; color:var(--t3); font-weight:500;">
       <span>calcolato in tempo reale</span>
-      <span class="smartscore-link" id="smartscore-howto-toggle" onclick="const h = document.getElementById('smartscore-howto'); h.style.display = h.style.display === 'none' ? 'block' : 'none';" style="cursor:pointer">· come si legge</span>
+      <span class="smartscore-link" id="smartscore-howto-toggle" onclick="const h = document.getElementById('smartscore-howto'); h.style.display = h.style.display === 'none' ? 'block' : 'none';" style="cursor:pointer; color:var(--t2); text-decoration:underline;">come si legge</span>
     </div>
-    <div id="smartscore-howto" class="smartscore-howto" style="display:none">
+    <div id="smartscore-howto" class="smartscore-howto" style="display:none; margin-top:14px; font-size:12px; color:var(--t2); line-height:1.75; text-align:left; border-top:1px dashed rgba(255,255,255,0.05); padding-top:12px;">
       <div style="display:flex;gap:8px;margin-bottom:4px"><span>🍽️</span><span><b>Pasti (35pt)</b> — pasti spuntati rispetto all'orario attuale</span></div>
       <div style="display:flex;gap:8px;margin-bottom:4px"><span>💪</span><span><b>Allenamento (30pt)</b> — sessione completata o programmata</span></div>
       <div style="display:flex;gap:8px;margin-bottom:4px"><span>🥩</span><span><b>Proteine (15pt)</b> — apporto proteico proporzionale</span></div>
@@ -65,42 +66,44 @@
   <div class="pano-list">
     <!-- DAY TYPE -->
     <div class="pano-card tgl-row">
-      <div class="pano-icon"><i class="ri-moon-fill"></i></div>
+      <div class="pano-icon"><i class="ri-moon-fill" id="dtype-icon" style="color:var(--t3);"></i></div>
       <div class="pano-info" style="flex:1">
         <div class="pano-label" id="dtype-label">OGGI</div>
-        <div class="pano-val" id="dtype-sub" style="font-size:10px;color:var(--t3);margin-top:2px;text-transform:none"></div>
+        <div class="pano-val" id="dtype-sub" style="font-size:15px; font-weight:700; color:#fff; margin-top:2px;">Giorno off — riposo</div>
+        <div class="pano-sub-detail" id="dtype-desc" style="font-size:11px; color:var(--t3); margin-top:2px;">Nessuna sessione programmata</div>
       </div>
       <label class="tgl"><input type="checkbox" id="override-tgl"><span class="tgl-s"></span></label>
     </div>
 
     <!-- ALLENAMENTI -->
     <div class="pano-card" onclick="location.href='programs.html'">
-      <div class="pano-icon"><i class="ri-boxing-fill"></i></div>
+      <div class="pano-icon"><i class="ri-dumbbell-line"></i></div>
       <div class="pano-info">
         <div class="pano-label">ALLENAMENTO</div>
         <div class="pano-val" id="active-program-name">Nessuna scheda</div>
+        <div style="font-size:11px; color:var(--t3); margin-top:2px;">Visualizza o modifica la scheda</div>
       </div>
       <i class="ri-arrow-right-s-line pano-arrow"></i>
     </div>
 
     <!-- CALORIE -->
     <div class="pano-card" onclick="location.href='diet.html'">
-      <div class="pano-icon"><i class="ri-fire-fill"></i></div>
+      <div class="pano-icon"><i class="ri-focus-3-line"></i></div>
       <div class="pano-info">
         <div class="pano-label">CALORIE</div>
-        <div class="pano-val"><span id="kcal-now" style="color:#fff;font-weight:700">0</span> <span style="font-size:11px;color:var(--t3)">/ <span id="kcal-tgt">0</span></span></div>
+        <div class="pano-val"><span id="kcal-now" style="color:#fff;font-weight:700">0</span> <span style="font-size:11px;color:var(--t3)">/ <span id="kcal-tgt">0</span> kcal</span></div>
+        <div style="font-size:11px; color:var(--t3); margin-top:2px;">Gestisci pasti e macronutrienti</div>
       </div>
       <i class="ri-arrow-right-s-line pano-arrow"></i>
     </div>
 
     <!-- PASSI / ATTIVITÀ -->
     <div class="pano-card" id="steps-card" style="cursor:pointer" onclick="window.openStepsModal && window.openStepsModal()">
-      <div class="pano-icon" style="width:32px;display:flex;align-items:center;justify-content:center">
-        <i class="ri-walk-line" style="font-size:20px;color:var(--t3)"></i>
-      </div>
+      <div class="pano-icon"><i class="ri-walk-line"></i></div>
       <div class="pano-info" style="flex:1">
         <div class="pano-label">ATTIVIT&Agrave;</div>
-        <div class="pano-val"><span style="font-size:12px;color:var(--t3)">Aggiungi passi</span></div>
+        <div class="pano-val" style="color:#fff; font-weight:700;">Passi &amp; Cardio</div>
+        <div style="font-size:11px; color:var(--t3); margin-top:2px;">Aggiungi passi o calorie bruciate</div>
       </div>
       <i class="ri-add-circle-line pano-arrow" style="font-size:20px"></i>
     </div>
@@ -144,12 +147,11 @@
 </div>
 
 <nav class="bnav">
-  <a href="index.html" class="on"><i class="ri-home-5-fill ni"></i><span>Home</span></a>
-  <a href="programs.html"><i class="ri-boxing-fill ni"></i><span>Schede</span></a>
-  <a href="diet.html"><i class="ri-restaurant-fill ni"></i><span>Dieta</span></a>
-
-  <a href="diary.html"><i class="ri-calendar-todo-fill ni"></i><span>Diario</span></a>
-  <a href="session.html"><i class="ri-play-circle-fill ni"></i><span>Allenati</span></a>
+  <a href="index.html" class="on"><i class="ri-home-5-line ni"></i><span>Home</span></a>
+  <a href="programs.html"><i class="ri-dumbbell-line ni"></i><span>Schede</span></a>
+  <a href="diet.html"><i class="ri-focus-3-line ni"></i><span>Dieta</span></a>
+  <a href="diary.html"><i class="ri-calendar-todo-line ni"></i><span>Diario</span></a>
+  <a href="session.html"><i class="ri-play-circle-line ni"></i><span>Allenati</span></a>
 </nav>
 
 <script type="module" src="js/daily_state.js"></script>
