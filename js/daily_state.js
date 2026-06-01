@@ -145,7 +145,12 @@ async function init() {
   }
 
   await checkDayRollover();
-  await loadWeeklyLogsForScore();
+  
+  // Load weekly logs in the background concurrently, and update SmartScore and Advisor once loaded
+  loadWeeklyLogsForScore().then(() => {
+    buildFitScore();
+    buildSmartAdvisor();
+  }).catch(e => console.warn('loadWeeklyLogsForScore background error:', e));
 
   try {
     const refs = [
