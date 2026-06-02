@@ -748,9 +748,9 @@ function buildFitScore() {
         
         <!-- Allenamento -->
         <div>
-          <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px;">
-            <span style="font-size:13px; font-weight:700; color:#fff;">Allenamento</span>
-            <span style="font-size:12px; color:var(--t2); font-weight:500;">
+          <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px; gap:8px;">
+            <span style="font-size:13px; font-weight:700; color:#fff; flex-shrink:0;">Allenamento</span>
+            <span style="font-size:12px; color:var(--t2); font-weight:500; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;">
               ${sessionName} <span style="color:var(--t3); margin:0 4px;">·</span> ${workoutScore}/${workoutMax}
             </span>
           </div>
