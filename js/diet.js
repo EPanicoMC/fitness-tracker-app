@@ -347,10 +347,10 @@ window.recalcTotals = function(dk) {
     fats:    a.fats    + (m.fats||0)
   }), { kcal:0, protein:0, carbs:0, fats:0 });
 
-  formData[dk].kcal = sum.kcal;
-  formData[dk].protein = sum.protein;
-  formData[dk].carbs = sum.carbs;
-  formData[dk].fats = sum.fats;
+  formData[dk].kcal = Math.round(sum.kcal);
+  formData[dk].protein = parseFloat(sum.protein.toFixed(1));
+  formData[dk].carbs = parseFloat(sum.carbs.toFixed(1));
+  formData[dk].fats = parseFloat(sum.fats.toFixed(1));
 
   const kIn = document.getElementById(`${dk}-kcal-input`);
   const pIn = document.getElementById(`${dk}-pro-input`);
@@ -389,12 +389,18 @@ window.saveDiet = async function() {
     
     const sumMeals = (meals) => {
       const s = sanitizeMeals(meals);
-      return s.reduce((a, m) => ({
+      const raw = s.reduce((a, m) => ({
         kcal: a.kcal + m.kcal,
         protein: a.protein + m.protein,
         carbs: a.carbs + m.carbs,
         fats: a.fats + m.fats
       }), { kcal: 0, protein: 0, carbs: 0, fats: 0 });
+      return {
+        kcal: Math.round(raw.kcal),
+        protein: parseFloat(raw.protein.toFixed(1)),
+        carbs: parseFloat(raw.carbs.toFixed(1)),
+        fats: parseFloat(raw.fats.toFixed(1))
+      };
     };
 
     const dayOnTotals = sumMeals(formData.day_on?.meals);

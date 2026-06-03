@@ -50,6 +50,86 @@ async function callGemini(key, prompt, opts = {}) {
   return { success: false, error: 'Tutti i modelli occupati. Riprova tra 1 minuto.' };
 }
 
+// ── Validazione coerenza macro ↔ kcal ───────────────────────
+function validateAndFixMacros(parsed) {
+  let protein = Math.max(0, Number(parsed.protein) || 0);
+  let carbs   = Math.max(0, Number(parsed.carbs)   || 0);
+  let fats    = Math.max(0, Number(parsed.fats)    || 0);
+  let items   = parsed.items || [];
+  const declaredKcal = Math.max(0, Number(parsed.kcal) || 0);
+
+  // 1. Cross-check items breakdown vs totali (se la somma items è più affidabile)
+  if (items.length > 0) {
+    const iSum = items.reduce((a, i) => ({
+      kcal: a.kcal + (Number(i.kcal) || 0),
+      protein: a.protein + (Number(i.protein) || 0),
+      carbs: a.carbs + (Number(i.carbs) || 0),
+      fats: a.fats + (Number(i.fats) || 0)
+    }), { kcal: 0, protein: 0, carbs: 0, fats: 0 });
+
+    // Se la somma degli items è lontana dai totali dichiarati (>15%), usa items
+    if (iSum.kcal > 0 && Math.abs(iSum.kcal - declaredKcal) > declaredKcal * 0.15) {
+      protein = Math.max(0, iSum.protein);
+      carbs   = Math.max(0, iSum.carbs);
+      fats    = Math.max(0, iSum.fats);
+    }
+  }
+
+  // 2. Calcola kcal dalla formula canonica
+  const computedKcal = (protein * 4) + (carbs * 4) + (fats * 9);
+
+  // 3. Se la differenza tra dichiarato e calcolato > 8%, usa il calcolato (la formula è la verità)
+  const diff = Math.abs(computedKcal - declaredKcal);
+  const threshold = Math.max(declaredKcal, computedKcal, 1) * 0.08;
+  const corrected = diff > threshold;
+  const finalKcal = Math.round(corrected ? computedKcal : declaredKcal);
+
+  return {
+    kcal: finalKcal,
+    protein: parseFloat(protein.toFixed(1)),
+    carbs: parseFloat(carbs.toFixed(1)),
+    fats: parseFloat(fats.toFixed(1)),
+    items,
+    _corrected: corrected
+  };
+}
+
+// ── Tabella riferimenti nutrizionali (per 100g) ─────────────
+const REFERENCE_TABLE = `Valori nutrizionali di riferimento per 100g di prodotto:
+   CEREALI E PANE:
+   - Pasta/Riso (crudo): ~350 kcal, 75g Carb, 10g Pro, 1g Fat
+   - Riso Basmati (crudo): ~350 kcal, 78g Carb, 8g Pro, 1g Fat
+   - Pane comune: ~260 kcal, 55g Carb, 8g Pro, 1g Fat
+   - Avena/Fiocchi d'avena: ~370 kcal, 60g Carb, 13g Pro, 7g Fat
+   - Fette biscottate: ~410 kcal, 75g Carb, 11g Pro, 7g Fat
+   PROTEINE ANIMALI:
+   - Petto di Pollo/Tacchino (crudo): ~110 kcal, 0g Carb, 23g Pro, 2g Fat
+   - Manzo magro (crudo): ~140 kcal, 0g Carb, 22g Pro, 5g Fat
+   - Salmone (fresco): ~180 kcal, 0g Carb, 20g Pro, 11g Fat
+   - Tonno in scatola (sgocciolato): ~110 kcal, 0g Carb, 25g Pro, 1g Fat
+   - Uovo intero (~60g): ~65 kcal → per 100g: ~155 kcal, 1g Carb, 13g Pro, 11g Fat
+   - Albume d'uovo: ~50 kcal, 1g Carb, 11g Pro, 0g Fat
+   LATTICINI:
+   - Latte intero: ~65 kcal, 5g Carb, 3g Pro, 4g Fat
+   - Yogurt greco 0%: ~55 kcal, 4g Carb, 10g Pro, 0g Fat
+   - Yogurt greco intero: ~95 kcal, 4g Carb, 9g Pro, 5g Fat
+   - Ricotta vaccina: ~140 kcal, 3g Carb, 11g Pro, 10g Fat
+   - Mozzarella: ~250 kcal, 1g Carb, 18g Pro, 19g Fat
+   - Parmigiano: ~390 kcal, 0g Carb, 33g Pro, 28g Fat
+   GRASSI E FRUTTA SECCA:
+   - Olio Extravergine: ~880 kcal, 0g Carb, 0g Pro, 100g Fat
+   - Burro: ~715 kcal, 0g Carb, 1g Pro, 81g Fat
+   - Noci/Mandorle/Nocciole: ~610 kcal, 12g Carb, 20g Pro, 52g Fat
+   - Burro d'arachidi: ~590 kcal, 22g Carb, 25g Pro, 50g Fat
+   FRUTTA E VERDURA:
+   - Banana: ~90 kcal, 23g Carb, 1g Pro, 0g Fat
+   - Mela/Pera: ~52 kcal, 14g Carb, 0g Pro, 0g Fat
+   - Verdure miste (zucchine, broccoli, spinaci): ~25 kcal, 3g Carb, 2g Pro, 0g Fat
+   - Patate: ~77 kcal, 17g Carb, 2g Pro, 0g Fat
+   LEGUMI:
+   - Ceci/Lenticchie (cotti): ~120 kcal, 20g Carb, 8g Pro, 2g Fat
+   - Fagioli (cotti): ~100 kcal, 17g Carb, 7g Pro, 1g Fat`;
+
 // ── Calcola macros da testo ─────────────────────────────────
 export async function calcMacrosFromText(text) {
   if (busy) return { success: false, error: 'Calcolo in corso...' };
@@ -62,15 +142,14 @@ export async function calcMacrosFromText(text) {
 Pasto: "${text}"
 
 Regole fondamentali e VINCOLANTI di attendibilità:
-1. Le calorie totali (kcal) DEVONO essere LA SOMMA MATEMATICA ESATTA dei macronutrienti calcolati usando questa formula: (Proteine * 4) + (Carboidrati * 4) + (Grassi * 9). Fai sempre un doppio check prima di rispondere. Se la somma non combacia, correggi i macronutrienti o le calorie.
-2. Se le quantità non sono specificate, ipotizza porzioni standard medie e ragionevoli (es. piatto di pasta = 80g a crudo, petto di pollo = 150g, 1 cucchiaio d'olio = 10g, uovo medio = 50g, 1 frutto = 150g).
-3. Valori nutrizionali di riferimento per 100g:
-   - Pasta/Riso (crudo): ~350 kcal, 75g Carb, 10g Pro, 1g Fat
-   - Petto di Pollo (crudo): ~110 kcal, 0g Carb, 23g Pro, 2g Fat
-   - Olio Extravergine: ~880 kcal, 0g Carb, 0g Pro, 100g Fat
-   - Salmone (fresco): ~180 kcal, 0g Carb, 20g Pro, 11g Fat
-   - Pane comune: ~260 kcal, 55g Carb, 8g Pro, 1g Fat
-4. L'output deve essere SOLO un JSON valido, niente markup markdown.
+1. Le calorie totali (kcal) DEVONO essere LA SOMMA MATEMATICA ESATTA dei macronutrienti calcolati usando questa formula: kcal = (Proteine * 4) + (Carboidrati * 4) + (Grassi * 9). PRIMA calcola i macro, POI calcola le kcal dalla formula. Se la somma non combacia, CORREGGI le kcal.
+2. Se le quantità non sono specificate, ipotizza porzioni standard medie e ragionevoli (es. piatto di pasta = 80g a crudo, petto di pollo = 150g, 1 cucchiaio d'olio = 10g, uovo medio = 60g, 1 frutto = 150g, bicchiere di latte = 200ml).
+3. ${REFERENCE_TABLE}
+4. SANITY CHECK obbligatori:
+   - Un singolo ingrediente di peso < 200g NON può avere più di 900 kcal (a meno che sia olio/burro/frutta secca pura).
+   - Le proteine per 100g di qualsiasi cibo NON superano mai i 35g (eccezione: isolato proteico).
+   - Controlla che il rapporto kcal/grammi sia plausibile per ogni ingrediente.
+5. L'output deve essere SOLO un JSON valido, niente markup markdown o backticks.
 
 Struttura JSON richiesta:
 {
@@ -99,13 +178,10 @@ Struttura JSON richiesta:
     if (s1 === -1 || s2 === -1) return { success: false, error: 'Risposta AI non valida.' };
 
     const parsed = JSON.parse(raw.slice(s1, s2 + 1));
+    const validated = validateAndFixMacros(parsed);
     return {
       success: true,
-      kcal: Math.round(parsed.kcal || 0),
-      protein: parseFloat((parsed.protein || 0).toFixed(1)),
-      carbs: parseFloat((parsed.carbs || 0).toFixed(1)),
-      fats: parseFloat((parsed.fats || 0).toFixed(1)),
-      items: parsed.items || []
+      ...validated
     };
   } catch(e) {
     return { success: false, error: 'Errore parsing risposta AI.' };
@@ -232,11 +308,14 @@ export async function analyzeFoodImageAI(base64Image, mimeType = 'image/jpeg') {
   if (!key) return { success: false, error: 'API key mancante.' };
 
   const promptText = `Analizza l'immagine di questo cibo e stima accuratamente i macronutrienti (Proteine, Carboidrati, Grassi) e le Calorie (kcal).
-Fornisci anche una descrizione sintetica degli ingredienti individuati e delle loro quantità stimate (es. 150g riso bollito, 100g salmone grigliato, 1 cucchiaio d'olio).
+Identifica ogni ingrediente visibile, stima le quantità in grammi e calcola i macro per ciascuno.
 
-Regole di calcolo:
-1. Sii il più preciso e realistico possibile in base all'aspetto visivo.
-2. Rispondi esclusivamente con un oggetto JSON valido e nient'altro. Non includere blocchi di codice markdown (tipo \`\`\`json) o testo aggiuntivo.
+Regole fondamentali e VINCOLANTI:
+1. Le calorie totali (kcal) DEVONO essere calcolate con la formula: kcal = (Proteine * 4) + (Carboidrati * 4) + (Grassi * 9). PRIMA calcola i macro di ogni ingrediente, POI somma, POI calcola le kcal dalla formula.
+2. Stima le porzioni in modo realistico basandoti sulle dimensioni visive del piatto/contenitore.
+3. ${REFERENCE_TABLE}
+4. SANITY CHECK: un singolo ingrediente < 200g NON può avere più di 900 kcal (eccezione: olio/burro/frutta secca pura). Le proteine per 100g non superano mai 35g.
+5. Rispondi esclusivamente con un oggetto JSON valido. Non includere blocchi di codice markdown o testo aggiuntivo.
 
 Struttura JSON richiesta:
 {
@@ -245,7 +324,10 @@ Struttura JSON richiesta:
   "protein": 0,
   "carbs": 0,
   "fats": 0,
-  "ingredients": "Ingrediente 1, Ingrediente 2, ecc."
+  "ingredients": "150g riso bollito, 100g salmone grigliato, 1 cucchiaio olio EVO",
+  "items": [
+    { "name": "Riso bollito (150g)", "grams": 150, "kcal": 195, "protein": 4, "carbs": 43, "fats": 0.5 }
+  ]
 }`;
 
   const parts = [
@@ -253,7 +335,7 @@ Struttura JSON richiesta:
     { inlineData: { mimeType, data: base64Image } }
   ];
 
-  const res = await callGemini(key, null, { temperature: 0.1, maxOutputTokens: 512, parts });
+  const res = await callGemini(key, null, { temperature: 0.1, maxOutputTokens: 768, parts });
   if (!res.success) return { success: false, error: 'Errore analisi immagine food scanner' };
 
   const raw = res.text;
@@ -263,13 +345,14 @@ Struttura JSON richiesta:
 
   try {
     const parsed = JSON.parse(raw.slice(s1, s2 + 1));
+    const validated = validateAndFixMacros(parsed);
     return {
       success: true,
       name: parsed.name || 'Pasto Scansionato',
-      kcal: Math.round(parsed.kcal || 0),
-      protein: parseFloat((parsed.protein || 0).toFixed(1)),
-      carbs: parseFloat((parsed.carbs || 0).toFixed(1)),
-      fats: parseFloat((parsed.fats || 0).toFixed(1)),
+      kcal: validated.kcal,
+      protein: validated.protein,
+      carbs: validated.carbs,
+      fats: validated.fats,
       ingredients: parsed.ingredients || ''
     };
   } catch(e) {

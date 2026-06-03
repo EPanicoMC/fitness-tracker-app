@@ -602,7 +602,12 @@ function calcTotals() {
     fats    += m.fats    || 0;
   });
 
-  return { kcal, protein, carbs, fats };
+  return {
+    kcal: Math.round(kcal),
+    protein: parseFloat(protein.toFixed(1)),
+    carbs: parseFloat(carbs.toFixed(1)),
+    fats: parseFloat(fats.toFixed(1))
+  };
 }
 
 function updateNutritionTotals() {

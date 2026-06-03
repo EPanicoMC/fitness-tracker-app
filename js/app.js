@@ -130,8 +130,8 @@ export function calcFitScore({ log, plan, isOn, objective = 'recomposizione', st
   total += tPt;
 
   // — Protein (30 pt) —
-  const proteinTarget = plan?.macros?.protein || 0;
-  const proteinActual = log.nutrition?.protein || 0;
+  const proteinTarget = plan?.protein || 0;
+  const proteinActual = log.nutrition?.totals?.protein || log.nutrition?.protein || 0;
   let pPt = 0;
   if (proteinTarget > 0) {
     const pRatio = proteinActual / proteinTarget;
@@ -145,7 +145,7 @@ export function calcFitScore({ log, plan, isOn, objective = 'recomposizione', st
 
   // — Calories (25 pt) — objective-aware —
   const kcalTarget = plan?.kcal || 0;
-  const kcalActual = log.nutrition?.kcal || 0;
+  const kcalActual = log.nutrition?.totals?.kcal || log.nutrition?.kcal || 0;
   let cPt = 0;
   if (kcalTarget > 0) {
     const cRatio = kcalActual / kcalTarget;
@@ -348,9 +348,9 @@ export function calcRecoveryPlan({ weeklyLogs, activeDiet, activeProgram, appSet
 
     // ── Macro deltas ──
     const targetKcal = plan?.kcal || 0;
-    const targetProtein = plan?.macros?.protein || plan?.protein || 0;
-    const targetCarbs = plan?.macros?.carbs || plan?.carbs || 0;
-    const targetFats = plan?.macros?.fats || plan?.fats || 0;
+    const targetProtein = plan?.protein || 0;
+    const targetCarbs = plan?.carbs || 0;
+    const targetFats = plan?.fats || 0;
 
     const actualKcal = logEntry.nutrition?.totals?.kcal || logEntry.nutrition?.kcal || 0;
     const actualProtein = logEntry.nutrition?.totals?.protein || logEntry.nutrition?.protein || 0;
@@ -408,7 +408,7 @@ export function calcRecoveryPlan({ weeklyLogs, activeDiet, activeProgram, appSet
   const isTodayTraining = !!(todaySchedule && todaySchedule !== 'off' && todaySchedule !== 'rest');
   const todayPlan = activeDiet?.[isTodayTraining ? 'day_on' : 'day_off'];
   const todayBaseKcal = todayPlan?.kcal || 0;
-  const todayBaseProtein = todayPlan?.macros?.protein || todayPlan?.protein || 0;
+  const todayBaseProtein = todayPlan?.protein || 0;
 
   // Spread deficit over remaining days — minimum 3 to avoid extreme single-day adjustments
   const remainingDays = Math.max(3, 7 - daysWithData);
