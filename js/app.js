@@ -402,7 +402,7 @@ export function calcRecoveryPlan({ weeklyLogs, activeDiet, activeProgram, appSet
     recoveryStatus = 'on_track';
   }
 
-  // ── Adjusted targets for today ──
+  // ── Adjusted targets for today (with physiological caps) ──
   const todayDow = getDayOfWeek(today);
   const todaySchedule = activeProgram?.schedule?.[todayDow];
   const isTodayTraining = !!(todaySchedule && todaySchedule !== 'off' && todaySchedule !== 'rest');
@@ -410,16 +410,28 @@ export function calcRecoveryPlan({ weeklyLogs, activeDiet, activeProgram, appSet
   const todayBaseKcal = todayPlan?.kcal || 0;
   const todayBaseProtein = todayPlan?.macros?.protein || todayPlan?.protein || 0;
 
-  // Spread deficit over remaining days (max 7)
-  const remainingDays = Math.max(1, 7 - daysWithData);
-  const kcalAdjustPerDay = kcalWeeklyDelta < 0 ? Math.round(Math.abs(kcalWeeklyDelta) / remainingDays) : 0;
-  const proteinAdjustPerDay = proteinWeeklyDelta < 0 ? Math.round(Math.abs(proteinWeeklyDelta) / remainingDays) : 0;
+  // Spread deficit over remaining days — minimum 3 to avoid extreme single-day adjustments
+  const remainingDays = Math.max(3, 7 - daysWithData);
+
+  // Calculate raw adjustments per day
+  const rawKcalAdjust = kcalWeeklyDelta < 0 ? Math.round(Math.abs(kcalWeeklyDelta) / remainingDays) : 0;
+  const rawProteinAdjust = proteinWeeklyDelta < 0 ? Math.round(Math.abs(proteinWeeklyDelta) / remainingDays) : 0;
+  const rawStepsAdjust = stepsGoal > 0 && stepsWeeklyDelta < 0
+    ? Math.round(Math.abs(stepsWeeklyDelta) / remainingDays)
+    : 0;
+
+  // Apply physiological caps — these are safe daily maximums
+  const MAX_EXTRA_KCAL_PER_DAY = 400;
+  const MAX_EXTRA_PROTEIN_PER_DAY = 40;
+  const MAX_EXTRA_STEPS_PER_DAY = 3000;
+
+  const kcalAdjustPerDay = Math.min(rawKcalAdjust, MAX_EXTRA_KCAL_PER_DAY);
+  const proteinAdjustPerDay = Math.min(rawProteinAdjust, MAX_EXTRA_PROTEIN_PER_DAY);
 
   const todayAdjustedKcal = todayBaseKcal + kcalAdjustPerDay;
   const todayExtraProtein = proteinAdjustPerDay;
-  const todayExtraSteps = stepsGoal > 0 && stepsWeeklyDelta < 0
-    ? Math.round(Math.abs(stepsWeeklyDelta) / remainingDays)
-    : 0;
+  const todayAdjustedProtein = todayBaseProtein + todayExtraProtein;
+  const todayExtraSteps = Math.min(rawStepsAdjust, MAX_EXTRA_STEPS_PER_DAY);
 
   // ── Days to recover estimate ──
   let daysToRecover = 0;
@@ -436,7 +448,7 @@ export function calcRecoveryPlan({ weeklyLogs, activeDiet, activeProgram, appSet
       type: 'meal',
       icon: '🥩',
       label: 'Spuntino proteico',
-      value: `${Math.abs(kcalAdjustPerDay)} kcal`
+      value: `+${kcalAdjustPerDay} kcal`
     });
   }
 
@@ -478,7 +490,10 @@ export function calcRecoveryPlan({ weeklyLogs, activeDiet, activeProgram, appSet
     workoutsPlanned,
     stepsWeeklyDelta: Math.round(stepsWeeklyDelta),
     avgDailySteps,
+    todayBaseKcal,
+    todayBaseProtein,
     todayAdjustedKcal,
+    todayAdjustedProtein,
     todayExtraProtein,
     todayExtraSteps,
     recoveryStatus,

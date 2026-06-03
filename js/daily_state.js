@@ -719,7 +719,7 @@ function buildFitScore() {
   const dash = (score / 100) * C;
 
   box.innerHTML = `
-    <div style="display:flex; gap:20px; align-items:center; width:100%; margin-top:8px;">
+    <div style="display:flex; gap:16px; align-items:center; width:100%; margin-top:8px; overflow:hidden;">
       
       <!-- Left Column: Circular chart -->
       <div style="position:relative; width:${S}px; height:${S}px; flex-shrink:0;">
@@ -736,22 +736,22 @@ function buildFitScore() {
       </div>
       
       <!-- Right Column: Metrics list -->
-      <div style="flex:1; display:flex; flex-direction:column; gap:10px;">
+      <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:10px; overflow:hidden;">
         
         <!-- Pasti -->
-        <div style="display:flex; justify-content:space-between; align-items:baseline;">
-          <span style="font-size:13px; font-weight:700; color:#fff;">Pasti</span>
-          <span style="font-size:12px; color:var(--t2); font-weight:500;">
-            ${eatenMealsCount}/${totalMeals} <span style="color:var(--t3); margin:0 4px;">·</span> ${actualKcal}/${targetKcal} kcal
+        <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
+          <span style="font-size:13px; font-weight:700; color:#fff; flex-shrink:0;">Pasti</span>
+          <span style="font-size:11px; color:var(--t2); font-weight:500; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;">
+            ${eatenMealsCount}/${totalMeals} <span style="color:var(--t3);">·</span> ${actualKcal}/${targetKcal}
           </span>
         </div>
         
         <!-- Allenamento -->
-        <div>
+        <div style="min-width:0; overflow:hidden;">
           <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px; gap:8px;">
-            <span style="font-size:13px; font-weight:700; color:#fff; flex-shrink:0;">Allenamento</span>
-            <span style="font-size:12px; color:var(--t2); font-weight:500; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;">
-              ${sessionName} <span style="color:var(--t3); margin:0 4px;">·</span> ${workoutScore}/${workoutMax}
+            <span style="font-size:13px; font-weight:700; color:#fff; flex-shrink:0;">Workout</span>
+            <span style="font-size:11px; color:var(--t2); font-weight:500; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;">
+              ${sessionName} <span style="color:var(--t3);">·</span> ${workoutScore}/${workoutMax}
             </span>
           </div>
           <div style="height:3px; background:rgba(255,255,255,0.04); border-radius:99px; overflow:hidden;">
@@ -760,18 +760,18 @@ function buildFitScore() {
         </div>
         
         <!-- Passi -->
-        <div style="display:flex; justify-content:space-between; align-items:baseline; border-top:1px solid rgba(255,255,255,0.03); padding-top:6px;">
-          <span style="font-size:13px; font-weight:700; color:#fff;">Passi</span>
-          <span style="font-size:12px; color:var(--t2); font-weight:500;">
-            ${actualSteps.toLocaleString('it-IT')} <span style="color:var(--t3); margin:0 4px;">·</span> ${stepsGoal.toLocaleString('it-IT')}
+        <div style="display:flex; justify-content:space-between; align-items:baseline; border-top:1px solid rgba(255,255,255,0.03); padding-top:6px; gap:8px;">
+          <span style="font-size:13px; font-weight:700; color:#fff; flex-shrink:0;">Passi</span>
+          <span style="font-size:11px; color:var(--t2); font-weight:500; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;">
+            ${actualSteps.toLocaleString('it-IT')} <span style="color:var(--t3);">·</span> ${stepsGoal > 9999 ? Math.round(stepsGoal/1000) + 'k' : stepsGoal.toLocaleString('it-IT')}
           </span>
         </div>
         
         <!-- Proteine -->
-        <div style="display:flex; justify-content:space-between; align-items:baseline; border-top:1px solid rgba(255,255,255,0.03); padding-top:6px;">
-          <span style="font-size:13px; font-weight:700; color:#fff;">Proteine</span>
-          <span style="font-size:12px; color:var(--t2); font-weight:500;">
-            ${actualProtein} g <span style="color:var(--t3); margin:0 4px;">·</span> ${targetProtein} g
+        <div style="display:flex; justify-content:space-between; align-items:baseline; border-top:1px solid rgba(255,255,255,0.03); padding-top:6px; gap:8px;">
+          <span style="font-size:13px; font-weight:700; color:#fff; flex-shrink:0;">Proteine</span>
+          <span style="font-size:11px; color:var(--t2); font-weight:500; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;">
+            ${actualProtein}g <span style="color:var(--t3);">·</span> ${targetProtein}g
           </span>
         </div>
 

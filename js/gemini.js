@@ -399,37 +399,52 @@ export async function generateRecoveryAdviceAI({ profile, currentWeight, activeD
   const key = await getKey();
   if (!key) return { success: false, error: 'Configura la chiave Gemini nelle impostazioni per usare il Coach.' };
 
-  const prompt = `Sei KOVA Coach, un assistente AI di fitness e nutrizione estremamente preciso e proattivo.
-Il tuo compito è analizzare lo stato di recupero (Recovery Engine) degli ultimi 7 giorni di un utente e proporre un piano per rimettersi in carreggiata.
+  const p = profile || {};
+  const weight = currentWeight || p.weight || null;
 
-DATI UTENTE:
-- Nome: ${profile?.name || 'Atleta'}
-- Peso attuale: ${currentWeight || profile?.weight || 'N/D'} kg
-- Obiettivo: ${profile?.target || 'N/D'}
+  // Build concise context about what TODAY looks like vs weekly trend
+  const todayType = recoveryPlan.todayBaseKcal ? 'allenamento/riposo pianificato' : 'N/D';
 
-STATO DI RECUPERO (Recovery Plan - Ultimi 7 Giorni):
-- Stato complessivo: ${recoveryPlan.recoveryStatus} (${recoveryPlan.daysToRecover} giorni necessari per il recupero)
-- Delta Calorie Settimanale: ${recoveryPlan.kcalWeeklyDelta} kcal (surplus/deficit totale)
-- Delta Proteine Settimanale: ${recoveryPlan.proteinWeeklyDelta}g
-- Delta Carboidrati Settimanale: ${recoveryPlan.carbsWeeklyDelta}g
-- Delta Grassi Settimanale: ${recoveryPlan.fatsWeeklyDelta}g
-- Allenamenti saltati: ${recoveryPlan.workoutsMissed} su ${recoveryPlan.workoutsPlanned} pianificati (completati: ${recoveryPlan.workoutsCompleted})
-- Delta Passi Settimanale: ${recoveryPlan.stepsWeeklyDelta} passi (media giornaliera: ${recoveryPlan.avgDailySteps})
+  const prompt = `Sei KOVA Coach, un assistente AI di fitness e nutrizione personale.
+Devi dare un consiglio BREVE, CONCRETO e REALISTICO per oggi basandoti sullo stato settimanale dell'utente.
 
-REGOLAZIONE PER OGGI:
-- Calorie consigliate oggi (aggiustate): ${recoveryPlan.todayAdjustedKcal} kcal
-- Proteine extra consigliate oggi: ${recoveryPlan.todayExtraProtein}g
-- Passi extra consigliati oggi: ${recoveryPlan.todayExtraSteps}
+PROFILO:
+- Nome: ${p.name || 'Atleta'}
+- Peso: ${weight ? weight + ' kg' : 'N/D'}
+- Obiettivo: ${p.target || 'miglioramento composizione corporea'}
 
-CONTESTO TEMPORALE:
-- Momento della giornata: ${partOfDay} (es: mattina, pomeriggio, sera)
+PIANO GIORNALIERO DI RIFERIMENTO (oggi):
+- Calorie target base: ${recoveryPlan.todayBaseKcal || 'N/D'} kcal/giorno
+- Proteine target base: ${recoveryPlan.todayBaseProtein || 'N/D'}g/giorno
+- Calorie consigliate oggi (con leggero recupero): ${recoveryPlan.todayAdjustedKcal || 'N/D'} kcal
+- Proteine consigliate oggi (con leggero recupero): ${recoveryPlan.todayAdjustedProtein || 'N/D'}g
 
-ISTRUZIONI PER LA RISPOSTA:
-1. Genera un messaggio di risposta SHORT (massimo 60-80 parole), diretto, chiaro e motivante in lingua italiana.
-2. Usa il grassetto (**testo**) per mettere in evidenza i numeri chiave (es: **350 kcal**, **45g di proteine**, **10000 passi**).
-3. Suggerisci 2 azioni pratiche concrete di recupero all'interno del testo coerenti con i deficit riscontrati.
-4. ATTENZIONE: Se il momento della giornata è "mattina" o "pomeriggio", NON menzionare i passi extra da fare (puoi parlarne solo se è "sera").
-5. Rispondi solo con il messaggio del coach. Non aggiungere prefazioni o altre spiegazioni.`;
+TREND SETTIMANALE (ultimi 7 giorni):
+- Stato: ${recoveryPlan.recoveryStatus}
+- Delta kcal settimanale: ${recoveryPlan.kcalWeeklyDelta} kcal (negativo = sotto target)
+- Delta proteine settimanale: ${recoveryPlan.proteinWeeklyDelta}g
+- Allenamenti: ${recoveryPlan.workoutsCompleted}/${recoveryPlan.workoutsPlanned} completati (${recoveryPlan.workoutsMissed} saltati)
+- Passi medi giornalieri: ${recoveryPlan.avgDailySteps}
+
+MOMENTO: ${partOfDay}
+
+⚠️ REGOLE FONDAMENTALI — DEVI RISPETTARLE TASSATIVAMENTE:
+1. NON suggerire MAI più di 30-40g di proteine extra al giorno. Il target base è già ${recoveryPlan.todayBaseProtein || '~160'}g — un aumento di 20-30g è già significativo.
+2. NON suggerire MAI aggiustamenti calorici superiori a +300-400 kcal rispetto al piano base giornaliero.
+3. NON cercare di "recuperare" l'intero deficit settimanale in un solo giorno. Il corpo non funziona così.
+4. Ragiona in termini di AZIONI PRATICHE: "aggiungi uno yogurt greco a merenda" è meglio di "integra 200g di proteine".
+5. Se il deficit è grande, suggerisci piccoli aggiustamenti graduali su più giorni, non soluzioni estreme.
+6. Se il momento è "mattina" o "pomeriggio", NON menzionare i passi.
+7. Sii motivante ma REALISTICO. Mai allarmista per deficit gestibili.
+8. Usa il grassetto **parola** per enfasi sui numeri chiave.
+
+FORMATO: Max 55-70 parole. Inizia direttamente col contenuto (no "Certo!", no "Ecco il consiglio"). Tono premium, coaching d'élite. Usa emoji con moderazione.
+
+ESEMPIO DI CONSIGLIO BUONO:
+"${p.name || 'Enrico'}, questa settimana sei leggermente sotto target calorico. Oggi punta a **${recoveryPlan.todayAdjustedKcal || 2100}** kcal aggiungendo uno spuntino proteico extra nel pomeriggio (es. yogurt greco + frutta secca, ~200 kcal). Proteine a **${recoveryPlan.todayAdjustedProtein || 180}g** — sei sulla buona strada. 💪"
+
+ESEMPIO DI CONSIGLIO SBAGLIATO (da NON fare):
+"Devi integrare 372g di proteine extra e 3500 kcal per compensare il deficit settimanale." ← QUESTO È ASSURDO E PERICOLOSO.`;
 
   try {
     const result = await callGemini(key, prompt, { temperature: 0.7, maxOutputTokens: 350 });
