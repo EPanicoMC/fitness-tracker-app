@@ -5,7 +5,7 @@ import {
 import {
   getTodayString, getYesterdayString, getDayOfWeek, formatDateIT, formatDateShort, addDays, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER, cleanOldLogs, calcFitScore, calcSmartScore, calcRecoveryPlan
 } from './app.js';
-import { calcMacrosFromText, analyzeFoodImageAI, generateSmartAdviceAI, generateRecoveryAdviceAI } from './gemini.js';
+import { calcMacrosFromText, analyzeFoodImageAI, generateSmartAdviceAI, generateRecoveryAdviceAI, saveAICorrection } from './gemini.js';
 
 const TODAY = getTodayString();
 
@@ -1155,7 +1155,10 @@ function patchMealRow(mi, kcal, protein, carbs, fats) {
 window.applyMealAI = function(mi, kcal, protein, carbs, fats) {
   if (!logData.meals_overrides) logData.meals_overrides = {};
   const txt = document.getElementById(`meal-txt-${mi}`)?.value || '';
-  logData.meals_overrides[mi] = { kcal, protein, carbs, fats, items_text: txt };
+  logData.meals_overrides[mi] = {
+    kcal, protein, carbs, fats, items_text: txt,
+    ai_estimate: { kcal, protein, carbs, fats }
+  };
   patchMealRow(mi, kcal, protein, carbs, fats);
   saveToLocal();
   buildNutrition();
@@ -1835,6 +1838,21 @@ window.saveManualMacro = function(mealIndex) {
   const carbs   = parseFloat(document.getElementById('mm-carb')?.value)  || 0;
   const fats    = parseFloat(document.getElementById('mm-fat')?.value)   || 0;
   const note    = document.getElementById('mm-note')?.value || '';
+
+  // Track AI correction if user is overriding a previous AI estimate
+  const prevOverride = logData.meals_overrides?.[mealIndex];
+  if (prevOverride?.ai_estimate && prevOverride.ai_estimate.kcal > 0) {
+    const aiEst = prevOverride.ai_estimate;
+    const userVals = { kcal, protein, carbs, fats };
+    // Only track if there's a meaningful difference (>5%)
+    const diffPct = Math.abs(kcal - aiEst.kcal) / Math.max(aiEst.kcal, 1);
+    if (diffPct > 0.05) {
+      const foodName = note || prevOverride.items_text || '';
+      if (foodName.length > 1) {
+        saveAICorrection(foodName, aiEst, userVals);
+      }
+    }
+  }
 
   if (!logData.meals_overrides) logData.meals_overrides = {};
   logData.meals_overrides[mealIndex] = { kcal, protein, carbs, fats, items_text: note };

@@ -67,7 +67,6 @@ function validateAndFixMacros(parsed) {
       fats: a.fats + (Number(i.fats) || 0)
     }), { kcal: 0, protein: 0, carbs: 0, fats: 0 });
 
-    // Se la somma degli items è lontana dai totali dichiarati (>15%), usa items
     if (iSum.kcal > 0 && Math.abs(iSum.kcal - declaredKcal) > declaredKcal * 0.15) {
       protein = Math.max(0, iSum.protein);
       carbs   = Math.max(0, iSum.carbs);
@@ -78,7 +77,7 @@ function validateAndFixMacros(parsed) {
   // 2. Calcola kcal dalla formula canonica
   const computedKcal = (protein * 4) + (carbs * 4) + (fats * 9);
 
-  // 3. Se la differenza tra dichiarato e calcolato > 8%, usa il calcolato (la formula è la verità)
+  // 3. Se differenza > 8%, usa il calcolato
   const diff = Math.abs(computedKcal - declaredKcal);
   const threshold = Math.max(declaredKcal, computedKcal, 1) * 0.08;
   const corrected = diff > threshold;
@@ -95,17 +94,18 @@ function validateAndFixMacros(parsed) {
 }
 
 // ── Tabella riferimenti nutrizionali (per 100g) ─────────────
-const REFERENCE_TABLE = `Valori nutrizionali di riferimento per 100g di prodotto:
+const REFERENCE_TABLE = `Valori nutrizionali di riferimento per 100g di prodotto (CRUDO se non diversamente specificato):
    CEREALI E PANE:
-   - Pasta/Riso (crudo): ~350 kcal, 75g Carb, 10g Pro, 1g Fat
+   - Pasta (cruda): ~350 kcal, 75g Carb, 10g Pro, 1g Fat → COTTA: ~130 kcal, 26g Carb, 5g Pro, 0.5g Fat
+   - Riso (crudo): ~350 kcal, 78g Carb, 7g Pro, 1g Fat → COTTO: ~130 kcal, 28g Carb, 3g Pro, 0.3g Fat
    - Riso Basmati (crudo): ~350 kcal, 78g Carb, 8g Pro, 1g Fat
    - Pane comune: ~260 kcal, 55g Carb, 8g Pro, 1g Fat
    - Avena/Fiocchi d'avena: ~370 kcal, 60g Carb, 13g Pro, 7g Fat
    - Fette biscottate: ~410 kcal, 75g Carb, 11g Pro, 7g Fat
    PROTEINE ANIMALI:
-   - Petto di Pollo/Tacchino (crudo): ~110 kcal, 0g Carb, 23g Pro, 2g Fat
-   - Manzo magro (crudo): ~140 kcal, 0g Carb, 22g Pro, 5g Fat
-   - Salmone (fresco): ~180 kcal, 0g Carb, 20g Pro, 11g Fat
+   - Petto di Pollo/Tacchino (crudo): ~110 kcal, 0g Carb, 23g Pro, 2g Fat → COTTO: ~165 kcal, 0g Carb, 31g Pro, 4g Fat
+   - Manzo magro (crudo): ~140 kcal, 0g Carb, 22g Pro, 5g Fat → COTTO: ~175 kcal, 0g Carb, 26g Pro, 7g Fat
+   - Salmone (fresco, crudo): ~180 kcal, 0g Carb, 20g Pro, 11g Fat
    - Tonno in scatola (sgocciolato): ~110 kcal, 0g Carb, 25g Pro, 1g Fat
    - Uovo intero (~60g): ~65 kcal → per 100g: ~155 kcal, 1g Carb, 13g Pro, 11g Fat
    - Albume d'uovo: ~50 kcal, 1g Carb, 11g Pro, 0g Fat
@@ -125,12 +125,260 @@ const REFERENCE_TABLE = `Valori nutrizionali di riferimento per 100g di prodotto
    - Banana: ~90 kcal, 23g Carb, 1g Pro, 0g Fat
    - Mela/Pera: ~52 kcal, 14g Carb, 0g Pro, 0g Fat
    - Verdure miste (zucchine, broccoli, spinaci): ~25 kcal, 3g Carb, 2g Pro, 0g Fat
-   - Patate: ~77 kcal, 17g Carb, 2g Pro, 0g Fat
+   - Patate (crude): ~77 kcal, 17g Carb, 2g Pro, 0g Fat → COTTE/bollite: ~85 kcal, 20g Carb, 2g Pro, 0g Fat
    LEGUMI:
-   - Ceci/Lenticchie (cotti): ~120 kcal, 20g Carb, 8g Pro, 2g Fat
-   - Fagioli (cotti): ~100 kcal, 17g Carb, 7g Pro, 1g Fat`;
+   - Ceci (secchi/crudi): ~330 kcal, 50g Carb, 20g Pro, 6g Fat → COTTI: ~120 kcal, 20g Carb, 8g Pro, 2g Fat
+   - Lenticchie (secche/crude): ~290 kcal, 46g Carb, 24g Pro, 2g Fat → COTTE: ~120 kcal, 20g Carb, 8g Pro, 2g Fat
+   - Fagioli (secchi/crudi): ~280 kcal, 45g Carb, 22g Pro, 2g Fat → COTTI: ~100 kcal, 17g Carb, 7g Pro, 1g Fat`;
 
-// ── Calcola macros da testo ─────────────────────────────────
+const COOKING_RULE = `REGOLA COTTURA (FONDAMENTALE):
+DEFAULT = CRUDO. Se l'utente scrive una quantità in grammi SENZA specificare "cotto/bollito/lessato/al vapore", usa SEMPRE i valori del prodotto CRUDO.
+Usa i valori COTTO solo quando l'utente ESPLICITAMENTE scrive: "cotto", "bollito", "lessato", "al vapore", "grigliato" o "già cotto".
+Esempi: "80g riso" = CRUDO. "80g riso bollito" = COTTO. "150g pollo" = CRUDO. "150g pollo grigliato" = COTTO.`;
+
+// ── Food Library Cache ──────────────────────────────────────
+let _foodLibCache = null;
+let _foodLibLoaded = false;
+
+async function loadFoodLibrary() {
+  if (_foodLibLoaded && _foodLibCache) return _foodLibCache;
+  try {
+    const { getDocs, collection } = await import('./firebase-config.js');
+    const snap = await getDocs(collection(db, 'users', getUserId(), 'food_library'));
+    _foodLibCache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    _foodLibLoaded = true;
+  } catch(e) {
+    console.warn('loadFoodLibrary error:', e.message);
+    _foodLibCache = [];
+    _foodLibLoaded = true;
+  }
+  return _foodLibCache;
+}
+
+async function saveToFoodLibrary(name, per100g) {
+  try {
+    const { setDoc } = await import('./firebase-config.js');
+    const id = name.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_àèéìòù]/g,'');
+    if (!id) return;
+    await setDoc(doc(db, 'users', getUserId(), 'food_library', id), {
+      name,
+      kcal_per_100g: Math.round(per100g.kcal),
+      protein_per_100g: parseFloat((per100g.protein || 0).toFixed(1)),
+      carbs_per_100g: parseFloat((per100g.carbs || 0).toFixed(1)),
+      fats_per_100g: parseFloat((per100g.fats || 0).toFixed(1)),
+      last_used: new Date().toISOString().split('T')[0],
+      source: 'ai_auto'
+    }, { merge: true });
+    // Invalidate cache
+    _foodLibLoaded = false;
+  } catch(e) {
+    console.warn('saveToFoodLibrary error:', e.message);
+  }
+}
+
+// ── AI Corrections System ───────────────────────────────────
+let _correctionsCache = null;
+let _correctionsLoaded = false;
+
+async function loadCorrections() {
+  if (_correctionsLoaded && _correctionsCache) return _correctionsCache;
+  try {
+    const { getDocs, collection } = await import('./firebase-config.js');
+    const snap = await getDocs(collection(db, 'users', getUserId(), 'ai_corrections'));
+    _correctionsCache = {};
+    snap.docs.forEach(d => {
+      const data = d.data();
+      if (data.count >= 2) _correctionsCache[d.id] = data;
+    });
+    _correctionsLoaded = true;
+  } catch(e) {
+    _correctionsCache = {};
+    _correctionsLoaded = true;
+  }
+  return _correctionsCache;
+}
+
+export async function saveAICorrection(foodName, aiValues, userValues) {
+  if (!foodName || !aiValues || !userValues) return;
+  const normalized = foodName.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_àèéìòù]/g,'');
+  if (!normalized) return;
+  try {
+    const { setDoc } = await import('./firebase-config.js');
+    const ref = doc(db, 'users', getUserId(), 'ai_corrections', normalized);
+    const existing = await getDoc(ref);
+    const prev = existing.exists() ? existing.data() : { food_name: foodName, corrections: [], count: 0 };
+
+    prev.corrections.push({
+      date: new Date().toISOString().split('T')[0],
+      ai: { kcal: aiValues.kcal, protein: aiValues.protein, carbs: aiValues.carbs, fats: aiValues.fats },
+      user: { kcal: userValues.kcal, protein: userValues.protein, carbs: userValues.carbs, fats: userValues.fats }
+    });
+    // Keep last 10 corrections max
+    if (prev.corrections.length > 10) prev.corrections = prev.corrections.slice(-10);
+    prev.count = prev.corrections.length;
+
+    // Calculate average delta
+    const deltas = prev.corrections.map(c => ({
+      kcal: c.ai.kcal > 0 ? ((c.user.kcal - c.ai.kcal) / c.ai.kcal) * 100 : 0,
+      protein: c.ai.protein > 0 ? ((c.user.protein - c.ai.protein) / c.ai.protein) * 100 : 0
+    }));
+    prev.avg_delta = {
+      kcal_pct: Math.round(deltas.reduce((s, d) => s + d.kcal, 0) / deltas.length),
+      protein_pct: Math.round(deltas.reduce((s, d) => s + d.protein, 0) / deltas.length)
+    };
+
+    await setDoc(ref, prev, { merge: false });
+    _correctionsLoaded = false; // invalidate cache
+
+    // Auto-correct food library if user consistently corrects same food (count >= 3)
+    if (prev.count >= 3 && userValues.kcal > 0) {
+      // Assume last user correction has the most accurate per-item info
+      // We need grams to calculate per-100g; if unavailable, skip
+      const lastCorrection = prev.corrections[prev.corrections.length - 1];
+      if (lastCorrection?.user?.kcal > 0) {
+        // Try to find this food in library and update its values
+        const lib = await loadFoodLibrary();
+        const match = lib.find(f => f.name.toLowerCase().includes(foodName.toLowerCase()) ||
+                                    foodName.toLowerCase().includes(f.name.toLowerCase()));
+        if (match && match.source === 'ai_auto') {
+          // Apply average correction to library values
+          const corrFactor = 1 + (prev.avg_delta.kcal_pct / 100);
+          await saveToFoodLibrary(match.name, {
+            kcal: match.kcal_per_100g * corrFactor,
+            protein: match.protein_per_100g * (1 + (prev.avg_delta.protein_pct / 100)),
+            carbs: match.carbs_per_100g,
+            fats: match.fats_per_100g
+          });
+        }
+      }
+    }
+  } catch(e) {
+    console.warn('saveAICorrection error:', e.message);
+  }
+}
+
+// ── Input Parser & Food Library Matching ────────────────────
+function parseStructuredInput(text) {
+  // Match patterns: "150g pollo", "pollo 150g", "150 g riso", "2 uova", "1 cucchiaio olio"
+  const patterns = [
+    /(\d+(?:[.,]\d+)?)\s*g\s+(?:di\s+)?([a-zàèéìòùA-Z\s]+?)(?=[,;\n]|$)/gi,
+    /([a-zàèéìòùA-Z\s]+?)\s+(\d+(?:[.,]\d+)?)\s*g(?=[,;\n]|$)/gi,
+  ];
+
+  const items = [];
+  const seen = new Set();
+
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      let qty, name;
+      if (/^\d/.test(match[1])) {
+        qty = parseFloat(match[1].replace(',', '.'));
+        name = match[2].trim();
+      } else {
+        name = match[1].trim();
+        qty = parseFloat(match[2].replace(',', '.'));
+      }
+      if (qty > 0 && name.length > 1 && !seen.has(name.toLowerCase())) {
+        seen.add(name.toLowerCase());
+        items.push({ qty, name: name.trim() });
+      }
+    }
+  }
+
+  return items;
+}
+
+function normalize(str) {
+  return str.toLowerCase()
+    .replace(/[àá]/g, 'a').replace(/[èé]/g, 'e')
+    .replace(/[ìí]/g, 'i').replace(/[òó]/g, 'o').replace(/[ùú]/g, 'u')
+    .replace(/[^a-z0-9\s]/g, '').trim();
+}
+
+function fuzzyMatch(inputName, library) {
+  const norm = normalize(inputName);
+  const words = norm.split(/\s+/);
+
+  // Exact name match
+  let best = library.find(f => normalize(f.name) === norm);
+  if (best) return best;
+
+  // All input words contained in library name (or vice versa)
+  best = library.find(f => {
+    const fn = normalize(f.name);
+    return words.every(w => fn.includes(w)) || fn.split(/\s+/).every(w => norm.includes(w));
+  });
+  if (best) return best;
+
+  // Primary word match (first word of input in library name)
+  if (words[0]?.length >= 3) {
+    best = library.find(f => normalize(f.name).includes(words[0]));
+    if (best) return best;
+  }
+
+  return null;
+}
+
+function calcDeterministic(parsedItems, library) {
+  const results = [];
+  const unmatched = [];
+
+  for (const item of parsedItems) {
+    const match = fuzzyMatch(item.name, library);
+    if (match && match.kcal_per_100g > 0) {
+      const factor = item.qty / 100;
+      results.push({
+        name: `${match.name} (${item.qty}g)`,
+        grams: item.qty,
+        kcal: Math.round(match.kcal_per_100g * factor),
+        protein: parseFloat((match.protein_per_100g * factor).toFixed(1)),
+        carbs: parseFloat((match.carbs_per_100g * factor).toFixed(1)),
+        fats: parseFloat((match.fats_per_100g * factor).toFixed(1)),
+        _source: 'library',
+        _libraryName: match.name
+      });
+    } else {
+      unmatched.push(item);
+    }
+  }
+
+  return { matched: results, unmatched };
+}
+
+// ── Double-pass AI verification ─────────────────────────────
+async function verifyMacrosAI(items, key) {
+  if (!items || items.length < 2) return null;
+  const totalKcal = items.reduce((s, i) => s + (Number(i.kcal) || 0), 0);
+  if (totalKcal < 300) return null;
+
+  const itemsText = items.map(i =>
+    `- ${i.name}: ${i.grams}g → ${i.kcal} kcal, P:${i.protein}g, C:${i.carbs}g, F:${i.fats}g`
+  ).join('\n');
+
+  const prompt = `Verifica RAPIDAMENTE questi valori nutrizionali. Per ogni ingrediente, controlla che i valori per-100g siano plausibili.
+${COOKING_RULE}
+
+${itemsText}
+
+Se trovi errori evidenti (>15% di scostamento dai valori reali), correggi SOLO quelli e ricalcola il totale.
+Se tutto è corretto, rispondi con lo stesso JSON invariato.
+Rispondi SOLO con un JSON valido: {"kcal":0,"protein":0,"carbs":0,"fats":0,"items":[...]}`;
+
+  try {
+    const res = await callGemini(key, prompt, { temperature: 0.05, maxOutputTokens: 768 });
+    if (!res.success) return null;
+    const raw = res.text;
+    const s1 = raw.indexOf('{');
+    const s2 = raw.lastIndexOf('}');
+    if (s1 === -1 || s2 === -1) return null;
+    return JSON.parse(raw.slice(s1, s2 + 1));
+  } catch(e) {
+    return null;
+  }
+}
+
+// ── Calcola macros da testo (ibrido: deterministico + AI) ───
 export async function calcMacrosFromText(text) {
   if (busy) return { success: false, error: 'Calcolo in corso...' };
   busy = true;
@@ -138,35 +386,56 @@ export async function calcMacrosFromText(text) {
     const key = await getKey();
     if (!key) return { success: false, error: 'API key mancante.' };
 
-    const prompt = `Analizza la seguente descrizione di un pasto e stima accuratamente i macronutrienti (Proteine, Carboidrati, Grassi) e le Calorie (kcal).
+    // 1. Load food library and corrections
+    const [library, corrections] = await Promise.all([
+      loadFoodLibrary(),
+      loadCorrections()
+    ]);
+
+    // 2. Parse structured input
+    const parsedItems = parseStructuredInput(text);
+    const { matched, unmatched } = parsedItems.length > 0
+      ? calcDeterministic(parsedItems, library)
+      : { matched: [], unmatched: [] };
+
+    // 3. Build correction hints for the prompt
+    let correctionHints = '';
+    if (Object.keys(corrections).length > 0) {
+      const relevantCorrs = [];
+      for (const [foodId, data] of Object.entries(corrections)) {
+        if (text.toLowerCase().includes(data.food_name?.toLowerCase())) {
+          relevantCorrs.push(`- "${data.food_name}": l'utente ha corretto le stime AI in media di ${data.avg_delta.kcal_pct > 0 ? '+' : ''}${data.avg_delta.kcal_pct}% sulle kcal e ${data.avg_delta.protein_pct > 0 ? '+' : ''}${data.avg_delta.protein_pct}% sulle proteine. Adatta le tue stime di conseguenza.`);
+        }
+      }
+      if (relevantCorrs.length > 0) {
+        correctionHints = `\nCORREZIONI UTENTE PRECEDENTI (tieni conto!):\n${relevantCorrs.join('\n')}`;
+      }
+    }
+
+    // 4. Build library hints for the prompt
+    let libraryHints = '';
+    if (matched.length > 0) {
+      libraryHints = `\nVALORI VERIFICATI dalla food library dell'utente (usa QUESTI come riferimento prioritario, sono più precisi):\n` +
+        matched.map(m => `- ${m.name}: ${m.kcal} kcal, P:${m.protein}g, C:${m.carbs}g, F:${m.fats}g (calcolato da ${m._libraryName}: ${library.find(f => f.name === m._libraryName)?.kcal_per_100g} kcal/100g)`).join('\n');
+    }
+
+    // 5. Call AI — always, with library hints as anchors
+    const prompt = `Analizza la seguente descrizione di un pasto e stima accuratamente i macronutrienti.
 Pasto: "${text}"
 
-Regole fondamentali e VINCOLANTI di attendibilità:
-1. Le calorie totali (kcal) DEVONO essere LA SOMMA MATEMATICA ESATTA dei macronutrienti calcolati usando questa formula: kcal = (Proteine * 4) + (Carboidrati * 4) + (Grassi * 9). PRIMA calcola i macro, POI calcola le kcal dalla formula. Se la somma non combacia, CORREGGI le kcal.
-2. Se le quantità non sono specificate, ipotizza porzioni standard medie e ragionevoli (es. piatto di pasta = 80g a crudo, petto di pollo = 150g, 1 cucchiaio d'olio = 10g, uovo medio = 60g, 1 frutto = 150g, bicchiere di latte = 200ml).
-3. ${REFERENCE_TABLE}
-4. SANITY CHECK obbligatori:
-   - Un singolo ingrediente di peso < 200g NON può avere più di 900 kcal (a meno che sia olio/burro/frutta secca pura).
-   - Le proteine per 100g di qualsiasi cibo NON superano mai i 35g (eccezione: isolato proteico).
-   - Controlla che il rapporto kcal/grammi sia plausibile per ogni ingrediente.
-5. L'output deve essere SOLO un JSON valido, niente markup markdown o backticks.
+Regole fondamentali e VINCOLANTI:
+1. kcal = (Proteine * 4) + (Carboidrati * 4) + (Grassi * 9). PRIMA calcola i macro, POI le kcal dalla formula.
+2. ${COOKING_RULE}
+3. Porzioni standard se non specificate: piatto di pasta = 80g crudo, petto di pollo = 150g crudo, 1 cucchiaio d'olio = 10g, uovo medio = 60g, 1 frutto = 150g, bicchiere di latte = 200ml.
+4. ${REFERENCE_TABLE}
+5. SANITY CHECK: ingrediente < 200g NON può avere > 900 kcal (eccezione: olio/burro/frutta secca). Proteine/100g mai > 35g (eccezione: whey).
+6. Output SOLO JSON valido, no markdown.
+${libraryHints}${correctionHints}
 
-Struttura JSON richiesta:
+JSON richiesto:
 {
-  "kcal": 0,
-  "protein": 0,
-  "carbs": 0,
-  "fats": 0,
-  "items": [
-    {
-      "name": "Nome alimento (con quantità stimata)",
-      "grams": 0,
-      "kcal": 0,
-      "protein": 0,
-      "carbs": 0,
-      "fats": 0
-    }
-  ]
+  "kcal": 0, "protein": 0, "carbs": 0, "fats": 0,
+  "items": [{ "name": "Alimento (XXXg)", "grams": 0, "kcal": 0, "protein": 0, "carbs": 0, "fats": 0 }]
 }`;
 
     const res = await callGemini(key, prompt, { temperature: 0.1, maxOutputTokens: 1024 });
@@ -177,13 +446,97 @@ Struttura JSON richiesta:
     const s2 = raw.lastIndexOf('}');
     if (s1 === -1 || s2 === -1) return { success: false, error: 'Risposta AI non valida.' };
 
-    const parsed = JSON.parse(raw.slice(s1, s2 + 1));
+    let parsed = JSON.parse(raw.slice(s1, s2 + 1));
+
+    // 6. If library had matches, prefer library values for those items
+    if (matched.length > 0 && parsed.items?.length > 0) {
+      for (const libItem of matched) {
+        // Find corresponding AI item and replace with library-calculated values
+        const aiItem = parsed.items.find(ai => {
+          const aiNorm = normalize(ai.name || '');
+          const libNorm = normalize(libItem._libraryName || '');
+          return aiNorm.includes(libNorm) || libNorm.split(/\s+/).some(w => w.length >= 3 && aiNorm.includes(w));
+        });
+        if (aiItem) {
+          aiItem.kcal = libItem.kcal;
+          aiItem.protein = libItem.protein;
+          aiItem.carbs = libItem.carbs;
+          aiItem.fats = libItem.fats;
+          aiItem.grams = libItem.grams;
+          aiItem._source = 'library';
+        }
+      }
+      // Recalc totals from items
+      const totals = parsed.items.reduce((a, i) => ({
+        kcal: a.kcal + (Number(i.kcal) || 0),
+        protein: a.protein + (Number(i.protein) || 0),
+        carbs: a.carbs + (Number(i.carbs) || 0),
+        fats: a.fats + (Number(i.fats) || 0)
+      }), { kcal: 0, protein: 0, carbs: 0, fats: 0 });
+      parsed.kcal = totals.kcal;
+      parsed.protein = totals.protein;
+      parsed.carbs = totals.carbs;
+      parsed.fats = totals.fats;
+    }
+
+    // 7. Double-pass verification for complex meals
+    if (parsed.items?.length >= 2 && (parsed.kcal || 0) > 300) {
+      const verified = await verifyMacrosAI(parsed.items, key);
+      if (verified) {
+        // Merge: keep library items untouched, use verified for AI-only items
+        if (verified.items?.length > 0) {
+          for (let i = 0; i < verified.items.length; i++) {
+            const origItem = parsed.items[i];
+            if (origItem?._source === 'library') continue; // don't override library
+            if (verified.items[i]) {
+              parsed.items[i] = verified.items[i];
+            }
+          }
+          // Recalc totals
+          const vTotals = parsed.items.reduce((a, it) => ({
+            kcal: a.kcal + (Number(it.kcal) || 0),
+            protein: a.protein + (Number(it.protein) || 0),
+            carbs: a.carbs + (Number(it.carbs) || 0),
+            fats: a.fats + (Number(it.fats) || 0)
+          }), { kcal: 0, protein: 0, carbs: 0, fats: 0 });
+          parsed.kcal = vTotals.kcal;
+          parsed.protein = vTotals.protein;
+          parsed.carbs = vTotals.carbs;
+          parsed.fats = vTotals.fats;
+        }
+      }
+    }
+
+    // 8. Final validation
     const validated = validateAndFixMacros(parsed);
+
+    // 9. Auto-save new foods to library (fire-and-forget)
+    if (parsed.items?.length > 0) {
+      for (const item of parsed.items) {
+        if (item._source === 'library') continue; // already in library
+        const grams = Number(item.grams) || 0;
+        if (grams >= 10 && (Number(item.kcal) || 0) > 0) {
+          const per100g = {
+            kcal: (item.kcal / grams) * 100,
+            protein: (item.protein / grams) * 100,
+            carbs: (item.carbs / grams) * 100,
+            fats: (item.fats / grams) * 100
+          };
+          // Clean the name (remove grams info)
+          const cleanName = (item.name || '').replace(/\s*\(\d+g?\)/g, '').replace(/\d+g\s*/g, '').trim();
+          if (cleanName.length >= 2) {
+            saveToFoodLibrary(cleanName, per100g); // fire-and-forget
+          }
+        }
+      }
+    }
+
     return {
       success: true,
       ...validated
     };
   } catch(e) {
+    console.error('calcMacrosFromText error:', e);
     return { success: false, error: 'Errore parsing risposta AI.' };
   } finally {
     busy = false;
@@ -311,23 +664,19 @@ export async function analyzeFoodImageAI(base64Image, mimeType = 'image/jpeg') {
 Identifica ogni ingrediente visibile, stima le quantità in grammi e calcola i macro per ciascuno.
 
 Regole fondamentali e VINCOLANTI:
-1. Le calorie totali (kcal) DEVONO essere calcolate con la formula: kcal = (Proteine * 4) + (Carboidrati * 4) + (Grassi * 9). PRIMA calcola i macro di ogni ingrediente, POI somma, POI calcola le kcal dalla formula.
+1. kcal = (Proteine * 4) + (Carboidrati * 4) + (Grassi * 9). PRIMA calcola i macro di ogni ingrediente, POI somma, POI calcola le kcal dalla formula.
 2. Stima le porzioni in modo realistico basandoti sulle dimensioni visive del piatto/contenitore.
-3. ${REFERENCE_TABLE}
-4. SANITY CHECK: un singolo ingrediente < 200g NON può avere più di 900 kcal (eccezione: olio/burro/frutta secca pura). Le proteine per 100g non superano mai 35g.
-5. Rispondi esclusivamente con un oggetto JSON valido. Non includere blocchi di codice markdown o testo aggiuntivo.
+3. IMPORTANTE: il cibo visibile in foto è COTTO/preparato. Usa i valori nutrizionali per il prodotto COTTO (pasta cotta, riso cotto, pollo cotto, ecc.), NON i valori a crudo.
+4. ${REFERENCE_TABLE}
+5. SANITY CHECK: ingrediente < 200g NON può avere > 900 kcal (eccezione: olio/burro/frutta secca). Proteine/100g mai > 35g.
+6. Rispondi esclusivamente con un oggetto JSON valido, no markdown.
 
 Struttura JSON richiesta:
 {
-  "name": "Nome sintetico del piatto (es. Riso e Salmone)",
-  "kcal": 0,
-  "protein": 0,
-  "carbs": 0,
-  "fats": 0,
-  "ingredients": "150g riso bollito, 100g salmone grigliato, 1 cucchiaio olio EVO",
-  "items": [
-    { "name": "Riso bollito (150g)", "grams": 150, "kcal": 195, "protein": 4, "carbs": 43, "fats": 0.5 }
-  ]
+  "name": "Nome sintetico del piatto",
+  "kcal": 0, "protein": 0, "carbs": 0, "fats": 0,
+  "ingredients": "150g riso cotto, 100g salmone grigliato, 1 cucchiaio olio EVO",
+  "items": [{ "name": "Riso cotto (150g)", "grams": 150, "kcal": 195, "protein": 4, "carbs": 43, "fats": 0.5 }]
 }`;
 
   const parts = [
@@ -346,6 +695,26 @@ Struttura JSON richiesta:
   try {
     const parsed = JSON.parse(raw.slice(s1, s2 + 1));
     const validated = validateAndFixMacros(parsed);
+
+    // Auto-save scanned items to food library (fire-and-forget)
+    if (parsed.items?.length > 0) {
+      for (const item of parsed.items) {
+        const grams = Number(item.grams) || 0;
+        if (grams >= 10 && (Number(item.kcal) || 0) > 0) {
+          const per100g = {
+            kcal: (item.kcal / grams) * 100,
+            protein: ((item.protein || 0) / grams) * 100,
+            carbs: ((item.carbs || 0) / grams) * 100,
+            fats: ((item.fats || 0) / grams) * 100
+          };
+          const cleanName = (item.name || '').replace(/\s*\(\d+g?\)/g, '').replace(/\d+g\s*/g, '').trim();
+          if (cleanName.length >= 2) {
+            saveToFoodLibrary(cleanName, per100g);
+          }
+        }
+      }
+    }
+
     return {
       success: true,
       name: parsed.name || 'Pasto Scansionato',
