@@ -1,6 +1,6 @@
 import { requireAuth, loadSmart } from './app.js';
 import {
-  db, getUserId, doc, getDoc, setDoc, getDocs, collection, query, orderBy, limit
+  db, getUserId, doc, getDoc, setDoc, getDocs, addDoc, deleteDoc, collection, query, orderBy, limit
 } from './firebase-config.js';
 import {
   getTodayString, getYesterdayString, getDayOfWeek, formatDateIT, formatDateShort, addDays, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER, cleanOldLogs, calcFitScore, calcSmartScore, calcRecoveryPlan
@@ -50,6 +50,8 @@ let mealStates = [];
 let friendLogData = null;
 let friendActiveDiet = null;
 let loadedFriendEmail = null;
+let fridgeItems = [];
+let friendBannerCollapsed = false;
 window.isServerLoaded = false;
 window.isMockData = false;
 
@@ -219,6 +221,9 @@ async function init() {
 
       renderDailyStateUI(local);
       window.isServerLoaded = true;
+
+      // Async load Dispensa (non-blocking)
+      loadFridgeFromFirebase().then(() => buildMeals()).catch(() => {});
 
       // Async load friend data (non-blocking — don't block main render)
       if (appSettings?.friend_email) {
@@ -877,19 +882,28 @@ function buildMeals() {
     window.currentFriendMeals = friendList;
     
     if (friendList.length > 0) {
-      const bannerTitle = friendLogData 
-        ? `🤝 Pasti di ${appSettings?.friend_email ? appSettings.friend_email.split('@')[0] : 'amico'} (Oggi)` 
-        : `🤝 Pasti di ${appSettings?.friend_email ? appSettings.friend_email.split('@')[0] : 'amico'} (Pianificati)`;
+      const friendName = appSettings?.friend_email ? appSettings.friend_email.split('@')[0] : 'amico';
+      const bannerTitle = friendLogData
+        ? `🤝 Pasti di ${friendName} (Oggi)`
+        : `🤝 Pasti di ${friendName} (Pianificati)`;
+      const totalFriendKcal = friendList.reduce((s, fm) => s + (fm.kcal || 0), 0);
+      const isCollapsed = friendBannerCollapsed;
       friendBannerHtml = `
         <div class="card" style="margin-bottom:12px;background:rgba(124,111,255,0.05);border:1px solid rgba(124,111,255,0.3)">
-          <div style="font-size:12px;font-weight:800;color:var(--accent);margin-bottom:8px">${bannerTitle}</div>
-          <div style="display:flex;flex-direction:column;gap:6px">
+          <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none" onclick="window.toggleFriendBanner()">
+            <div style="font-size:12px;font-weight:800;color:var(--accent)">${bannerTitle}</div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:11px;color:var(--t2);font-weight:600">${friendList.length} pasti · ${totalFriendKcal} kcal</span>
+              <i class="ri-arrow-${isCollapsed ? 'down' : 'up'}-s-line" style="color:var(--accent);font-size:16px;transition:transform 0.2s"></i>
+            </div>
+          </div>
+          <div id="friend-banner-body" style="display:${isCollapsed ? 'none' : 'flex'};flex-direction:column;gap:6px;margin-top:${isCollapsed ? '0' : '10px'}">
             ${friendList.map((fm, idx) => `
               <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.05)">
                  <div style="flex:1;margin-right:12px">
                    <div style="font-size:13px;font-weight:700;color:var(--t1)">${fm.name}</div>
                    <div style="font-size:11px;color:var(--t2)">${fm.kcal} kcal · P:${fm.protein}g C:${fm.carbs}g F:${fm.fats}g</div>
-                   ${fm.ingredients ? `<div style="font-size:11px;color:var(--accent);margin-top:4px;font-style:italic">${fm.ingredients}</div>` : ''}
+                   ${fm.ingredients ? `<div style="font-size:11px;color:var(--accent);margin-top:4px;font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px">${fm.ingredients}</div>` : ''}
                  </div>
                  <button class="btn btn-ghost btn-sm" onclick="window.openAddMeal(window.currentFriendMeals[${idx}])">Copia</button>
               </div>
@@ -925,9 +939,23 @@ function buildMeals() {
     </div>`;
   }).join('');
     
-  el.innerHTML = friendBannerHtml + mealStates.map((m, mi) => renderMealRow(m, mi, meals)).join('') + extraHtml;
+  el.innerHTML = friendBannerHtml + buildFridgeHtml() + mealStates.map((m, mi) => renderMealRow(m, mi, meals)).join('') + extraHtml;
   updateNutritionTotals();
 }
+
+window.toggleFriendBanner = function() {
+  friendBannerCollapsed = !friendBannerCollapsed;
+  const body = document.getElementById('friend-banner-body');
+  const icon = document.querySelector('[onclick="window.toggleFriendBanner()"] .ri-arrow-up-s-line, [onclick="window.toggleFriendBanner()"] .ri-arrow-down-s-line');
+  if (body) {
+    body.style.display = friendBannerCollapsed ? 'none' : 'flex';
+    if (!friendBannerCollapsed) body.style.marginTop = '10px';
+  }
+  if (icon) {
+    icon.className = `ri-arrow-${friendBannerCollapsed ? 'down' : 'up'}-s-line`;
+    icon.style.cssText = 'color:var(--accent);font-size:16px;transition:transform 0.2s';
+  }
+};
 
 window.toggleExtraMealDetail = function(xi) {
   const el = document.getElementById(`extradtl-${xi}`);
@@ -2345,6 +2373,308 @@ window.refreshSmartAdvisor = async function(silent = false) {
   } finally {
     isGeneratingAdvice = false;
     if (refreshIcon) refreshIcon.classList.remove('ri-spin');
+  }
+};
+
+// ── Dispensa (Fridge) ──────────────────────────────────────
+
+async function loadFridgeFromFirebase() {
+  if (!getUserId()) return;
+  try {
+    const snap = await getDocs(collection(db, 'users', getUserId(), 'fridge'));
+    fridgeItems = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    fridgeItems.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+  } catch(e) {
+    console.warn('Fridge load error:', e.message);
+  }
+}
+
+async function saveFridgeItem(item) {
+  const ref = await addDoc(collection(db, 'users', getUserId(), 'fridge'), item);
+  return ref.id;
+}
+
+async function updateFridgeItem(id, data) {
+  await setDoc(doc(db, 'users', getUserId(), 'fridge', id), data, { merge: true });
+}
+
+async function removeFridgeItem(id) {
+  await deleteDoc(doc(db, 'users', getUserId(), 'fridge', id));
+}
+
+function buildFridgeHtml() {
+  if (!getUserId()) return '';
+  const items = fridgeItems;
+  const hasItems = items.length > 0;
+
+  const itemsHtml = items.map((item, idx) => {
+    const remPct = item.total_grams > 0 ? Math.round((item.remaining_grams / item.total_grams) * 100) : 0;
+    const remKcal = item.total_grams > 0
+      ? Math.round((item.kcal_per_100g / 100) * item.remaining_grams)
+      : 0;
+    const barColor = remPct > 50 ? 'var(--green)' : remPct > 20 ? 'var(--yellow)' : 'var(--red, #ef4444)';
+    return `
+      <div style="background:var(--bg);border-radius:10px;padding:10px 12px;border:1px solid rgba(255,255,255,0.06)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div style="font-size:13px;font-weight:700;color:var(--t1);flex:1;margin-right:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item.name}</div>
+          <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+            <button class="btn btn-ghost btn-sm" style="padding:4px 8px;font-size:11px" onclick="window.openConsumeModal(${idx})">
+              <i class="ri-restaurant-line"></i> Consuma
+            </button>
+            <button onclick="window.deleteFridgeItemUI(${idx})" style="background:none;border:none;color:var(--t3);cursor:pointer;padding:4px;font-size:14px;line-height:1">
+              <i class="ri-delete-bin-line"></i>
+            </button>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">
+          <div style="flex:1;height:4px;background:rgba(255,255,255,0.08);border-radius:2px;overflow:hidden">
+            <div style="height:100%;width:${remPct}%;background:${barColor};border-radius:2px;transition:width 0.4s"></div>
+          </div>
+          <span style="font-size:11px;color:var(--t2);white-space:nowrap">${item.remaining_grams}g rimasti</span>
+        </div>
+        <div style="font-size:11px;color:var(--t3)">
+          ~${remKcal} kcal rimaste · P:${parseFloat(((item.protein_per_100g||0)/100*item.remaining_grams).toFixed(0))}g C:${parseFloat(((item.carbs_per_100g||0)/100*item.remaining_grams).toFixed(0))}g F:${parseFloat(((item.fats_per_100g||0)/100*item.remaining_grams).toFixed(0))}g
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="card" style="margin-bottom:12px;background:rgba(20,184,166,0.04);border:1px solid rgba(20,184,166,0.25)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${hasItems ? '10px' : '0'}">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:15px">❄️</span>
+          <div>
+            <div style="font-size:12px;font-weight:800;color:rgb(20,184,166);letter-spacing:0.5px">DISPENSA</div>
+            <div style="font-size:10px;color:var(--t3)">${hasItems ? `${items.length} piatt${items.length === 1 ? 'o' : 'i'} in riserva` : 'Nessun piatto salvato'}</div>
+          </div>
+        </div>
+        <button class="btn btn-ghost btn-sm" style="font-size:11px;border-color:rgba(20,184,166,0.4);color:rgb(20,184,166)" onclick="window.openAddFridgeModal()">
+          <i class="ri-add-line"></i> Aggiungi
+        </button>
+      </div>
+      ${hasItems ? `<div style="display:flex;flex-direction:column;gap:8px">${itemsHtml}</div>` : ''}
+    </div>`;
+}
+
+window.openAddFridgeModal = function() {
+  showModal(`
+    <div style="padding:0 4px">
+      <div style="font-size:14px;font-weight:800;color:rgb(20,184,166);margin-bottom:16px;display:flex;align-items:center;gap:8px">
+        <span>❄️</span> Aggiungi alla Dispensa
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div>
+          <label style="font-size:11px;color:var(--t2);font-weight:700;letter-spacing:0.5px">NOME PIATTO</label>
+          <input id="fr-name" class="fi" placeholder="Es: Lasagna, Torta, Risotto..." style="width:100%;margin-top:4px">
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--t2);font-weight:700;letter-spacing:0.5px">GRAMMI TOTALI DEL PIATTO</label>
+          <input id="fr-grams" class="fi" type="number" placeholder="Es: 1200" style="width:100%;margin-top:4px">
+        </div>
+        <div style="background:rgba(20,184,166,0.06);border:1px solid rgba(20,184,166,0.2);border-radius:8px;padding:10px">
+          <div style="font-size:11px;color:rgb(20,184,166);font-weight:700;margin-bottom:8px">CALCOLA CON AI</div>
+          <textarea id="fr-ai-text" class="fi" rows="2" placeholder="Descrivi gli ingredienti del piatto (es: 500g farina, 3 uova, 200g burro...)" style="width:100%;font-size:12px"></textarea>
+          <button class="btn btn-ghost btn-sm" style="width:100%;margin-top:6px;border-color:rgba(20,184,166,0.4);color:rgb(20,184,166);font-size:11px" onclick="window.calcFridgeAI()">
+            <i class="ri-robot-2-line"></i> Calcola Macro AI
+          </button>
+        </div>
+        <div style="background:var(--bg2,rgba(255,255,255,0.04));border-radius:8px;padding:10px">
+          <div style="font-size:11px;color:var(--t2);font-weight:700;margin-bottom:8px">MACRO PER 100g</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div>
+              <label style="font-size:10px;color:var(--t3)">KCAL/100g</label>
+              <input id="fr-kcal" class="fi" type="number" placeholder="0" style="width:100%;margin-top:2px">
+            </div>
+            <div>
+              <label style="font-size:10px;color:var(--t3)">PROTEINE/100g</label>
+              <input id="fr-protein" class="fi" type="number" placeholder="0" style="width:100%;margin-top:2px">
+            </div>
+            <div>
+              <label style="font-size:10px;color:var(--t3)">CARBOIDRATI/100g</label>
+              <input id="fr-carbs" class="fi" type="number" placeholder="0" style="width:100%;margin-top:2px">
+            </div>
+            <div>
+              <label style="font-size:10px;color:var(--t3)">GRASSI/100g</label>
+              <input id="fr-fats" class="fi" type="number" placeholder="0" style="width:100%;margin-top:2px">
+            </div>
+          </div>
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--t2);font-weight:700;letter-spacing:0.5px">NOTE (opzionale)</label>
+          <input id="fr-note" class="fi" placeholder="Es: Fatta il 4 giugno, conserva 5 giorni..." style="width:100%;margin-top:4px">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:16px">
+        <button class="btn btn-ghost btn-sm" style="flex:1" onclick="document.getElementById('modal-overlay')?.remove()">Annulla</button>
+        <button class="btn btn-v" style="flex:2;background:rgba(20,184,166,0.15);border-color:rgb(20,184,166);color:rgb(20,184,166)" onclick="window.confirmAddFridge()">
+          <i class="ri-save-line"></i> Salva in Dispensa
+        </button>
+      </div>
+    </div>
+  `);
+};
+
+window.calcFridgeAI = async function() {
+  const text = document.getElementById('fr-ai-text')?.value.trim();
+  if (!text) { showToast('Inserisci gli ingredienti', 'err'); return; }
+  const btn = document.querySelector('[onclick="window.calcFridgeAI()"]');
+  if (btn) { btn.innerHTML = '<i class="ri-loader-4-line ri-spin"></i> Calcolo...'; btn.disabled = true; }
+  const r = await calcMacrosFromText(text);
+  if (btn) { btn.innerHTML = '<i class="ri-robot-2-line"></i> Calcola Macro AI'; btn.disabled = false; }
+  if (!r.success) { showToast('Errore AI: ' + r.error, 'err'); return; }
+  const grams = parseFloat(document.getElementById('fr-grams')?.value) || 0;
+  if (grams > 0) {
+    const f = 100 / grams;
+    const setV = (id, v) => { const el = document.getElementById(id); if (el) el.value = parseFloat((v * f).toFixed(1)); };
+    setV('fr-kcal', r.kcal);
+    setV('fr-protein', r.protein);
+    setV('fr-carbs', r.carbs);
+    setV('fr-fats', r.fats);
+    showToast('✅ Macro calcolati per 100g!');
+  } else {
+    const setV = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+    setV('fr-kcal', r.kcal);
+    setV('fr-protein', r.protein);
+    setV('fr-carbs', r.carbs);
+    setV('fr-fats', r.fats);
+    showToast('⚠️ Inserisci i grammi totali per calcolare i valori per 100g', 'warn');
+  }
+};
+
+window.confirmAddFridge = async function() {
+  const name = document.getElementById('fr-name')?.value.trim();
+  const grams = parseFloat(document.getElementById('fr-grams')?.value) || 0;
+  const kcal = parseFloat(document.getElementById('fr-kcal')?.value) || 0;
+  const protein = parseFloat(document.getElementById('fr-protein')?.value) || 0;
+  const carbs = parseFloat(document.getElementById('fr-carbs')?.value) || 0;
+  const fats = parseFloat(document.getElementById('fr-fats')?.value) || 0;
+  const note = document.getElementById('fr-note')?.value.trim() || '';
+  if (!name) { showToast('Inserisci il nome del piatto', 'err'); return; }
+  if (grams < 1) { showToast('Inserisci i grammi totali', 'err'); return; }
+  if (kcal < 1) { showToast('Inserisci almeno le kcal/100g', 'err'); return; }
+  const item = {
+    name,
+    total_grams: grams,
+    remaining_grams: grams,
+    kcal_per_100g: kcal,
+    protein_per_100g: protein,
+    carbs_per_100g: carbs,
+    fats_per_100g: fats,
+    note,
+    created_at: new Date().toISOString().split('T')[0]
+  };
+  try {
+    const id = await saveFridgeItem(item);
+    fridgeItems.unshift({ id, ...item });
+    document.getElementById('modal-overlay')?.remove();
+    buildMeals();
+    showToast('❄️ Piatto aggiunto alla Dispensa!');
+  } catch(e) {
+    showToast('Errore salvataggio: ' + e.message, 'err');
+  }
+};
+
+window.openConsumeModal = function(idx) {
+  const item = fridgeItems[idx];
+  if (!item) return;
+  const remKcal = Math.round((item.kcal_per_100g / 100) * item.remaining_grams);
+  showModal(`
+    <div style="padding:0 4px">
+      <div style="font-size:14px;font-weight:800;color:rgb(20,184,166);margin-bottom:4px;display:flex;align-items:center;gap:8px">
+        <span>🍽️</span> Consuma da Dispensa
+      </div>
+      <div style="font-size:12px;color:var(--t2);margin-bottom:16px">${item.name}</div>
+      <div style="background:rgba(20,184,166,0.06);border:1px solid rgba(20,184,166,0.15);border-radius:8px;padding:10px;margin-bottom:14px">
+        <div style="font-size:11px;color:var(--t3);margin-bottom:4px">Rimanenti: <strong style="color:var(--t1)">${item.remaining_grams}g</strong> (~${remKcal} kcal)</div>
+        <div style="font-size:11px;color:var(--t3)">P:${parseFloat(((item.protein_per_100g||0)/100*item.remaining_grams).toFixed(0))}g C:${parseFloat(((item.carbs_per_100g||0)/100*item.remaining_grams).toFixed(0))}g F:${parseFloat(((item.fats_per_100g||0)/100*item.remaining_grams).toFixed(0))}g</div>
+      </div>
+      <div style="margin-bottom:14px">
+        <label style="font-size:11px;color:var(--t2);font-weight:700;letter-spacing:0.5px">GRAMMI DA CONSUMARE</label>
+        <input id="cons-grams" class="fi" type="number" placeholder="Es: 150" max="${item.remaining_grams}" style="width:100%;margin-top:4px">
+        <div id="cons-preview" style="font-size:11px;color:var(--t3);margin-top:6px;min-height:16px"></div>
+      </div>
+      <div style="margin-bottom:14px">
+        <label style="font-size:11px;color:var(--t2);font-weight:700;letter-spacing:0.5px">NOME NEL DIARIO (opzionale)</label>
+        <input id="cons-name" class="fi" placeholder="${item.name}" style="width:100%;margin-top:4px">
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost btn-sm" style="flex:1" onclick="document.getElementById('modal-overlay')?.remove()">Annulla</button>
+        <button class="btn btn-v" style="flex:2;background:rgba(20,184,166,0.15);border-color:rgb(20,184,166);color:rgb(20,184,166)" onclick="window.confirmConsume(${idx})">
+          <i class="ri-add-circle-line"></i> Aggiungi al Diario
+        </button>
+      </div>
+    </div>
+  `);
+  // Live preview
+  setTimeout(() => {
+    const input = document.getElementById('cons-grams');
+    const preview = document.getElementById('cons-preview');
+    if (input && preview) {
+      input.addEventListener('input', () => {
+        const g = parseFloat(input.value) || 0;
+        if (g > 0 && item.kcal_per_100g > 0) {
+          const f = g / 100;
+          preview.textContent = `→ ${Math.round(item.kcal_per_100g * f)} kcal · P:${(item.protein_per_100g * f).toFixed(1)}g C:${(item.carbs_per_100g * f).toFixed(1)}g F:${(item.fats_per_100g * f).toFixed(1)}g`;
+        } else {
+          preview.textContent = '';
+        }
+      });
+    }
+  }, 50);
+};
+
+window.confirmConsume = async function(idx) {
+  const item = fridgeItems[idx];
+  if (!item) return;
+  const grams = parseFloat(document.getElementById('cons-grams')?.value) || 0;
+  if (grams < 1) { showToast('Inserisci i grammi da consumare', 'err'); return; }
+  if (grams > item.remaining_grams) { showToast(`Max ${item.remaining_grams}g disponibili`, 'err'); return; }
+  const f = grams / 100;
+  const kcal = Math.round(item.kcal_per_100g * f);
+  const protein = parseFloat((item.protein_per_100g * f).toFixed(1));
+  const carbs = parseFloat((item.carbs_per_100g * f).toFixed(1));
+  const fats = parseFloat((item.fats_per_100g * f).toFixed(1));
+  const mealName = document.getElementById('cons-name')?.value.trim() || item.name;
+  // Add to extra meals
+  if (!logData.extra_meals) logData.extra_meals = [];
+  logData.extra_meals.push({
+    name: `${mealName} (${grams}g)`,
+    kcal, protein, carbs, fats,
+    ingredients: `Dalla Dispensa: ${item.name}`,
+    eaten: true
+  });
+  // Update fridge remaining
+  const newRemaining = Math.max(0, item.remaining_grams - grams);
+  try {
+    await updateFridgeItem(item.id, { remaining_grams: newRemaining });
+    fridgeItems[idx] = { ...item, remaining_grams: newRemaining };
+    if (newRemaining === 0) {
+      await removeFridgeItem(item.id);
+      fridgeItems.splice(idx, 1);
+      showToast('🎉 Piatto terminato! Rimosso dalla Dispensa.');
+    } else {
+      showToast(`✅ ${grams}g aggiunti al diario! Rimangono ${newRemaining}g.`);
+    }
+    saveToLocal();
+    document.getElementById('modal-overlay')?.remove();
+    buildMeals();
+    buildNutrition();
+  } catch(e) {
+    showToast('Errore: ' + e.message, 'err');
+  }
+};
+
+window.deleteFridgeItemUI = async function(idx) {
+  const item = fridgeItems[idx];
+  if (!item) return;
+  if (!confirm(`Eliminare "${item.name}" dalla Dispensa?`)) return;
+  try {
+    await removeFridgeItem(item.id);
+    fridgeItems.splice(idx, 1);
+    buildMeals();
+    showToast('🗑️ Rimosso dalla Dispensa.');
+  } catch(e) {
+    showToast('Errore: ' + e.message, 'err');
   }
 };
 

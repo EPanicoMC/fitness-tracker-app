@@ -15,10 +15,9 @@ async function getKey() {
 
 // ── Model list ──────────────────────────────────────────────
 const MODELS = [
-  'gemini-3.1-flash-lite-preview',
-  'gemini-3.5-flash',
   'gemini-2.5-flash-lite',
   'gemini-2.5-flash',
+  'gemini-2.0-flash',
   'gemini-1.5-flash'
 ];
 
@@ -363,7 +362,8 @@ ${itemsText}
 
 Se trovi errori evidenti (>15% di scostamento dai valori reali), correggi SOLO quelli e ricalcola il totale.
 Se tutto è corretto, rispondi con lo stesso JSON invariato.
-Rispondi SOLO con un JSON valido: {"kcal":0,"protein":0,"carbs":0,"fats":0,"items":[...]}`;
+Rispondi SOLO con un JSON valido (includi SEMPRE il campo grams per ogni item):
+{"kcal":0,"protein":0,"carbs":0,"fats":0,"items":[{"name":"...","grams":0,"kcal":0,"protein":0,"carbs":0,"fats":0}]}`;
 
   try {
     const res = await callGemini(key, prompt, { temperature: 0.05, maxOutputTokens: 768 });
@@ -489,7 +489,12 @@ JSON richiesto:
             const origItem = parsed.items[i];
             if (origItem?._source === 'library') continue; // don't override library
             if (verified.items[i]) {
-              parsed.items[i] = verified.items[i];
+              // Preserve grams and _source from original if verified doesn't have them
+              parsed.items[i] = {
+                grams: origItem?.grams,
+                _source: origItem?._source,
+                ...verified.items[i]
+              };
             }
           }
           // Recalc totals
