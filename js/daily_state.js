@@ -884,36 +884,48 @@ function buildMeals() {
     
     if (friendList.length > 0) {
       const friendName = appSettings?.friend_email ? appSettings.friend_email.split('@')[0] : 'amico';
-      const bannerTitle = friendLogData
-        ? `🤝 Pasti di ${friendName} (Oggi)`
-        : `🤝 Pasti di ${friendName} (Pianificati)`;
+      const isToday = !!friendLogData;
       const totalFriendKcal = friendList.reduce((s, fm) => s + (fm.kcal || 0), 0);
       const isCollapsed = friendBannerCollapsed;
-      friendBannerHtml = `
-        <div class="card" style="margin-bottom:12px;background:rgba(124,111,255,0.05);border:1px solid rgba(124,111,255,0.3)">
-          <div style="display:flex;align-items:center;justify-content:space-between">
-            <div>
-              <div style="font-size:12px;font-weight:800;color:var(--accent)">${bannerTitle}</div>
-              <div style="font-size:11px;color:var(--t3);margin-top:1px">${friendList.length} pasti · ${totalFriendKcal} kcal totali</div>
+
+      const collapsedHtml = `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer" onclick="window.toggleFriendBanner()">
+          <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0">
+            <div style="width:36px;height:36px;border-radius:50%;background:rgba(124,111,255,0.15);border:1px solid rgba(124,111,255,0.4);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">🤝</div>
+            <div style="min-width:0">
+              <div style="font-size:13px;font-weight:700;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Pasti di ${friendName}</div>
+              <div style="font-size:11px;color:var(--t3)">${friendList.length} pasti · ${totalFriendKcal} kcal ${isToday ? '(oggi)' : '(piano)'}</div>
             </div>
-            <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 10px" onclick="window.toggleFriendBanner()">
-              ${isCollapsed ? '<i class="ri-eye-line"></i> Mostra' : '<i class="ri-eye-off-line"></i> Nascondi'}
-            </button>
           </div>
-          <div id="friend-banner-body" style="display:${isCollapsed ? 'none' : 'flex'};flex-direction:column;gap:6px;margin-top:${isCollapsed ? '0' : '12px'}">
-            ${friendList.map((fm, idx) => `
-              <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.05)">
-                 <div style="flex:1;margin-right:12px;min-width:0">
-                   <div style="font-size:13px;font-weight:700;color:var(--t1)">${fm.name}</div>
-                   <div style="font-size:11px;color:var(--t2)">${fm.kcal} kcal · P:${fm.protein}g C:${fm.carbs}g F:${fm.fats}g</div>
-                   ${fm.ingredients ? `<div style="font-size:11px;color:var(--accent);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${fm.ingredients}</div>` : ''}
-                 </div>
-                 <button class="btn btn-ghost btn-sm" style="flex-shrink:0" onclick="window.openAddMeal(window.currentFriendMeals[${idx}])">Copia</button>
-              </div>
-            `).join('')}
-          </div>
+          <button class="btn btn-ghost btn-sm" style="font-size:11px;flex-shrink:0;border-color:rgba(124,111,255,0.4);color:var(--accent)" onclick="event.stopPropagation();window.toggleFriendBanner()">
+            <i class="ri-eye-line"></i> Vedi
+          </button>
+        </div>`;
+
+      const expandedHtml = `
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div style="font-size:12px;font-weight:800;color:var(--accent)">🤝 Pasti di ${friendName} ${isToday ? '(oggi)' : '(pianificati)'}</div>
+          <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 10px" onclick="window.toggleFriendBanner()">
+            <i class="ri-eye-off-line"></i> Nascondi
+          </button>
         </div>
-      `;
+        <div style="display:flex;flex-direction:column;gap:6px">
+          ${friendList.map((fm, idx) => `
+            <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.05)">
+              <div style="flex:1;margin-right:12px;min-width:0">
+                <div style="font-size:13px;font-weight:700;color:var(--t1)">${fm.name}</div>
+                <div style="font-size:11px;color:var(--t2)">${fm.kcal} kcal · P:${fm.protein}g C:${fm.carbs}g F:${fm.fats}g</div>
+                ${fm.ingredients ? `<div style="font-size:11px;color:var(--accent);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${fm.ingredients}</div>` : ''}
+              </div>
+              <button class="btn btn-ghost btn-sm" style="flex-shrink:0" onclick="window.openAddMeal(window.currentFriendMeals[${idx}])">Copia</button>
+            </div>
+          `).join('')}
+        </div>`;
+
+      friendBannerHtml = `
+        <div id="friend-banner-card" class="card" style="margin-bottom:12px;background:rgba(124,111,255,0.05);border:1px solid rgba(124,111,255,0.3)">
+          ${isCollapsed ? collapsedHtml : expandedHtml}
+        </div>`;
     }
   }
   
@@ -948,17 +960,8 @@ function buildMeals() {
 
 window.toggleFriendBanner = function() {
   friendBannerCollapsed = !friendBannerCollapsed;
-  const body = document.getElementById('friend-banner-body');
-  const btn = document.querySelector('[onclick="window.toggleFriendBanner()"]');
-  if (body) {
-    body.style.display = friendBannerCollapsed ? 'none' : 'flex';
-    body.style.marginTop = friendBannerCollapsed ? '0' : '12px';
-  }
-  if (btn) {
-    btn.innerHTML = friendBannerCollapsed
-      ? '<i class="ri-eye-line"></i> Mostra'
-      : '<i class="ri-eye-off-line"></i> Nascondi';
-  }
+  // Re-render only the meals section (buildMeals triggers full re-render)
+  buildMeals();
 };
 
 window.toggleExtraMealDetail = function(xi) {
