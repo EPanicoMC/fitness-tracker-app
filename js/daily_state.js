@@ -51,7 +51,8 @@ let friendLogData = null;
 let friendActiveDiet = null;
 let loadedFriendEmail = null;
 let fridgeItems = [];
-let friendBannerCollapsed = false;
+let friendBannerCollapsed = true;
+let _selectedFridgeIdx = -1;
 window.isServerLoaded = false;
 window.isMockData = false;
 
@@ -1675,6 +1676,28 @@ window.openAddMeal = function(prefillData, editIndex) {
         </select>
       </div>
 
+      ${fridgeItems.length > 0 ? `
+      <div style="background:rgba(20,184,166,0.06);border:1px solid rgba(20,184,166,0.2);border-radius:10px;padding:12px;margin-bottom:14px">
+        <div style="font-size:11px;color:rgb(20,184,166);font-weight:700;margin-bottom:8px">❄️ USA DALLA DISPENSA</div>
+        <select class="fi" id="am-fridge-select" onchange="window.onFridgeSelect(this.value)" style="margin-bottom:8px">
+          <option value="">— Seleziona un piatto —</option>
+          ${fridgeItems.map((it, fi) => {
+            const hasSlices = it.slices > 0;
+            const remSlices = hasSlices ? (it.slices_remaining ?? it.slices) : null;
+            const disabled = hasSlices && remSlices <= 0 ? 'disabled' : '';
+            const label = hasSlices
+              ? `${it.name} (${remSlices}/${it.slices} fette)`
+              : it.name;
+            return `<option value="${fi}" ${disabled}>${label}</option>`;
+          }).join('')}
+        </select>
+        <div id="am-fridge-slices-row" style="display:none;align-items:center;gap:8px;margin-bottom:8px">
+          <input type="number" class="fi" id="am-fridge-slices" placeholder="Quante fette?" min="1" style="flex:1" oninput="window.onFridgeSlicesInput()">
+          <span id="am-fridge-slices-max" style="font-size:11px;color:var(--t3);white-space:nowrap"></span>
+        </div>
+        <div id="am-fridge-preview" style="font-size:12px;color:rgb(20,184,166);font-weight:600;min-height:16px"></div>
+      </div>` : ''}
+
       <div class="fg">
         <label class="fl">Nome pasto</label>
         <input type="text" class="fi" id="am-name" placeholder="Es. Snack, Extra proteine..." value="${prefillData?.name || ''}">
@@ -1749,6 +1772,68 @@ window.openAddMeal = function(prefillData, editIndex) {
   loadMealTemplatesForDropdown();
 };
  
+window.onFridgeSelect = function(val) {
+  _selectedFridgeIdx = val !== '' ? parseInt(val) : -1;
+  const slicesRow = document.getElementById('am-fridge-slices-row');
+  const preview = document.getElementById('am-fridge-preview');
+  const slicesInput = document.getElementById('am-fridge-slices');
+  const slicesMax = document.getElementById('am-fridge-slices-max');
+  if (_selectedFridgeIdx < 0 || !fridgeItems[_selectedFridgeIdx]) {
+    if (slicesRow) slicesRow.style.display = 'none';
+    if (preview) preview.textContent = '';
+    return;
+  }
+  const item = fridgeItems[_selectedFridgeIdx];
+  const hasSlices = item.slices > 0;
+  if (hasSlices) {
+    const rem = item.slices_remaining ?? item.slices;
+    if (slicesRow) slicesRow.style.display = 'flex';
+    if (slicesInput) { slicesInput.value = '1'; slicesInput.max = rem; }
+    if (slicesMax) slicesMax.textContent = `max ${rem}`;
+    window.onFridgeSlicesInput();
+  } else {
+    if (slicesRow) slicesRow.style.display = 'none';
+    // Fill all fields with total
+    _fillFridgeMacros(item, 1, 1);
+    if (preview) preview.textContent = `→ ${item.total_kcal||0} kcal · P:${item.total_protein||0}g · C:${item.total_carbs||0}g · F:${item.total_fats||0}g`;
+  }
+};
+
+window.onFridgeSlicesInput = function() {
+  if (_selectedFridgeIdx < 0) return;
+  const item = fridgeItems[_selectedFridgeIdx];
+  if (!item || !item.slices) return;
+  const slicesInput = document.getElementById('am-fridge-slices');
+  const preview = document.getElementById('am-fridge-preview');
+  const n = Math.max(1, parseInt(slicesInput?.value) || 1);
+  const tot = item.slices;
+  _fillFridgeMacros(item, n, tot);
+  const kcal = Math.round((item.total_kcal||0) * n / tot);
+  const pro = ((item.total_protein||0) * n / tot).toFixed(1);
+  const carb = ((item.total_carbs||0) * n / tot).toFixed(1);
+  const fat = ((item.total_fats||0) * n / tot).toFixed(1);
+  if (preview) preview.textContent = n > 0 ? `→ ${kcal} kcal · P:${pro}g · C:${carb}g · F:${fat}g` : '';
+};
+
+function _fillFridgeMacros(item, n, tot) {
+  const kcal = Math.round((item.total_kcal||0) * n / tot);
+  const pro = parseFloat(((item.total_protein||0) * n / tot).toFixed(1));
+  const carb = parseFloat(((item.total_carbs||0) * n / tot).toFixed(1));
+  const fat = parseFloat(((item.total_fats||0) * n / tot).toFixed(1));
+  const sliceLabel = (item.slices > 0 && n > 0) ? ` (${n} ${n === 1 ? 'fetta' : 'fette'})` : '';
+  const nameEl = document.getElementById('am-name');
+  const kcalEl = document.getElementById('am-kcal');
+  const proEl = document.getElementById('am-protein');
+  const carbEl = document.getElementById('am-carbs');
+  const fatEl = document.getElementById('am-fats');
+  if (nameEl && !nameEl.value) nameEl.value = item.name + sliceLabel;
+  else if (nameEl) nameEl.value = item.name + sliceLabel;
+  if (kcalEl) kcalEl.value = kcal;
+  if (proEl) proEl.value = pro;
+  if (carbEl) carbEl.value = carb;
+  if (fatEl) fatEl.value = fat;
+}
+
 window.calcAIMeal = async function() {
   const text = document.getElementById('am-ingredients')?.value?.trim();
   if (!text) return showToast('Inserisci gli ingredienti', 'err');
@@ -1820,7 +1905,36 @@ window.saveExtraMeal = async function(editIndex) {
   saveToLocal();
   document.getElementById('add-meal-modal')?.remove();
   showToast(editIndex !== undefined && editIndex !== null ? '✅ Pasto modificato!' : '✅ Pasto aggiunto!');
-  buildMeals();
+
+  // Scala le fette dalla Dispensa se il pasto proviene da essa
+  if (_selectedFridgeIdx >= 0 && fridgeItems[_selectedFridgeIdx]) {
+    const fi = fridgeItems[_selectedFridgeIdx];
+    _selectedFridgeIdx = -1;
+    if (fi.slices > 0) {
+      const slicesUsed = parseInt(document.getElementById('am-fridge-slices')?.value) || 1;
+      const newRem = Math.max(0, (fi.slices_remaining ?? fi.slices) - slicesUsed);
+      updateFridgeItem(fi.id, { slices_remaining: newRem }).then(() => {
+        const idx = fridgeItems.findIndex(x => x.id === fi.id);
+        if (idx >= 0) fridgeItems[idx] = { ...fi, slices_remaining: newRem };
+        if (newRem === 0) {
+          removeFridgeItem(fi.id).then(() => {
+            fridgeItems = fridgeItems.filter(x => x.id !== fi.id);
+          }).catch(() => {});
+          showToast('🎉 Ultime fette consumate! Piatto rimosso dalla Dispensa.');
+        }
+        buildMeals();
+      }).catch(() => {});
+    } else {
+      // Piatto senza fette: rimuovi dalla dispensa
+      removeFridgeItem(fi.id).then(() => {
+        fridgeItems = fridgeItems.filter(x => x.id !== fi.id);
+        buildMeals();
+      }).catch(() => {});
+    }
+  } else {
+    _selectedFridgeIdx = -1;
+    buildMeals();
+  }
 };
 
 window.openManualMacro = function(mealIndex) {
@@ -2411,33 +2525,38 @@ function buildFridgeHtml() {
   const hasItems = items.length > 0;
 
   const itemsHtml = items.map((item, idx) => {
-    const remPct = item.total_grams > 0 ? Math.round((item.remaining_grams / item.total_grams) * 100) : 0;
-    const remKcal = item.total_grams > 0
-      ? Math.round((item.kcal_per_100g / 100) * item.remaining_grams)
-      : 0;
-    const barColor = remPct > 50 ? 'var(--green)' : remPct > 20 ? 'var(--yellow)' : 'var(--red, #ef4444)';
+    const hasSlices = item.slices > 0;
+    const remSlices = hasSlices ? (item.slices_remaining ?? item.slices) : null;
+    const totSlices = item.slices || 1;
+    const remPct = hasSlices ? Math.round((remSlices / totSlices) * 100) : 100;
+    const barColor = remPct > 50 ? 'var(--green)' : remPct > 20 ? 'var(--yellow)' : '#ef4444';
+    const perSliceKcal = hasSlices ? Math.round((item.total_kcal || 0) / totSlices) : (item.total_kcal || 0);
+    const perSlicePro = hasSlices ? ((item.total_protein || 0) / totSlices).toFixed(1) : (item.total_protein || 0);
+    const perSliceCarb = hasSlices ? ((item.total_carbs || 0) / totSlices).toFixed(1) : (item.total_carbs || 0);
+    const perSliceFat = hasSlices ? ((item.total_fats || 0) / totSlices).toFixed(1) : (item.total_fats || 0);
+    const statusText = hasSlices
+      ? `${remSlices}/${totSlices} fette rimaste`
+      : 'Disponibile';
     return `
       <div style="background:var(--bg);border-radius:10px;padding:10px 12px;border:1px solid rgba(255,255,255,0.06)">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-          <div style="font-size:13px;font-weight:700;color:var(--t1);flex:1;margin-right:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item.name}</div>
-          <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
-            <button class="btn btn-ghost btn-sm" style="padding:4px 8px;font-size:11px" onclick="window.openConsumeModal(${idx})">
-              <i class="ri-restaurant-line"></i> Consuma
-            </button>
-            <button onclick="window.deleteFridgeItemUI(${idx})" style="background:none;border:none;color:var(--t3);cursor:pointer;padding:4px;font-size:14px;line-height:1">
-              <i class="ri-delete-bin-line"></i>
-            </button>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${hasSlices ? '6px' : '4px'}">
+          <div style="flex:1;min-width:0;margin-right:8px">
+            <div style="font-size:13px;font-weight:700;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item.name}</div>
+            <div style="font-size:11px;color:var(--t3);margin-top:2px">
+              ${hasSlices ? `Per fetta: ${perSliceKcal} kcal · P:${perSlicePro}g C:${perSliceCarb}g F:${perSliceFat}g` : `Totale: ${item.total_kcal||0} kcal · P:${item.total_protein||0}g C:${item.total_carbs||0}g F:${item.total_fats||0}g`}
+            </div>
           </div>
+          <button onclick="window.deleteFridgeItemUI(${idx})" style="background:none;border:none;color:var(--t3);cursor:pointer;padding:4px 6px;font-size:14px;flex-shrink:0">
+            <i class="ri-delete-bin-line"></i>
+          </button>
         </div>
-        <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">
-          <div style="flex:1;height:4px;background:rgba(255,255,255,0.08);border-radius:2px;overflow:hidden">
-            <div style="height:100%;width:${remPct}%;background:${barColor};border-radius:2px;transition:width 0.4s"></div>
+        ${hasSlices ? `
+        <div style="display:flex;gap:8px;align-items:center">
+          <div style="flex:1;height:3px;background:rgba(255,255,255,0.08);border-radius:2px;overflow:hidden">
+            <div style="height:100%;width:${remPct}%;background:${barColor};border-radius:2px"></div>
           </div>
-          <span style="font-size:11px;color:var(--t2);white-space:nowrap">${item.remaining_grams}g rimasti</span>
-        </div>
-        <div style="font-size:11px;color:var(--t3)">
-          ~${remKcal} kcal rimaste · P:${parseFloat(((item.protein_per_100g||0)/100*item.remaining_grams).toFixed(0))}g C:${parseFloat(((item.carbs_per_100g||0)/100*item.remaining_grams).toFixed(0))}g F:${parseFloat(((item.fats_per_100g||0)/100*item.remaining_grams).toFixed(0))}g
-        </div>
+          <span style="font-size:11px;color:var(--t2);white-space:nowrap;font-weight:600">${statusText}</span>
+        </div>` : `<div style="font-size:11px;color:rgb(20,184,166);font-weight:600">${statusText}</div>`}
       </div>`;
   }).join('');
 
@@ -2448,7 +2567,7 @@ function buildFridgeHtml() {
           <span style="font-size:15px">❄️</span>
           <div>
             <div style="font-size:12px;font-weight:800;color:rgb(20,184,166);letter-spacing:0.5px">DISPENSA</div>
-            <div style="font-size:10px;color:var(--t3)">${hasItems ? `${items.length} piatt${items.length === 1 ? 'o' : 'i'} in riserva` : 'Nessun piatto salvato'}</div>
+            <div style="font-size:10px;color:var(--t3)">${hasItems ? `${items.length} piatt${items.length === 1 ? 'o' : 'i'} salvat${items.length === 1 ? 'o' : 'i'} · seleziona da "Aggiungi Pasto"` : 'Vuota — aggiungi un piatto preparato'}</div>
           </div>
         </div>
         <button class="btn btn-ghost btn-sm" style="font-size:11px;border-color:rgba(20,184,166,0.4);color:rgb(20,184,166)" onclick="window.openAddFridgeModal()">
@@ -2459,64 +2578,66 @@ function buildFridgeHtml() {
     </div>`;
 }
 
-function closeFridgeModal() {
-  document.querySelector('.modal-bg.fridge-modal')?.remove();
-}
-
 window.openAddFridgeModal = function() {
   const bg = document.createElement('div');
   bg.className = 'modal-bg fridge-modal';
   bg.innerHTML = `
-    <div class="modal" style="max-height:85vh;overflow-y:auto">
+    <div class="modal" style="max-height:88vh;overflow-y:auto">
       <div class="modal-handle"></div>
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
         <span style="font-size:18px">❄️</span>
         <h3 style="margin:0;color:rgb(20,184,166)">Aggiungi alla Dispensa</h3>
       </div>
-      <div style="display:flex;flex-direction:column;gap:12px">
-        <div>
-          <label style="font-size:11px;color:var(--t2);font-weight:700;letter-spacing:0.5px">NOME PIATTO *</label>
-          <input id="fr-name" class="fi" placeholder="Es: Lasagna, Torta, Risotto..." style="width:100%;margin-top:4px;box-sizing:border-box">
+
+      <div class="fg">
+        <label class="fl">Nome ricetta / piatto *</label>
+        <input id="fr-name" class="fi" placeholder="Es: Lasagna, Torta cioccolato, Risotto...">
+      </div>
+
+      <div style="background:rgba(20,184,166,0.06);border:1px solid rgba(20,184,166,0.18);border-radius:10px;padding:12px;margin:12px 0">
+        <div style="font-size:11px;color:rgb(20,184,166);font-weight:700;margin-bottom:8px">🤖 CALCOLA CON AI (consigliato)</div>
+        <textarea id="fr-ai-text" class="fi" rows="3" placeholder="Elenca tutti gli ingredienti totali della ricetta&#10;Es: 500g farina, 4 uova, 200g burro, 150g zucchero, 100g cacao..."></textarea>
+        <button id="fr-ai-btn" class="btn btn-ghost btn-sm" style="width:100%;margin-top:8px;border-color:rgba(20,184,166,0.5);color:rgb(20,184,166)" onclick="window.calcFridgeAI()">
+          <i class="ri-robot-2-line"></i> Calcola macro totali con AI
+        </button>
+      </div>
+
+      <div style="font-size:11px;color:var(--t2);font-weight:700;letter-spacing:0.5px;margin-bottom:8px">MACRO TOTALI DEL PIATTO *</div>
+      <div class="fmp" style="margin-bottom:12px">
+        <div class="fmp-item">
+          <input type="number" class="fi" id="fr-kcal" placeholder="0" oninput="window.updateFridgeSlicePreview()">
+          <div class="fmp-l">Kcal</div>
         </div>
-        <div>
-          <label style="font-size:11px;color:var(--t2);font-weight:700;letter-spacing:0.5px">GRAMMI TOTALI DEL PIATTO *</label>
-          <input id="fr-grams" class="fi" type="number" placeholder="Es: 1200" style="width:100%;margin-top:4px;box-sizing:border-box">
+        <div class="fmp-item">
+          <input type="number" class="fi" id="fr-protein" placeholder="0" oninput="window.updateFridgeSlicePreview()">
+          <div class="fmp-l">Prot g</div>
         </div>
-        <div style="background:rgba(20,184,166,0.06);border:1px solid rgba(20,184,166,0.2);border-radius:10px;padding:12px">
-          <div style="font-size:11px;color:rgb(20,184,166);font-weight:700;margin-bottom:8px">🤖 CALCOLA MACRO CON AI</div>
-          <textarea id="fr-ai-text" class="fi" rows="2" placeholder="Descrivi gli ingredienti (es: 500g farina, 3 uova, 200g burro, 150g zucchero...)" style="width:100%;font-size:12px;box-sizing:border-box"></textarea>
-          <button id="fr-ai-btn" class="btn btn-ghost btn-sm" style="width:100%;margin-top:8px;border-color:rgba(20,184,166,0.5);color:rgb(20,184,166);font-size:12px" onclick="window.calcFridgeAI()">
-            <i class="ri-robot-2-line"></i> Calcola Macro AI
-          </button>
+        <div class="fmp-item">
+          <input type="number" class="fi" id="fr-carbs" placeholder="0" oninput="window.updateFridgeSlicePreview()">
+          <div class="fmp-l">Carbo g</div>
         </div>
-        <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px">
-          <div style="font-size:11px;color:var(--t2);font-weight:700;margin-bottom:10px">MACRO PER 100g *</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-            <div>
-              <label style="font-size:10px;color:var(--t3);font-weight:600">KCAL</label>
-              <input id="fr-kcal" class="fi" type="number" placeholder="0" style="width:100%;margin-top:3px;box-sizing:border-box">
-            </div>
-            <div>
-              <label style="font-size:10px;color:var(--t3);font-weight:600">PROTEINE g</label>
-              <input id="fr-protein" class="fi" type="number" placeholder="0" style="width:100%;margin-top:3px;box-sizing:border-box">
-            </div>
-            <div>
-              <label style="font-size:10px;color:var(--t3);font-weight:600">CARBOIDRATI g</label>
-              <input id="fr-carbs" class="fi" type="number" placeholder="0" style="width:100%;margin-top:3px;box-sizing:border-box">
-            </div>
-            <div>
-              <label style="font-size:10px;color:var(--t3);font-weight:600">GRASSI g</label>
-              <input id="fr-fats" class="fi" type="number" placeholder="0" style="width:100%;margin-top:3px;box-sizing:border-box">
-            </div>
-          </div>
-        </div>
-        <div>
-          <label style="font-size:11px;color:var(--t2);font-weight:700;letter-spacing:0.5px">NOTE (opzionale)</label>
-          <input id="fr-note" class="fi" placeholder="Es: Fatta il 4 giugno, conserva 5 giorni..." style="width:100%;margin-top:4px;box-sizing:border-box">
+        <div class="fmp-item">
+          <input type="number" class="fi" id="fr-fats" placeholder="0" oninput="window.updateFridgeSlicePreview()">
+          <div class="fmp-l">Grassi g</div>
         </div>
       </div>
-      <div class="modal-btns" style="margin-top:20px">
-        <button class="btn btn-flat btn-cancel" onclick="window.closeFridgeModal()">Annulla</button>
+
+      <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;margin-bottom:12px">
+        <div style="font-size:11px;color:var(--t2);font-weight:700;letter-spacing:0.5px;margin-bottom:8px">🍕 DIVIDI IN FETTE / PORZIONI (opzionale)</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <input type="number" class="fi" id="fr-slices" placeholder="Es: 8" min="1" style="flex:1" oninput="window.updateFridgeSlicePreview()">
+          <span style="font-size:12px;color:var(--t2)">fette / porzioni</span>
+        </div>
+        <div id="fr-slice-preview" style="font-size:12px;color:rgb(20,184,166);margin-top:8px;min-height:16px;font-weight:600"></div>
+      </div>
+
+      <div class="fg">
+        <label class="fl">Note (opzionale)</label>
+        <input id="fr-note" class="fi" placeholder="Es: Fatta il 5 giugno, si conserva 4 giorni in frigo...">
+      </div>
+
+      <div class="modal-btns" style="margin-top:16px">
+        <button class="btn btn-flat btn-cancel" onclick="this.closest('.modal-bg').remove()">Annulla</button>
         <button class="btn btn-ok" style="background:rgba(20,184,166,0.2);border:1px solid rgb(20,184,166);color:rgb(20,184,166)" onclick="window.confirmAddFridge()">
           <i class="ri-save-line"></i> Salva in Dispensa
         </button>
@@ -2526,148 +2647,63 @@ window.openAddFridgeModal = function() {
   bg.addEventListener('click', e => { if (e.target === bg) bg.remove(); });
 };
 
-window.closeFridgeModal = closeFridgeModal;
-
-window.calcFridgeAI = async function() {
-  const text = document.getElementById('fr-ai-text')?.value.trim();
-  if (!text) { showToast('Inserisci gli ingredienti nella casella AI', 'err'); return; }
-  const btn = document.getElementById('fr-ai-btn');
-  if (btn) { btn.innerHTML = '<i class="ri-loader-4-line ri-spin"></i> Calcolo in corso...'; btn.disabled = true; }
-  const r = await calcMacrosFromText(text);
-  if (btn) { btn.innerHTML = '<i class="ri-robot-2-line"></i> Calcola Macro AI'; btn.disabled = false; }
-  if (!r.success) { showToast('Errore AI: ' + r.error, 'err'); return; }
-  const grams = parseFloat(document.getElementById('fr-grams')?.value) || 0;
-  const setV = (id, v) => { const el = document.getElementById(id); if (el) el.value = parseFloat(v.toFixed(1)); };
-  if (grams > 0) {
-    const f = 100 / grams;
-    setV('fr-kcal', r.kcal * f);
-    setV('fr-protein', r.protein * f);
-    setV('fr-carbs', r.carbs * f);
-    setV('fr-fats', r.fats * f);
-    showToast('✅ Macro calcolati per 100g!');
-  } else {
-    setV('fr-kcal', r.kcal);
-    setV('fr-protein', r.protein);
-    setV('fr-carbs', r.carbs);
-    setV('fr-fats', r.fats);
-    showToast('Inserisci i grammi totali per normalizzare a 100g', 'warn');
-  }
-};
-
-window.confirmAddFridge = async function() {
-  const name = document.getElementById('fr-name')?.value.trim();
-  const grams = parseFloat(document.getElementById('fr-grams')?.value) || 0;
+window.updateFridgeSlicePreview = function() {
+  const slices = parseInt(document.getElementById('fr-slices')?.value) || 0;
   const kcal = parseFloat(document.getElementById('fr-kcal')?.value) || 0;
   const protein = parseFloat(document.getElementById('fr-protein')?.value) || 0;
   const carbs = parseFloat(document.getElementById('fr-carbs')?.value) || 0;
   const fats = parseFloat(document.getElementById('fr-fats')?.value) || 0;
+  const preview = document.getElementById('fr-slice-preview');
+  if (!preview) return;
+  if (slices > 1 && kcal > 0) {
+    preview.textContent = `→ Per fetta: ${Math.round(kcal/slices)} kcal · P:${(protein/slices).toFixed(1)}g · C:${(carbs/slices).toFixed(1)}g · F:${(fats/slices).toFixed(1)}g`;
+  } else {
+    preview.textContent = '';
+  }
+};
+
+window.calcFridgeAI = async function() {
+  const text = document.getElementById('fr-ai-text')?.value.trim();
+  if (!text) { showToast('Descrivi gli ingredienti della ricetta', 'err'); return; }
+  const btn = document.getElementById('fr-ai-btn');
+  if (btn) { btn.innerHTML = '<i class="ri-loader-4-line ri-spin"></i> Calcolo...'; btn.disabled = true; }
+  const r = await calcMacrosFromText(text);
+  if (btn) { btn.innerHTML = '<i class="ri-robot-2-line"></i> Calcola macro totali con AI'; btn.disabled = false; }
+  if (!r.success) { showToast('Errore AI: ' + r.error, 'err'); return; }
+  const setV = (id, v) => { const el = document.getElementById(id); if (el) el.value = parseFloat(v.toFixed(1)); };
+  setV('fr-kcal', r.kcal);
+  setV('fr-protein', r.protein);
+  setV('fr-carbs', r.carbs);
+  setV('fr-fats', r.fats);
+  window.updateFridgeSlicePreview();
+  showToast('✅ Macro totali calcolati!');
+};
+
+window.confirmAddFridge = async function() {
+  const name = document.getElementById('fr-name')?.value.trim();
+  const kcal = parseFloat(document.getElementById('fr-kcal')?.value) || 0;
+  const protein = parseFloat(document.getElementById('fr-protein')?.value) || 0;
+  const carbs = parseFloat(document.getElementById('fr-carbs')?.value) || 0;
+  const fats = parseFloat(document.getElementById('fr-fats')?.value) || 0;
+  const slices = parseInt(document.getElementById('fr-slices')?.value) || 0;
   const note = document.getElementById('fr-note')?.value.trim() || '';
   if (!name) { showToast('Inserisci il nome del piatto', 'err'); return; }
-  if (grams < 1) { showToast('Inserisci i grammi totali', 'err'); return; }
-  if (kcal < 1) { showToast('Inserisci le kcal per 100g', 'err'); return; }
+  if (kcal < 1) { showToast('Inserisci le kcal totali (usa AI o inseriscile manualmente)', 'err'); return; }
   const item = {
-    name, total_grams: grams, remaining_grams: grams,
-    kcal_per_100g: kcal, protein_per_100g: protein,
-    carbs_per_100g: carbs, fats_per_100g: fats,
+    name,
+    total_kcal: kcal, total_protein: protein, total_carbs: carbs, total_fats: fats,
+    slices: slices > 1 ? slices : null,
+    slices_remaining: slices > 1 ? slices : null,
     note, created_at: new Date().toISOString().split('T')[0]
   };
   try {
     const id = await saveFridgeItem(item);
     fridgeItems.unshift({ id, ...item });
-    closeFridgeModal();
+    document.querySelector('.modal-bg.fridge-modal')?.remove();
     buildMeals();
-    showToast('❄️ Piatto aggiunto alla Dispensa!');
+    showToast('❄️ Piatto salvato in Dispensa!');
   } catch(e) {
     showToast('Errore salvataggio: ' + e.message, 'err');
-  }
-};
-
-window.openConsumeModal = function(idx) {
-  const item = fridgeItems[idx];
-  if (!item) return;
-  const remKcal = Math.round((item.kcal_per_100g / 100) * item.remaining_grams);
-  const remP = ((item.protein_per_100g||0)/100*item.remaining_grams).toFixed(0);
-  const remC = ((item.carbs_per_100g||0)/100*item.remaining_grams).toFixed(0);
-  const remF = ((item.fats_per_100g||0)/100*item.remaining_grams).toFixed(0);
-  const bg = document.createElement('div');
-  bg.className = 'modal-bg fridge-modal';
-  bg.innerHTML = `
-    <div class="modal">
-      <div class="modal-handle"></div>
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-        <span style="font-size:18px">🍽️</span>
-        <h3 style="margin:0;color:rgb(20,184,166)">Consuma Porzione</h3>
-      </div>
-      <div style="font-size:13px;color:var(--t1);font-weight:700;margin-bottom:12px">${item.name}</div>
-      <div style="background:rgba(20,184,166,0.06);border:1px solid rgba(20,184,166,0.15);border-radius:10px;padding:10px;margin-bottom:14px">
-        <div style="font-size:12px;color:var(--t2);margin-bottom:2px">Disponibili: <strong style="color:var(--t1)">${item.remaining_grams}g</strong> (~${remKcal} kcal)</div>
-        <div style="font-size:11px;color:var(--t3)">P:${remP}g · C:${remC}g · F:${remF}g</div>
-      </div>
-      <div style="margin-bottom:12px">
-        <label style="font-size:11px;color:var(--t2);font-weight:700;letter-spacing:0.5px">GRAMMI DA CONSUMARE</label>
-        <input id="cons-grams" class="fi" type="number" placeholder="Es: 150" max="${item.remaining_grams}" style="width:100%;margin-top:4px;box-sizing:border-box">
-        <div id="cons-preview" style="font-size:12px;color:rgb(20,184,166);margin-top:6px;min-height:18px;font-weight:600"></div>
-      </div>
-      <div style="margin-bottom:4px">
-        <label style="font-size:11px;color:var(--t2);font-weight:700;letter-spacing:0.5px">NOME NEL DIARIO (opzionale)</label>
-        <input id="cons-name" class="fi" placeholder="${item.name}" style="width:100%;margin-top:4px;box-sizing:border-box">
-      </div>
-      <div class="modal-btns" style="margin-top:16px">
-        <button class="btn btn-flat btn-cancel" onclick="this.closest('.modal-bg').remove()">Annulla</button>
-        <button class="btn btn-ok" style="background:rgba(20,184,166,0.2);border:1px solid rgb(20,184,166);color:rgb(20,184,166)" onclick="window.confirmConsume(${idx})">
-          <i class="ri-add-circle-line"></i> Aggiungi al Diario
-        </button>
-      </div>
-    </div>`;
-  document.body.appendChild(bg);
-  bg.addEventListener('click', e => { if (e.target === bg) bg.remove(); });
-  setTimeout(() => {
-    const input = document.getElementById('cons-grams');
-    const preview = document.getElementById('cons-preview');
-    if (!input || !preview) return;
-    input.addEventListener('input', () => {
-      const g = parseFloat(input.value) || 0;
-      if (g > 0 && item.kcal_per_100g > 0) {
-        const f = g / 100;
-        preview.textContent = `→ ${Math.round(item.kcal_per_100g * f)} kcal · P:${(item.protein_per_100g * f).toFixed(1)}g · C:${(item.carbs_per_100g * f).toFixed(1)}g · F:${(item.fats_per_100g * f).toFixed(1)}g`;
-      } else {
-        preview.textContent = '';
-      }
-    });
-  }, 50);
-};
-
-window.confirmConsume = async function(idx) {
-  const item = fridgeItems[idx];
-  if (!item) return;
-  const grams = parseFloat(document.getElementById('cons-grams')?.value) || 0;
-  if (grams < 1) { showToast('Inserisci i grammi da consumare', 'err'); return; }
-  if (grams > item.remaining_grams) { showToast(`Max ${item.remaining_grams}g disponibili`, 'err'); return; }
-  const f = grams / 100;
-  const kcal = Math.round(item.kcal_per_100g * f);
-  const protein = parseFloat((item.protein_per_100g * f).toFixed(1));
-  const carbs = parseFloat((item.carbs_per_100g * f).toFixed(1));
-  const fats = parseFloat((item.fats_per_100g * f).toFixed(1));
-  const mealName = document.getElementById('cons-name')?.value.trim() || item.name;
-  if (!logData.extra_meals) logData.extra_meals = [];
-  logData.extra_meals.push({ name: `${mealName} (${grams}g)`, kcal, protein, carbs, fats, ingredients: `Dispensa: ${item.name}`, eaten: true });
-  const newRemaining = Math.max(0, item.remaining_grams - grams);
-  try {
-    document.querySelector('.modal-bg.fridge-modal')?.remove();
-    await updateFridgeItem(item.id, { remaining_grams: newRemaining });
-    fridgeItems[idx] = { ...item, remaining_grams: newRemaining };
-    if (newRemaining === 0) {
-      await removeFridgeItem(item.id);
-      fridgeItems.splice(idx, 1);
-      showToast('🎉 Piatto terminato! Rimosso dalla Dispensa.');
-    } else {
-      showToast(`✅ ${grams}g aggiunti! Rimangono ${newRemaining}g.`);
-    }
-    saveToLocal();
-    buildMeals();
-    buildNutrition();
-  } catch(e) {
-    showToast('Errore: ' + e.message, 'err');
   }
 };
 
