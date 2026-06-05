@@ -845,3 +845,67 @@ body.minimal-dark {
   font-weight: 500;
 }
 
+/* FOCUS STATUS */
+.advisor-card.status-focus { border-color: rgba(124, 111, 255, 0.25); background: linear-gradient(to bottom, rgba(124, 111, 255, 0.02), transparent); }
+.advisor-card.status-focus .recovery-badge { color: #7c6fff; background: rgba(124, 111, 255, 0.08); }
+
+/* INSIGHT PILLS */
+.advisor-insights {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+  margin-bottom: 4px;
+}
+.insight-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.insight-pill .insight-label { color: var(--t2); }
+.insight-pill .insight-value { font-weight: 800; }
+.insight-good .insight-value { color: var(--green); }
+.insight-good { border-color: rgba(28, 227, 112, 0.15); }
+.insight-warning .insight-value { color: var(--yellow); }
+.insight-warning { border-color: rgba(255, 195, 0, 0.15); }
+.insight-critical .insight-value { color: var(--red); }
+.insight-critical { border-color: rgba(255, 69, 58, 0.15); }
+
+/* WEEKLY ADHERENCE DOTS */
+.advisor-weekly-dots {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  align-items: flex-start;
+  justify-content: center;
+}
+.weekly-dot-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+.weekly-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.weekly-dot-label {
+  font-size: 8px;
+  color: var(--t3);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.dot-good { background: var(--green); box-shadow: 0 0 6px rgba(28, 227, 112, 0.3); }
+.dot-warning { background: var(--yellow); box-shadow: 0 0 6px rgba(255, 195, 0, 0.3); }
+.dot-bad { background: var(--red); box-shadow: 0 0 6px rgba(255, 69, 58, 0.3); }
+.dot-none { background: rgba(255,255,255,0.08); }
+

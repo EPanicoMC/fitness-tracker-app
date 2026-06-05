@@ -5,7 +5,7 @@ import {
 import {
   getTodayString, getYesterdayString, getDayOfWeek, formatDateIT, formatDateShort, addDays, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER, cleanOldLogs, calcFitScore, calcSmartScore, calcRecoveryPlan
 } from './app.js';
-import { calcMacrosFromText, analyzeFoodImageAI, generateSmartAdviceAI, generateRecoveryAdviceAI, saveAICorrection } from './gemini.js';
+import { calcMacrosFromText, analyzeFoodImageAI, generateSmartAdviceAI, generateRecoveryAdviceAI, generateAdvisor360AI, saveAICorrection } from './gemini.js';
 
 const TODAY = getTodayString();
 
@@ -45,6 +45,7 @@ let activeDiet = null;
 let activeProgram = null;
 let appSettings = null;
 let latestCheck = null;
+let recentChecks = [];
 let isTrainingDay = false;
 let mealStates = [];
 let friendLogData = null;
@@ -161,7 +162,7 @@ async function init() {
       collection(db, 'users', userId, 'programs'),
       collection(db, 'users', userId, 'diet_plans'),
       doc(db, 'users', userId, 'settings', 'app'),
-      query(collection(db, 'users', userId, 'checks'), orderBy('date', 'desc'), limit(1))
+      query(collection(db, 'users', userId, 'checks'), orderBy('date', 'desc'), limit(4))
     ];
 
     window.isServerLoaded = false;
@@ -178,7 +179,8 @@ async function init() {
       activeDiets.sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
       activeDiet = activeDiets[0] || null;
       appSettings   = settSnap.exists() ? settSnap.data() : {};
-      latestCheck   = !checksSnap.empty ? checksSnap.docs[0].data() : null;
+      recentChecks  = checksSnap.docs.map(d => d.data());
+      latestCheck   = recentChecks[0] || null;
 
       // Merge localStorage (higher priority for today's working state if local is newer)
       const lsKey = 'fittracker_today_' + getTodayString();
@@ -264,6 +266,7 @@ async function init() {
     activeDiet = null;
     appSettings = {};
     latestCheck = null;
+    recentChecks = [];
     renderDailyStateUI(null);
     buildSmartAdvisor();
   }
@@ -2188,44 +2191,223 @@ function getPartOfDay() {
   return 'sera';
 }
 
+const DAYS_SHORT = ['Lun','Mar','Mer','Gio','Ven','Sab','Dom'];
+
+function computeWeeklyAdherence() {
+  const logs = _weeklyLogsCache || [];
+  const today = new Date();
+  const result = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const dateStr = d.toISOString().split('T')[0];
+    const dayIdx = (d.getDay() + 6) % 7;
+    const dayLabel = DAYS_SHORT[dayIdx];
+    const log = logs.find(l => (l.date || l.id) === dateStr);
+    if (!log || (!log.nutrition?.totals?.kcal && !log.nutrition?.kcal && !log.workout?.completed)) {
+      result.push({ dayLabel, date: dateStr, hasData: false, score: 0 });
+      continue;
+    }
+    const todayDow = getDayOfWeek(dateStr);
+    const scheduleDay = activeProgram?.schedule?.[todayDow];
+    const isOn = !!(scheduleDay && scheduleDay !== 'off' && scheduleDay !== 'rest');
+    const dayKey = isOn ? 'day_on' : 'day_off';
+    const plan = activeDiet?.[dayKey];
+    const fs = calcFitScore({
+      log, plan, isOn,
+      objective: activeProgram?.objective || 'recomposizione',
+      stepsGoal: appSettings?.steps_goal || 0
+    });
+    result.push({ dayLabel, date: dateStr, hasData: true, score: fs?.score || 0 });
+  }
+  return result;
+}
+
+function buildAdvisorContext() {
+  const p = appSettings?.profile || {};
+  const tots = calcTotals();
+  const partOfDay = getPartOfDay();
+  const dayKey = isTrainingDay ? 'day_on' : 'day_off';
+  const plan = activeDiet?.[dayKey];
+
+  // Età
+  let age = '';
+  if (p.dob) {
+    const dob = new Date(p.dob);
+    const now = new Date();
+    age = now.getFullYear() - dob.getFullYear();
+    const m = now.getMonth() - dob.getMonth();
+    if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age--;
+  }
+
+  // Target macro
+  const targetKcal = plan?.kcal || 0;
+  const targetProtein = plan?.protein || 0;
+  const targetCarbs = plan?.carbs || 0;
+  const targetFats = plan?.fats || 0;
+
+  // Percentuali raggiungimento
+  const kcalPct = targetKcal > 0 ? Math.round((tots.kcal / targetKcal) * 100) : 0;
+  const proteinPct = targetProtein > 0 ? Math.round((tots.protein / targetProtein) * 100) : 0;
+  const carbsPct = targetCarbs > 0 ? Math.round((tots.carbs / targetCarbs) * 100) : 0;
+  const fatsPct = targetFats > 0 ? Math.round((tots.fats / targetFats) * 100) : 0;
+
+  // Pasti del piano: fatti e rimanenti
+  const planMeals = plan?.meals || [];
+  const eatenMeals = [];
+  const remainingMeals = [];
+  planMeals.forEach((m, i) => {
+    const eaten = !!mealStates?.[i]?.eaten;
+    const mInfo = { label: m.label || m.type, kcal: m.kcal || 0, protein: m.protein || 0, carbs: m.carbs || 0, fats: m.fats || 0 };
+    if (eaten) eatenMeals.push(mInfo.label);
+    else remainingMeals.push(mInfo);
+  });
+  const eatenExtra = (logData.extra_meals || []).filter(m => m.eaten !== false).map(m => m.name);
+  const allEaten = eatenMeals.concat(eatenExtra);
+
+  // Workout info
+  const wk = logData.workout;
+  const workoutDone = !!wk?.completed;
+  let workoutDurationMin = null;
+  let workoutVolumeKg = null;
+  if (workoutDone && wk) {
+    workoutDurationMin = wk.duration_seconds ? Math.round(wk.duration_seconds / 60) : null;
+    workoutVolumeKg = wk.total_volume ? Math.round(wk.total_volume) : null;
+  }
+  const todayDow = getDayOfWeek(TODAY);
+  const scheduleDay = activeProgram?.schedule?.[todayDow];
+  const plannedSession = isTrainingDay
+    ? (typeof scheduleDay === 'string' ? scheduleDay : scheduleDay?.name || 'Sessione')
+    : null;
+
+  // Body trend
+  const weightTrend = recentChecks
+    .filter(c => c.weight)
+    .map(c => ({ date: c.date, weight: c.weight }));
+  const bfTrend = recentChecks
+    .filter(c => c.body_fat)
+    .map(c => ({ date: c.date, bf: c.body_fat }));
+
+  // Dispensa: solo piatti con porzioni disponibili
+  const availableFridge = fridgeItems
+    .filter(f => f.slices_remaining == null || f.slices_remaining > 0)
+    .map(f => ({
+      name: f.name,
+      kcal: Math.round(f.total_kcal / (f.slices || 1)),
+      protein: Math.round(f.total_protein / (f.slices || 1)),
+      carbs: Math.round(f.total_carbs / (f.slices || 1)),
+      fats: Math.round(f.total_fats / (f.slices || 1)),
+      slices_remaining: f.slices_remaining
+    }));
+
+  // Recovery plan
+  const recoveryPlan = calcRecoveryPlan({
+    weeklyLogs: _weeklyLogsCache || [],
+    activeDiet, activeProgram, appSettings, today: TODAY
+  });
+
+  // Weekly adherence
+  const adherence = computeWeeklyAdherence();
+
+  return {
+    profile: {
+      name: p.name, sex: p.sex, age, height: p.height,
+      weight_target: p.weight_target, fat_target: p.fat_target,
+      steps_goal: p.steps_goal || 10000
+    },
+    body: {
+      current_weight: latestCheck?.weight || null,
+      weight_trend: weightTrend,
+      body_fat: latestCheck?.body_fat || null,
+      muscle_mass: latestCheck?.muscle_mass || null,
+      body_fat_trend: bfTrend
+    },
+    today: {
+      part_of_day: partOfDay,
+      is_training_day: isTrainingDay,
+      kcal: Math.round(tots.kcal), protein: Math.round(tots.protein),
+      carbs: Math.round(tots.carbs), fats: Math.round(tots.fats),
+      target_kcal: targetKcal, target_protein: targetProtein,
+      target_carbs: targetCarbs, target_fats: targetFats,
+      kcal_pct: kcalPct, protein_pct: proteinPct,
+      carbs_pct: carbsPct, fats_pct: fatsPct,
+      meals_eaten: allEaten.length ? allEaten.join(', ') : 'Nessuno',
+      meals_remaining: remainingMeals,
+      workout_done: workoutDone,
+      workout_session: workoutDone ? (wk?.session_name || plannedSession) : null,
+      workout_duration_min: workoutDurationMin,
+      workout_volume_kg: workoutVolumeKg,
+      planned_session: plannedSession,
+      steps: logData.steps || 0,
+      smart_score: _weeklyScoreCache
+    },
+    weekly: {
+      recovery_status: recoveryPlan?.recoveryStatus || 'on_track',
+      kcal_delta: recoveryPlan?.kcalWeeklyDelta || 0,
+      protein_delta: recoveryPlan?.proteinWeeklyDelta || 0,
+      carbs_delta: recoveryPlan?.carbsWeeklyDelta || 0,
+      fats_delta: recoveryPlan?.fatsWeeklyDelta || 0,
+      workouts_completed: recoveryPlan?.workoutsCompleted || 0,
+      workouts_planned: recoveryPlan?.workoutsPlanned || 0,
+      workouts_missed: recoveryPlan?.workoutsMissed || 0,
+      avg_steps: recoveryPlan?.avgDailySteps || 0,
+      adherence_pattern: adherence,
+      actions: recoveryPlan?.actions || [],
+      today_adjusted_kcal: recoveryPlan?.todayAdjustedKcal || null,
+      today_adjusted_protein: recoveryPlan?.todayAdjustedProtein || null
+    },
+    fridge: availableFridge,
+    program: {
+      name: activeProgram?.name || null,
+      objective: activeProgram?.objective || null
+    }
+  };
+}
+
 function generateLocalAdvice({ profile, activeDiet, activeProgram, dailyState, partOfDay }) {
   const name = profile?.name || 'Campione';
-  const steps = dailyState.steps || 0;
+  const steps = dailyState?.steps || 0;
   const goalSteps = profile?.steps_goal || 0;
   const tots = calcTotals();
-  const dayKey = dailyState.isTrainingDay ? 'day_on' : 'day_off';
+  const dayKey = dailyState?.isTrainingDay ? 'day_on' : 'day_off';
   const plan = activeDiet?.[dayKey];
   const targetKcal = plan?.kcal || 2000;
+  const targetProtein = plan?.protein || 0;
+  const targetFats = plan?.fats || 0;
   const kcalDiff = targetKcal - tots.kcal;
+  const proteinDiff = targetProtein - tots.protein;
+  const fatsDiff = targetFats - tots.fats;
 
   if (partOfDay === 'mattina') {
-    if (dailyState.isTrainingDay) {
-      return `Buongiorno, **${name}**! Oggi è giorno di **allenamento**. Assicurati di fare una colazione proteica e idratati bene. Target calorico: **${targetKcal} kcal**. Forza! 🏋️`;
-    } else {
-      return `Buongiorno, **${name}**! Oggi è un giorno di **riposo**. Concentrati sul recupero, mantieni l'alimentazione in target (**${targetKcal} kcal**) e goditi il relax. 🛀`;
-    }
+    const dayType = dailyState?.isTrainingDay ? 'allenamento' : 'riposo';
+    return `Buongiorno, **${name}**! Oggi è giorno di **${dayType}**. Target: **${targetKcal} kcal**, **${targetProtein}g** proteine, **${targetFats}g** grassi. ${dailyState?.isTrainingDay ? 'Colazione proteica e idratazione! 🏋️' : 'Recupero e alimentazione in target! 🛀'}`;
   } else if (partOfDay === 'pomeriggio') {
     const kcalSoFar = Math.round(tots.kcal);
+    const proSoFar = Math.round(tots.protein);
+    let macroNote = '';
+    if (proteinDiff > 30) macroNote = ` Proteine: **${proSoFar}/${targetProtein}g**.`;
+    if (fatsDiff > 15 && targetFats > 0) macroNote += ` Grassi sotto target.`;
     if (kcalDiff > 200) {
-      return `Buon pomeriggio! Hai consumato **${kcalSoFar} kcal** su ${targetKcal}. Ti mancano circa **${Math.round(kcalDiff)} kcal** al target. ${dailyState.isTrainingDay && !dailyState.workoutDone ? "Ricorda l'allenamento! 💪" : 'Continua così! ⚡'}`;
+      return `**${kcalSoFar}/${targetKcal} kcal** consumate.${macroNote} ${dailyState?.isTrainingDay && !dailyState?.workoutDone ? "Ricorda l'allenamento! 💪" : 'Continua così! ⚡'}`;
     } else {
-      return `Buon pomeriggio, **${name}**! Sei sulla strada giusta con **${kcalSoFar} kcal**. ${dailyState.isTrainingDay && !dailyState.workoutDone ? "Hai ancora l'allenamento da completare! 🏋️" : 'Ottima gestione delle calorie! ✅'}`;
+      return `**${name}**, sei in linea con **${kcalSoFar} kcal**.${macroNote} ${dailyState?.isTrainingDay && !dailyState?.workoutDone ? "Hai ancora l'allenamento! 🏋️" : 'Ottima gestione! ✅'}`;
     }
   } else {
-    // Sera — include passi
     const parts = [];
-    if (kcalDiff > 100) {
-      parts.push(`Ti mancano **${Math.round(kcalDiff)} kcal** per raggiungere il target`);
-    } else if (kcalDiff < -100) {
-      parts.push(`Hai superato il target di **${Math.round(Math.abs(kcalDiff))} kcal**`);
-    } else {
-      parts.push(`Sei perfettamente in target con le calorie`);
+    if (kcalDiff > 100) parts.push(`**${Math.round(kcalDiff)} kcal** sotto target`);
+    else if (kcalDiff < -100) parts.push(`**+${Math.round(Math.abs(kcalDiff))} kcal** sopra target`);
+    else parts.push(`calorie in target ✅`);
+
+    if (targetProtein > 0) {
+      const proPct = Math.round((tots.protein / targetProtein) * 100);
+      parts.push(`proteine al **${proPct}%**`);
     }
+    if (targetFats > 0 && fatsDiff > 15) parts.push(`grassi sotto target ⚠️`);
     if (goalSteps > 0) {
-      if (steps >= goalSteps) parts.push(`obiettivo passi raggiunto 🏅`);
-      else parts.push(`**${steps}/${goalSteps} passi** completati`);
+      if (steps >= goalSteps) parts.push(`passi raggiunti 🏅`);
+      else parts.push(`**${steps}/${goalSteps}** passi`);
     }
-    return `Buonasera, **${name}**! ${parts.join(', ')}. ${kcalDiff > 100 ? 'Valuta uno spuntino proteico pre-nanna. 🥩' : 'Buona notte e recupero! 🌟'}`;
+    return `Buonasera **${name}**! ${parts.join(', ')}. ${kcalDiff > 100 ? 'Valuta uno spuntino pre-nanna. 🥩' : 'Ottima giornata! 🌟'}`;
   }
 }
 
@@ -2236,30 +2418,32 @@ async function buildSmartAdvisor() {
   const partOfDay = getPartOfDay();
   const advice = logData.smart_advice?.[partOfDay];
 
-  // We need to load weekly logs first to compute the plan
   await loadWeeklyLogsForScore();
 
-  const recoveryPlan = calcRecoveryPlan({
-    weeklyLogs: _weeklyLogsCache || [],
-    activeDiet,
-    activeProgram,
-    appSettings,
-    today: TODAY
-  });
+  // Compatibilità: formato vecchio (string) e nuovo ({text, insights})
+  const adviceText = typeof advice === 'string' ? advice : advice?.text;
+  const adviceInsights = typeof advice === 'object' && advice?.insights ? advice.insights : [];
 
-  if (advice) {
-    renderSmartAdvisorContent(advice, recoveryPlan);
+  if (adviceText) {
+    renderSmartAdvisorContent(adviceText, adviceInsights);
     return;
   }
 
   const cachedKey = `fittracker_advice_${TODAY}_${partOfDay}`;
-  const cachedText = safeLocalStorage.getItem(cachedKey);
+  const cachedRaw = safeLocalStorage.getItem(cachedKey);
 
-  if (cachedText) {
+  if (cachedRaw) {
+    let parsed = cachedRaw;
+    let cachedInsights = [];
+    try {
+      const obj = JSON.parse(cachedRaw);
+      if (obj && obj.text) { parsed = obj.text; cachedInsights = obj.insights || []; }
+    } catch(e) { /* formato vecchio, è una stringa semplice */ }
+
     if (!logData.smart_advice) logData.smart_advice = {};
-    logData.smart_advice[partOfDay] = cachedText;
+    logData.smart_advice[partOfDay] = { text: parsed, insights: cachedInsights };
     saveToLocal();
-    renderSmartAdvisorContent(cachedText, recoveryPlan);
+    renderSmartAdvisorContent(parsed, cachedInsights);
     return;
   }
 
@@ -2299,7 +2483,7 @@ async function buildSmartAdvisor() {
   }, 200);
 }
 
-function renderSmartAdvisorContent(text, recoveryPlan = null) {
+function renderSmartAdvisorContent(text, insights = []) {
   const box = document.getElementById('smart-advisor-box');
   if (!box) return;
 
@@ -2307,46 +2491,86 @@ function renderSmartAdvisorContent(text, recoveryPlan = null) {
     .replace(/\*\*(.*?)\*\*/g, '<b style="color:var(--t1)">$1</b>')
     .replace(/\n/g, '<br>');
 
+  // Calcola status dal recovery plan corrente
+  const recoveryPlan = calcRecoveryPlan({
+    weeklyLogs: _weeklyLogsCache || [],
+    activeDiet, activeProgram, appSettings, today: TODAY
+  });
+
   let statusClass = 'status-on_track';
   let badgeText = 'IN CARREGGIATA';
-  let actionsHtml = '';
 
   if (recoveryPlan) {
-    statusClass = `status-${recoveryPlan.recoveryStatus}`;
-    if (recoveryPlan.recoveryStatus === 'critical') {
-      badgeText = 'RECUPERO CRITICO';
-    } else if (recoveryPlan.recoveryStatus === 'needs_recovery') {
-      badgeText = 'RECUPERO CONSIGLIATO';
-    } else if (recoveryPlan.recoveryStatus === 'slight_deviation') {
-      badgeText = 'DEVIAZIONE LIEVE';
+    const rs = recoveryPlan.recoveryStatus;
+    if (rs === 'critical') { statusClass = 'status-critical'; badgeText = 'RECUPERO CRITICO'; }
+    else if (rs === 'needs_recovery') { statusClass = 'status-needs_recovery'; badgeText = 'RECUPERO CONSIGLIATO'; }
+    else if (rs === 'slight_deviation') { statusClass = 'status-slight_deviation'; badgeText = 'DEVIAZIONE LIEVE'; }
+    else {
+      // Check se serve status "focus" (on track ma un macro richiede attenzione)
+      const hasWarning = insights.some(ins => ins.status === 'warning' || ins.status === 'critical');
+      if (hasWarning) { statusClass = 'status-focus'; badgeText = 'FOCUS'; }
     }
+  }
 
-    if (recoveryPlan.actions && recoveryPlan.actions.length > 0) {
-      actionsHtml = `
-        <div style="margin-top: 14px; margin-bottom: 4px;">
-          <div style="font-size: 10px; font-weight: 800; color: var(--t3); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px;">Azioni di Recupero</div>
-          <div class="advisor-actions">
-            ${recoveryPlan.actions.map(act => {
-              let clickJs = '';
-              if (act.type === 'meal') clickJs = `location.href='diet.html'`;
-              else if (act.type === 'activity') clickJs = `window.openStepsModal ? window.openStepsModal() : document.getElementById('steps-card').click()`;
-              else clickJs = `location.href='session.html'`;
-
-              return `
-                <div class="action-item" onclick="${clickJs}">
-                  <div class="action-left">
-                    <span class="action-icon">${act.icon}</span>
-                    <span class="action-label">${act.label}</span>
-                  </div>
-                  <div class="action-right">
-                    <span class="action-value">${act.value}</span>
-                    <div class="action-btn-mini"><i class="ri-arrow-right-s-line"></i></div>
-                  </div>
-                </div>`;
-            }).join('')}
-          </div>
+  // Weekly adherence dots
+  const adherence = computeWeeklyAdherence();
+  const dotsHtml = `
+    <div class="advisor-weekly-dots">
+      ${adherence.map(d => {
+        let dotClass = 'dot-none';
+        if (d.hasData) {
+          if (d.score >= 75) dotClass = 'dot-good';
+          else if (d.score >= 45) dotClass = 'dot-warning';
+          else dotClass = 'dot-bad';
+        }
+        return `<div class="weekly-dot-wrap">
+          <div class="weekly-dot ${dotClass}" title="${d.dayLabel}: ${d.hasData ? d.score + '/100' : 'nessun dato'}"></div>
+          <div class="weekly-dot-label">${d.dayLabel}</div>
         </div>`;
-    }
+      }).join('')}
+    </div>`;
+
+  // Insight pills
+  let insightsHtml = '';
+  if (insights && insights.length > 0) {
+    insightsHtml = `
+      <div class="advisor-insights">
+        ${insights.slice(0, 5).map(ins => {
+          const statusCls = ins.status === 'good' ? 'insight-good' : ins.status === 'critical' ? 'insight-critical' : 'insight-warning';
+          return `<div class="insight-pill ${statusCls}">
+            <span class="insight-label">${ins.label}</span>
+            <span class="insight-value">${ins.value}</span>
+          </div>`;
+        }).join('')}
+      </div>`;
+  }
+
+  // Recovery actions
+  let actionsHtml = '';
+  if (recoveryPlan?.actions?.length > 0) {
+    actionsHtml = `
+      <div style="margin-top: 14px; margin-bottom: 4px;">
+        <div style="font-size: 10px; font-weight: 800; color: var(--t3); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px;">Azioni Suggerite</div>
+        <div class="advisor-actions">
+          ${recoveryPlan.actions.map(act => {
+            let clickJs = '';
+            if (act.type === 'meal') clickJs = `location.href='diet.html'`;
+            else if (act.type === 'activity') clickJs = `window.openStepsModal ? window.openStepsModal() : document.getElementById('steps-card').click()`;
+            else clickJs = `location.href='session.html'`;
+            return `
+              <div class="action-item" onclick="${clickJs}">
+                <div class="action-left">
+                  <span class="action-icon">${act.icon}</span>
+                  <span class="action-label">${act.label}</span>
+                </div>
+                <div class="action-right">
+                  <span class="action-value">${act.value}</span>
+                  <div class="action-btn-mini"><i class="ri-arrow-right-s-line"></i></div>
+                </div>
+              </div>`;
+          }).join('')}
+        </div>
+      </div>`;
   }
 
   box.innerHTML = `
@@ -2355,9 +2579,11 @@ function renderSmartAdvisorContent(text, recoveryPlan = null) {
         <div class="advisor-title">KOVA SMART ADVISOR</div>
         <div class="recovery-badge">${badgeText}</div>
       </div>
+      ${dotsHtml}
       <div id="smart-advisor-content" class="advisor-body">
         ${formattedText}
       </div>
+      ${insightsHtml}
       ${actionsHtml}
       <div class="advisor-footer">
         <button onclick="window.refreshSmartAdvisor(false)" style="background:none; border:none; color:var(--t3); font-size:12px; font-weight:700; cursor:pointer; display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:6px; background:rgba(255,255,255,0.03); border:1px solid var(--border); transition: all 0.2s;" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--t3)'">
@@ -2376,100 +2602,50 @@ window.refreshSmartAdvisor = async function(silent = false) {
   if (refreshIcon) refreshIcon.classList.add('ri-spin');
 
   const partOfDay = getPartOfDay();
-  const tots = calcTotals();
 
-  // Load weekly logs to ensure data is updated
   await loadWeeklyLogsForScore();
 
-  const recoveryPlan = calcRecoveryPlan({
-    weeklyLogs: _weeklyLogsCache || [],
-    activeDiet,
-    activeProgram,
-    appSettings,
-    today: TODAY
-  });
-
-  const planMeals = activeDiet?.[isTrainingDay ? 'day_on' : 'day_off']?.meals || [];
-  const eatenMeals = planMeals
-    .filter((m, i) => logData.meals_state?.[i]?.eaten)
-    .map(m => m.label || m.type);
-  const eatenExtraMeals = (logData.extra_meals || [])
-    .filter(m => m.eaten !== false)
-    .map(m => m.name);
-  const allEaten = eatenMeals.concat(eatenExtraMeals);
-  const eatenMealsStr = allEaten.length ? allEaten.join(', ') : 'Nessuno';
-
-  const dailyState = {
-    steps: logData.steps || 0,
-    kcal: Math.round(tots.kcal),
-    protein: Math.round(tots.protein),
-    carbs: Math.round(tots.carbs),
-    fats: Math.round(tots.fats),
-    isTrainingDay,
-    workoutDone: !!logData.workout?.completed,
-    eatenMealsStr,
-    weeklyScore: _weeklyScoreCache,
-  };
+  const ctx = buildAdvisorContext();
 
   try {
     let finalAdvice = '';
-    
-    if (recoveryPlan) {
-      const r = await generateRecoveryAdviceAI({
-        profile: appSettings?.profile,
-        currentWeight: latestCheck?.weight || null,
-        activeDiet,
-        activeProgram,
-        recoveryPlan,
-        partOfDay
-      });
+    let finalInsights = [];
 
-      if (r.success && r.advice) {
-        finalAdvice = r.advice;
-      } else {
-        if (!silent && r.error && r.error.includes('Key')) {
-          showToast('Configura la Gemini API Key in Impostazioni per consigli AI avanzati!', 'info');
-        }
-        finalAdvice = generateLocalAdvice({
-          profile: appSettings?.profile,
-          activeDiet,
-          activeProgram,
-          dailyState,
-          partOfDay
-        });
-      }
+    const r = await generateAdvisor360AI(ctx);
+
+    if (r.success && r.advice) {
+      finalAdvice = r.advice;
+      finalInsights = r.insights || [];
     } else {
-      const r = await generateSmartAdviceAI({
+      if (!silent && r.error && r.error.includes('Key')) {
+        showToast('Configura la Gemini API Key in Impostazioni per consigli AI avanzati!', 'info');
+      }
+      finalAdvice = generateLocalAdvice({
         profile: appSettings?.profile,
-        currentWeight: latestCheck?.weight || null,
         activeDiet,
         activeProgram,
-        dailyState,
+        dailyState: {
+          steps: logData.steps || 0,
+          kcal: Math.round(ctx.today.kcal),
+          protein: Math.round(ctx.today.protein),
+          carbs: Math.round(ctx.today.carbs),
+          fats: Math.round(ctx.today.fats),
+          isTrainingDay,
+          workoutDone: ctx.today.workout_done,
+        },
         partOfDay
       });
-
-      if (r.success && r.advice) {
-        finalAdvice = r.advice;
-      } else {
-        finalAdvice = generateLocalAdvice({
-          profile: appSettings?.profile,
-          activeDiet,
-          activeProgram,
-          dailyState,
-          partOfDay
-        });
-      }
     }
 
     if (!logData.smart_advice) logData.smart_advice = {};
-    logData.smart_advice[partOfDay] = finalAdvice;
+    logData.smart_advice[partOfDay] = { text: finalAdvice, insights: finalInsights };
 
     const cachedKey = `fittracker_advice_${TODAY}_${partOfDay}`;
-    safeLocalStorage.setItem(cachedKey, finalAdvice);
+    safeLocalStorage.setItem(cachedKey, JSON.stringify({ text: finalAdvice, insights: finalInsights }));
 
     saveToLocal();
     await syncToFirebase();
-    renderSmartAdvisorContent(finalAdvice, recoveryPlan);
+    renderSmartAdvisorContent(finalAdvice, finalInsights);
 
   } catch(e) {
     console.error('Advisor error:', e);
@@ -2477,19 +2653,27 @@ window.refreshSmartAdvisor = async function(silent = false) {
       profile: appSettings?.profile,
       activeDiet,
       activeProgram,
-      dailyState,
+      dailyState: {
+        steps: logData.steps || 0,
+        kcal: Math.round(ctx.today.kcal),
+        protein: Math.round(ctx.today.protein),
+        carbs: Math.round(ctx.today.carbs),
+        fats: Math.round(ctx.today.fats),
+        isTrainingDay,
+        workoutDone: ctx.today.workout_done,
+      },
       partOfDay
     });
 
     if (!logData.smart_advice) logData.smart_advice = {};
-    logData.smart_advice[partOfDay] = localAdvice;
+    logData.smart_advice[partOfDay] = { text: localAdvice, insights: [] };
 
     const cachedKey = `fittracker_advice_${TODAY}_${partOfDay}`;
-    safeLocalStorage.setItem(cachedKey, localAdvice);
+    safeLocalStorage.setItem(cachedKey, JSON.stringify({ text: localAdvice, insights: [] }));
 
     saveToLocal();
     await syncToFirebase();
-    renderSmartAdvisorContent(localAdvice, recoveryPlan);
+    renderSmartAdvisorContent(localAdvice, []);
   } finally {
     isGeneratingAdvice = false;
     if (refreshIcon) refreshIcon.classList.remove('ri-spin');

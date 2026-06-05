@@ -919,3 +919,143 @@ ESEMPIO DI CONSIGLIO SBAGLIATO (da NON fare):
   }
 }
 
+// ── Advisor 360° — analisi completa a 360 gradi ─────────────
+export async function generateAdvisor360AI(context) {
+  const key = await getKey();
+  if (!key) return { success: false, error: 'API key mancante.' };
+
+  const c = context;
+  const p = c.profile || {};
+  const t = c.today || {};
+  const w = c.weekly || {};
+  const body = c.body || {};
+  const fridge = c.fridge || [];
+  const prog = c.program || {};
+
+  // Trend peso compatto
+  let weightTrendStr = 'Nessun dato';
+  if (body.weight_trend && body.weight_trend.length > 1) {
+    const latest = body.weight_trend[0];
+    const oldest = body.weight_trend[body.weight_trend.length - 1];
+    const diff = (latest.weight - oldest.weight).toFixed(1);
+    const sign = diff > 0 ? '+' : '';
+    weightTrendStr = body.weight_trend.map(wt => `${wt.date}: ${wt.weight}kg`).join(' → ');
+    weightTrendStr += ` (${sign}${diff}kg)`;
+  } else if (body.current_weight) {
+    weightTrendStr = `${body.current_weight}kg (singola misura)`;
+  }
+
+  // Body composition compatto
+  let bodyCompStr = '';
+  if (body.body_fat != null) bodyCompStr += `BF%: ${body.body_fat}%`;
+  if (body.muscle_mass != null) bodyCompStr += `${bodyCompStr ? ', ' : ''}MM: ${body.muscle_mass}%`;
+  if (!bodyCompStr) bodyCompStr = 'Non disponibile';
+
+  // Pasti rimanenti
+  const remainingMeals = (t.meals_remaining || []).map(m =>
+    `${m.label} (${m.kcal}kcal, P:${m.protein}g, C:${m.carbs}g, F:${m.fats}g)`
+  ).join('; ') || 'Nessuno';
+
+  // Pasti consumati
+  const eatenStr = t.meals_eaten || 'Nessuno';
+
+  // Dispensa disponibile
+  const fridgeStr = fridge.length > 0
+    ? fridge.map(f => `${f.name} (${f.kcal}kcal, P:${f.protein}g, C:${f.carbs}g, F:${f.fats}g${f.slices_remaining ? ', ' + f.slices_remaining + ' porzioni' : ''})`).join('; ')
+    : 'Vuota';
+
+  // Pattern settimanale
+  const adherenceStr = (w.adherence_pattern || []).map(d =>
+    d.hasData ? `${d.dayLabel}: ${d.score}/100` : `${d.dayLabel}: --`
+  ).join(', ') || 'Nessun dato';
+
+  // Workout dettaglio
+  let workoutStr = '';
+  if (t.workout_done) {
+    workoutStr = `COMPLETATO — ${t.workout_session || 'Sessione'}`;
+    if (t.workout_duration_min) workoutStr += `, ${t.workout_duration_min} min`;
+    if (t.workout_volume_kg) workoutStr += `, volume ${t.workout_volume_kg}kg`;
+  } else if (t.is_training_day) {
+    workoutStr = `NON ANCORA FATTO — pianificato: ${t.planned_session || 'Sessione'}`;
+  } else {
+    workoutStr = 'Giorno di riposo';
+  }
+
+  const prompt = `Sei KOVA Smart Advisor 360°, un assistente AI d'élite di fitness e nutrizione.
+Analizza TUTTI i dati seguenti e genera un consiglio ultra-personalizzato per il momento attuale: ${t.part_of_day?.toUpperCase() || 'GIORNATA'}.
+
+═══ PROFILO ═══
+Nome: ${p.name || 'Atleta'} | ${p.sex === 'M' ? 'Uomo' : p.sex === 'F' ? 'Donna' : ''} ${p.age ? p.age + ' anni' : ''} ${p.height ? '| ' + p.height + 'cm' : ''}
+Peso: ${body.current_weight ? body.current_weight + 'kg' : '?'} → Target: ${p.weight_target || '?'}kg
+Trend peso: ${weightTrendStr}
+Composizione: ${bodyCompStr}
+
+═══ OBIETTIVO PROGRAMMA ═══
+${prog.objective ? prog.objective.toUpperCase() : 'Non specificato'}${prog.name ? ' (' + prog.name + ')' : ''}
+
+═══ OGGI (${t.is_training_day ? 'GIORNO ON' : 'GIORNO OFF'}) ═══
+Calorie: ${t.kcal || 0} / ${t.target_kcal || '?'} kcal (${t.kcal_pct || 0}%)
+Proteine: ${t.protein || 0}g / ${t.target_protein || '?'}g (${t.protein_pct || 0}%)
+Carboidrati: ${t.carbs || 0}g / ${t.target_carbs || '?'}g (${t.carbs_pct || 0}%)
+Grassi: ${t.fats || 0}g / ${t.target_fats || '?'}g (${t.fats_pct || 0}%)
+Pasti fatti: ${eatenStr}
+Pasti rimanenti dal piano: ${remainingMeals}
+Workout: ${workoutStr}
+Passi: ${t.steps || 0} / ${p.steps_goal || 10000}
+${t.smart_score != null ? 'SmartScore: ' + t.smart_score + '/100' : ''}
+
+═══ TREND SETTIMANALE (ultimi 7 giorni) ═══
+Stato: ${w.recovery_status || 'on_track'}
+Delta kcal: ${w.kcal_delta || 0} | Delta proteine: ${w.protein_delta || 0}g | Delta carbs: ${w.carbs_delta || 0}g | Delta grassi: ${w.fats_delta || 0}g
+Workout: ${w.workouts_completed || 0}/${w.workouts_planned || 0} completati
+Passi medi: ${w.avg_steps || 0}/giorno
+Aderenza per giorno: ${adherenceStr}
+
+═══ DISPENSA (piatti pronti) ═══
+${fridgeStr}
+
+═══ REGOLE VINCOLANTI ═══
+1. Max +30g proteine/giorno e max +400 kcal/giorno rispetto al target base. MAI di più.
+2. OBIETTIVO ${prog.objective ? prog.objective.toUpperCase() : 'GENERALE'}:
+   ${prog.objective === 'cut' ? '- In CUT: il deficit è voluto. Non suggerire di mangiare di più a meno che il deficit sia >30% sotto target. Priorità: mantenere proteine alte, deficit controllato.' : ''}
+   ${prog.objective === 'bulk' ? '- In BULK: tollera surplus calorico moderato (+10-15%). Preoccupati solo se proteine basse o grassi eccessivi.' : ''}
+   ${prog.objective === 'recomposizione' ? '- In RECOMPOSIZIONE: ogni macro conta. Bilancio è la priorità. Proteine alte, carbs intorno al workout, grassi adeguati.' : ''}
+   ${prog.objective === 'maintenance' || !prog.objective ? '- MANTENIMENTO: resta vicino ai target su tutti i macro.' : ''}
+3. I GRASSI contano! Se grassi < 20% delle kcal totali, segnalalo — servono per ormoni e assorbimento vitamine.
+4. Se ci sono piatti in DISPENSA, suggeriscili PER NOME quando servono per colmare un deficit (es. "hai la [nome] pronta").
+5. Basa i consigli sui PASTI RIMANENTI del piano, non su pasti generici inventati.
+6. Mattina: motiva, prepara la giornata, NO passi.
+7. Pomeriggio: valuta progresso, indica cosa manca, ricorda workout se non fatto. NO passi.
+8. Sera: bilancio COMPLETO della giornata con NUMERI. Passi inclusi. Se tutto è fatto, dai feedback, non consigli.
+9. Non cercare di recuperare deficit settimanali in un giorno. Suggerisci aggiustamenti graduali.
+10. Tono: premium, d'élite, tecnico, motivante. Mai allarmista per deviazioni gestibili.
+
+═══ FORMATO RISPOSTA (JSON obbligatorio) ═══
+Rispondi SOLO con un JSON valido, nessun testo prima o dopo:
+{
+  "advice": "Consiglio 50-70 parole. Usa **grassetto** per numeri chiave e emoji moderate. Parti subito col contenuto, no intro.",
+  "insights": [
+    { "label": "etichetta breve", "value": "valore", "status": "good|warning|critical" }
+  ]
+}
+insights: 3-5 elementi. Scegli i più rilevanti tra: macro (proteine/carbs/grassi in %), trend peso, aderenza settimanale, workout, passi, obiettivo. Status: "good" = in linea, "warning" = attenzione, "critical" = fuori range.`;
+
+  const result = await callGemini(key, prompt, { temperature: 0.65, maxOutputTokens: 512 });
+  if (!result.success) return { success: false, error: 'AI non disponibile.' };
+
+  const raw = result.text;
+  const s1 = raw.indexOf('{');
+  const s2 = raw.lastIndexOf('}');
+  if (s1 !== -1 && s2 !== -1) {
+    try {
+      const parsed = JSON.parse(raw.slice(s1, s2 + 1));
+      return {
+        success: true,
+        advice: parsed.advice || raw,
+        insights: Array.isArray(parsed.insights) ? parsed.insights : []
+      };
+    } catch(e) { /* fallthrough */ }
+  }
+  return { success: true, advice: raw.trim(), insights: [] };
+}
+
