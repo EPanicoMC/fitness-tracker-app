@@ -549,6 +549,43 @@ JSON richiesto:
 }
 
 // ── Analizza progressione check ─────────────────────────────
+function buildDeltaSection(newCheck, prevCheck, getMs) {
+  const lines = [];
+  lines.push(`\n═══ DELTA PRE-CALCOLATI (check attuale vs precedente ${prevCheck.date}) — USA QUESTI VALORI, NON CALCOLARLI TU ═══`);
+  if (newCheck.weight != null && prevCheck.weight != null) {
+    const d = (newCheck.weight - prevCheck.weight).toFixed(1);
+    lines.push(`Peso: ${prevCheck.weight}kg → ${newCheck.weight}kg = ${d > 0 ? '+' : ''}${d}kg`);
+  }
+  const zones = [
+    { key: 'shoulders', label: 'Spalle' },
+    { key: 'chest', label: 'Petto' },
+    { key: 'waist', label: 'Vita' },
+    { key: 'bicep', label: 'Braccia' },
+    { key: 'thigh', label: 'Gambe' }
+  ];
+  const msNew = newCheck.measurements || {};
+  const msPrev = prevCheck.measurements || {};
+  zones.forEach(z => {
+    const vNew = getMs(msNew, z.key);
+    const vPrev = getMs(msPrev, z.key);
+    if (vNew != null && vPrev != null) {
+      const d = (vNew - vPrev).toFixed(1);
+      lines.push(`${z.label}: ${vPrev}cm → ${vNew}cm = ${d > 0 ? '+' : ''}${d}cm`);
+    } else if (vNew != null) {
+      lines.push(`${z.label}: N/A → ${vNew}cm (primo dato)`);
+    }
+  });
+  if (newCheck.body_fat != null && prevCheck.body_fat != null) {
+    const d = (newCheck.body_fat - prevCheck.body_fat).toFixed(1);
+    lines.push(`Body Fat: ${prevCheck.body_fat}% → ${newCheck.body_fat}% = ${d > 0 ? '+' : ''}${d}%`);
+  }
+  if (newCheck.muscle_mass != null && prevCheck.muscle_mass != null) {
+    const d = (newCheck.muscle_mass - prevCheck.muscle_mass).toFixed(1);
+    lines.push(`Massa Muscolare: ${prevCheck.muscle_mass}% → ${newCheck.muscle_mass}% = ${d > 0 ? '+' : ''}${d}%`);
+  }
+  return lines.join('\n');
+}
+
 export async function analyzeCheckProgress({ newCheck, allChecks, profile, dailyLogs, activeProgram, activeDiet }) {
   const key = await getKey();
   if (!key) return { success: false, error: 'API key mancante' };
@@ -667,19 +704,21 @@ ${checkHistory || 'Primo check in assoluto'}
 ${fmtCheck(newCheck)}
 ${newCheck.notes ? `Note utente: "${newCheck.notes}"` : 'Nessuna nota'}
 ${daysSinceLastCheck ? `Giorni dall'ultimo check: ${daysSinceLastCheck}` : 'Primo check — nessun confronto disponibile'}
+${prevCheck ? buildDeltaSection(newCheck, prevCheck, getMs) : ''}
 ${logsSection}${dietSection}${programSection}
 
 ═══ REGOLE VINCOLANTI ═══
-1. Analisi COMMISURATA al tempo trascorso: se sono passati 7 giorni non aspettarti stravolgimenti, se ne sono passati 30 puoi essere più critico.
-2. Valuta i TREND, non solo il delta singolo. Se il peso cala costantemente da 3 check, è diverso da un calo isolato.
-3. Correla le misure tra loro: vita che scende + peso stabile = probabile ricomposizione. Peso che sale + braccia/petto che crescono in bulk = coerente.
-4. Se l'aderenza alla dieta è bassa, DILLO CHIARAMENTE. Se gli allenamenti sono stati saltati, CRITICALO.
-5. Per le foto: analizza visivamente composizione corporea, distribuzione grasso, definizione muscolare, postura. Confronta con foto precedenti se disponibili.
-6. STIMA BODY FAT: Se ci sono foto, STIMA la percentuale di grasso corporeo basandoti su: visibilità addominali, separazione muscolare, vascolarizzazione, distribuzione grasso (fianchi, bassa schiena, tricipiti). Fornisci un range (es: 14-16%) e il livello di confidenza. Questa stima va SEMPRE inserita nel campo body_fat_stimato.
-7. Il verdetto (PROSEGUI/MODIFICA) deve essere MOTIVATO con numeri e dati, non generico.
-8. Valuta se la scheda e la dieta sono coerenti con l'obiettivo (cut/bulk/recomp) e con i risultati ottenuti.
-9. Se è il primo check, dai una valutazione di partenza onesta e stabilisci baseline chiare.
-10. Tono: professionale, diretto, analitico. Come un coach pagato 200€/h che non può permettersi di essere vago.
+1. I DELTA tra check attuale e precedente sono PRE-CALCOLATI sopra. USA QUELLI ESATTAMENTE come forniti. NON ricalcolarli, NON invertirli, NON approssimarli. Copialli tal quali nei campi "delta" del JSON di risposta.
+2. Analisi COMMISURATA al tempo trascorso: se sono passati 7 giorni non aspettarti stravolgimenti, se ne sono passati 30 puoi essere più critico.
+3. Valuta i TREND, non solo il delta singolo. Se il peso cala costantemente da 3 check, è diverso da un calo isolato.
+4. Correla le misure tra loro: vita che scende + peso stabile = probabile ricomposizione. Peso che sale + braccia/petto che crescono in bulk = coerente.
+5. Se l'aderenza alla dieta è bassa, DILLO CHIARAMENTE. Se gli allenamenti sono stati saltati, CRITICALO.
+6. Per le foto: analizza visivamente composizione corporea, distribuzione grasso, definizione muscolare, postura. Confronta con foto precedenti se disponibili.
+7. STIMA BODY FAT: Se ci sono foto, STIMA la percentuale di grasso corporeo basandoti su: visibilità addominali, separazione muscolare, vascolarizzazione, distribuzione grasso (fianchi, bassa schiena, tricipiti). Fornisci un range (es: 14-16%) e il livello di confidenza. Questa stima va SEMPRE inserita nel campo body_fat_stimato.
+8. Il verdetto (PROSEGUI/MODIFICA) deve essere MOTIVATO con numeri e dati, non generico.
+9. Valuta se la scheda e la dieta sono coerenti con l'obiettivo (cut/bulk/recomp) e con i risultati ottenuti.
+10. Se è il primo check, dai una valutazione di partenza onesta e stabilisci baseline chiare.
+11. Tono: professionale, diretto, analitico. Come un coach pagato 200€/h che non può permettersi di essere vago.
 
 ═══ FORMATO RISPOSTA (JSON obbligatorio) ═══
 Rispondi SOLO con un JSON valido, nessun testo prima o dopo:
