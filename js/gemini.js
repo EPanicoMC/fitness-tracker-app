@@ -675,10 +675,11 @@ ${logsSection}${dietSection}${programSection}
 3. Correla le misure tra loro: vita che scende + peso stabile = probabile ricomposizione. Peso che sale + braccia/petto che crescono in bulk = coerente.
 4. Se l'aderenza alla dieta è bassa, DILLO CHIARAMENTE. Se gli allenamenti sono stati saltati, CRITICALO.
 5. Per le foto: analizza visivamente composizione corporea, distribuzione grasso, definizione muscolare, postura. Confronta con foto precedenti se disponibili.
-6. Il verdetto (PROSEGUI/MODIFICA) deve essere MOTIVATO con numeri e dati, non generico.
-7. Valuta se la scheda e la dieta sono coerenti con l'obiettivo (cut/bulk/recomp) e con i risultati ottenuti.
-8. Se è il primo check, dai una valutazione di partenza onesta e stabilisci baseline chiare.
-9. Tono: professionale, diretto, analitico. Come un coach pagato 200€/h che non può permettersi di essere vago.
+6. STIMA BODY FAT: Se ci sono foto, STIMA la percentuale di grasso corporeo basandoti su: visibilità addominali, separazione muscolare, vascolarizzazione, distribuzione grasso (fianchi, bassa schiena, tricipiti). Fornisci un range (es: 14-16%) e il livello di confidenza. Questa stima va SEMPRE inserita nel campo body_fat_stimato.
+7. Il verdetto (PROSEGUI/MODIFICA) deve essere MOTIVATO con numeri e dati, non generico.
+8. Valuta se la scheda e la dieta sono coerenti con l'obiettivo (cut/bulk/recomp) e con i risultati ottenuti.
+9. Se è il primo check, dai una valutazione di partenza onesta e stabilisci baseline chiare.
+10. Tono: professionale, diretto, analitico. Come un coach pagato 200€/h che non può permettersi di essere vago.
 
 ═══ FORMATO RISPOSTA (JSON obbligatorio) ═══
 Rispondi SOLO con un JSON valido, nessun testo prima o dopo:
@@ -689,6 +690,7 @@ Rispondi SOLO con un JSON valido, nessun testo prima o dopo:
     "misure_focus": [
       { "zona": "Nome zona", "valore": "XXcm", "delta": "+/-Xcm vs precedente", "trend": "in crescita/calo/stabile da N check", "giudizio": "ottimo/buono/attenzione/critico" }
     ],
+    "body_fat_stimato": { "range": "X-Y%", "confidenza": "alta/media/bassa", "nota": "Motivazione breve della stima basata sulle foto" },
     "body_score": 7.5,
     "tempo_valutazione": "Valutazione su N giorni"
   },
@@ -705,7 +707,7 @@ Rispondi SOLO con un JSON valido, nessun testo prima o dopo:
     "prossimo_check_consigliato": "tra X giorni"
   }
 }
-misure_focus: una entry per ogni zona misurata. body_score: da 1 a 10 (valutazione complessiva progressi). Se primo check senza confronto, metti delta e trend "baseline".`;
+misure_focus: una entry per ogni zona misurata. body_fat_stimato: stima visiva della % grasso dalle foto (se presenti, altrimenti null). body_score: da 1 a 10 (valutazione complessiva progressi). Se primo check senza confronto, metti delta e trend "baseline".`;
 
   const parts = [{ text: promptText }];
 

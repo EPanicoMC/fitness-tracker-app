@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Debug Checks</title>
+  <style>
+    body { font-family: monospace; background: #111; color: #eee; padding: 20px; font-size: 13px; }
+    pre { background: #1a1a2e; padding: 12px; border-radius: 8px; overflow-x: auto; white-space: pre-wrap; }
+    button { background: #7c6fff; color: #fff; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; margin: 4px; }
+    button:hover { opacity: 0.85; }
+    button.orange { background: #ff6a00; }
+    button.green { background: #00dc78; color: #111; }
+    .section { margin: 20px 0; padding: 16px; border: 1px solid #333; border-radius: 12px; }
+    h2 { color: #7c6fff; }
+    #log { max-height: 600px; overflow-y: auto; }
+  </style>
+</head>
+<body>
+<h1>Debug Checks — Ispeziona & Rigenera AI</h1>
+<div class="section">
+  <h2>1. Carica dati check</h2>
+  <input id="uid" placeholder="email utente (es: enricopanico@gmail.com)" style="width:400px;padding:8px;background:#222;color:#eee;border:1px solid #444;border-radius:6px">
+  <button onclick="loadUserChecks()">Carica Checks</button>
+  <button onclick="loadUserDailyLogs()">Carica Daily Logs</button>
+  <button onclick="loadUserProfile()">Carica Profilo</button>
+  <button onclick="loadUserProgram()">Carica Programma</button>
+  <button onclick="loadUserDiet()">Carica Dieta</button>
+</div>
+<div class="section">
+  <h2>2. Rigenera AI</h2>
+  <input id="check-date" placeholder="data check (es: 2026-06-06)" style="width:250px;padding:8px;background:#222;color:#eee;border:1px solid #444;border-radius:6px">
+  <button class="orange" onclick="regenAI()">Rigenera Analisi AI</button>
+  <button class="green" onclick="saveAIResult()">Salva su Firestore</button>
+</div>
+<div class="section">
+  <h2>Log</h2>
+  <div id="log"></div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import {
+  getFirestore, collection, doc, getDoc, getDocs, setDoc, query, orderBy, limit, where
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+import {
+  getAuth, onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyC7bm-wJAScIaQfelZkGP4C7kw_FKI4Gv8",
+  authDomain: "fitness-tracker-app-b6792.firebaseapp.com",
+  projectId: "fitness-tracker-app-b6792",
+  storageBucket: "fitness-tracker-app-b6792.firebasestorage.app",
+  messagingSenderId: "458513477303",
+  appId: "1:458513477303:web:11c284ec5505e12a846732"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
+
+let cachedChecks = {};
+let cachedLogs = {};
+let cachedProfile = {};
+let cachedProgram = {};
+let cachedDiet = {};
+let lastAIResult = null;
+
+function log(msg) {
+  const el = document.getElementById('log');
+  const pre = document.createElement('pre');
+  pre.textContent = typeof msg === 'string' ? msg : JSON.stringify(msg, null, 2);
+  el.prepend(pre);
+}
+
+function getUid() {
+  return document.getElementById('uid').value.trim();
+}
+
+onAuthStateChanged(auth, u => {
+  if (u) log('Autenticato come: ' + u.email);
+  else log('NON autenticato — vai su index.html e logga prima');
+});
+
+window.loadUserChecks = async function() {
+  const uid = getUid();
+  if (!uid) { log('Inserisci email utente'); return; }
+  try {
+    const snap = await getDocs(query(collection(db, 'users', uid, 'checks'), orderBy('date', 'desc')));
+    const checks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    cachedChecks[uid] = checks;
+    log(`=== CHECKS per ${uid} (${checks.length} totali) ===`);
+    checks.forEach(c => {
+      const ms = c.measurements || {};
+      log(`${c.date} | Peso:${c.weight||'—'}kg | BF:${c.body_fat||'—'}% | MM:${c.muscle_mass||'—'}% | Spalle:${ms.shoulders||'—'} | Petto:${ms.chest||'—'} | Vita:${ms.waist||'—'} | Braccia:${ms.bicep||'—'} | Gambe:${ms.thigh||'—'} | Note:"${c.notes||''}" | Foto:${c.photos?.length||0} | AI:${c.ai_analysis ? 'SI (' + c.ai_analysis.substring(0,80) + '...)' : 'NO'}`);
+    });
+  } catch(e) { log('ERRORE: ' + e.message); }
+};
+
+window.loadUserDailyLogs = async function() {
+  const uid = getUid();
+  if (!uid) { log('Inserisci email utente'); return; }
+  try {
+    const snap = await getDocs(query(collection(db, 'users', uid, 'daily_logs'), orderBy('date', 'desc'), limit(30)));
+    const logs = snap.docs.map(d => d.data());
+    cachedLogs[uid] = logs;
+    log(`=== DAILY LOGS per ${uid} (ultimi ${logs.length}) ===`);
+    logs.forEach(l => {
+      const kcal = l.nutrition?.totals?.kcal || 0;
+      const pro = l.nutrition?.totals?.protein || 0;
+      const wk = l.workout?.completed ? `WK:${l.workout.session_name||'OK'}` : (l.is_training_day ? 'WK:MISS' : 'REST');
+      log(`${l.date} | ${kcal}kcal P:${Math.round(pro)}g | ${wk} | Steps:${l.steps||0} | Note:"${l.daily_note||''}"`);
+    });
+  } catch(e) { log('ERRORE: ' + e.message); }
+};
+
+window.loadUserProfile = async function() {
+  const uid = getUid();
+  if (!uid) { log('Inserisci email utente'); return; }
+  try {
+    const snap = await getDoc(doc(db, 'users', uid, 'settings', 'app'));
+    if (!snap.exists()) { log('Nessun profilo trovato'); return; }
+    const data = snap.data();
+    cachedProfile[uid] = data.profile || {};
+    log(`=== PROFILO ${uid} ===`);
+    log(data.profile || {});
+  } catch(e) { log('ERRORE: ' + e.message); }
+};
+
+window.loadUserProgram = async function() {
+  const uid = getUid();
+  if (!uid) { log('Inserisci email utente'); return; }
+  try {
+    const snap = await getDocs(query(collection(db, 'users', uid, 'programs'), limit(1)));
+    const prog = snap.docs[0]?.data() || null;
+    cachedProgram[uid] = prog;
+    log(`=== PROGRAMMA ${uid} ===`);
+    log(prog);
+  } catch(e) { log('ERRORE: ' + e.message); }
+};
+
+window.loadUserDiet = async function() {
+  const uid = getUid();
+  if (!uid) { log('Inserisci email utente'); return; }
+  try {
+    const snap = await getDocs(query(collection(db, 'users', uid, 'diet_plans'), limit(1)));
+    const diet = snap.docs[0]?.data() || null;
+    cachedDiet[uid] = diet;
+    log(`=== DIETA ${uid} ===`);
+    log(diet);
+  } catch(e) { log('ERRORE: ' + e.message); }
+};
+
+window.regenAI = async function() {
+  const uid = getUid();
+  const checkDate = document.getElementById('check-date').value.trim();
+  if (!uid || !checkDate) { log('Inserisci email e data check'); return; }
+
+  const checks = cachedChecks[uid];
+  if (!checks) { log('Carica prima i checks!'); return; }
+
+  const targetCheck = checks.find(c => c.date === checkDate);
+  if (!targetCheck) { log(`Check ${checkDate} non trovato per ${uid}`); return; }
+
+  log(`Rigenerando AI per ${uid} check ${checkDate}...`);
+
+  // Carica dati se non già caricati
+  if (!cachedProfile[uid]) await window.loadUserProfile();
+  if (!cachedProgram[uid]) await window.loadUserProgram();
+  if (!cachedDiet[uid]) await window.loadUserDiet();
+  if (!cachedLogs[uid]) await window.loadUserDailyLogs();
+
+  const profile = cachedProfile[uid] || {};
+  const prevCheck = checks.find(c => c.date < checkDate);
+  const logsFrom = prevCheck ? prevCheck.date : null;
+  const dailyLogs = logsFrom
+    ? (cachedLogs[uid] || []).filter(l => l.date >= logsFrom && l.date <= checkDate)
+    : [];
+
+  log(`Contesto: profilo=${!!profile.name}, prevCheck=${prevCheck?.date||'nessuno'}, logs=${dailyLogs.length}, programma=${!!cachedProgram[uid]}, dieta=${!!cachedDiet[uid]}`);
+
+  try {
+    const { analyzeCheckProgress } = await import('./js/gemini.js');
+    const result = await analyzeCheckProgress({
+      newCheck: {
+        date: targetCheck.date,
+        weight: targetCheck.weight,
+        body_fat: targetCheck.body_fat,
+        muscle_mass: targetCheck.muscle_mass,
+        measurements: targetCheck.measurements,
+        photos: targetCheck.photos || [],
+        notes: targetCheck.notes || ''
+      },
+      allChecks: checks,
+      profile,
+      dailyLogs,
+      activeProgram: cachedProgram[uid],
+      activeDiet: cachedDiet[uid]
+    });
+
+    lastAIResult = { uid, checkDate, result };
+    log(`=== RISULTATO AI ===`);
+    if (result.success) {
+      try {
+        log(JSON.parse(result.analysis));
+      } catch(e) {
+        log(result.analysis);
+      }
+    } else {
+      log('ERRORE AI: ' + result.error);
+    }
+  } catch(e) {
+    log('ERRORE: ' + e.message);
+    console.error(e);
+  }
+};
+
+window.saveAIResult = async function() {
+  if (!lastAIResult || !lastAIResult.result?.success) {
+    log('Nessun risultato AI da salvare. Rigenera prima!');
+    return;
+  }
+  const { uid, checkDate, result } = lastAIResult;
+  const id = `check_${checkDate.replace(/-/g, '')}`;
+  try {
+    await setDoc(doc(db, 'users', uid, 'checks', id), { ai_analysis: result.analysis }, { merge: true });
+    log(`Salvato ai_analysis su Firestore per ${uid} / ${id}`);
+  } catch(e) {
+    log('ERRORE salvataggio: ' + e.message);
+  }
+};
+</script>
+</body>
+</html>

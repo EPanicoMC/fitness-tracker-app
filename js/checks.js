@@ -500,6 +500,16 @@ function renderAIAnalysis(raw) {
     </div>`;
   }
 
+  const bfHtml = a.body_fat_stimato ? `
+    <div style="display:flex;align-items:center;gap:10px;margin-top:10px;padding:10px 12px;background:rgba(255,106,0,0.06);border-radius:10px;border:1px solid rgba(255,106,0,0.12)">
+      <div style="font-size:22px;font-weight:900;color:var(--orange)">${a.body_fat_stimato.range}</div>
+      <div style="flex:1">
+        <div style="font-size:9px;font-weight:800;color:var(--t3);text-transform:uppercase;letter-spacing:0.5px">Body Fat Stimato</div>
+        <div style="font-size:10px;color:var(--t3);margin-top:2px">${a.body_fat_stimato.nota || ''}</div>
+      </div>
+      ${a.body_fat_stimato.confidenza ? `<div style="font-size:9px;font-weight:700;color:var(--orange);background:rgba(255,106,0,0.1);padding:3px 8px;border-radius:12px">${a.body_fat_stimato.confidenza}</div>` : ''}
+    </div>` : '';
+
   const scoreHtml = a.body_score != null ? `
     <div style="display:flex;align-items:center;gap:10px;margin-top:12px;padding:10px 12px;background:rgba(124,111,255,0.06);border-radius:10px">
       <div style="font-size:28px;font-weight:900;color:var(--purple)">${a.body_score}<span style="font-size:14px;color:var(--t3)">/10</span></div>
@@ -520,6 +530,7 @@ function renderAIAnalysis(raw) {
     ${a.titolo ? `<div style="font-size:15px;font-weight:900;color:var(--t1);margin-bottom:8px">${a.titolo}</div>` : ''}
     <div style="font-size:12px;color:var(--t2);line-height:1.65">${a.body_review || ''}</div>
     ${misureFocusHtml}
+    ${bfHtml}
     ${scoreHtml}
   </div>`;
 
