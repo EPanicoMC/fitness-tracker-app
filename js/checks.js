@@ -1,6 +1,6 @@
 import { requireAuth } from './app.js';
 import {
-  db, getUserId, collection, doc, getDoc, getDocs, setDoc, deleteDoc, query, orderBy, limit, storage
+  db, getUserId, collection, doc, getDoc, getDocs, setDoc, deleteDoc, query, orderBy, limit, where, storage
 } from './firebase-config.js';
 import { showToast, showModal, formatDateIT } from './app.js';
 import {
@@ -447,15 +447,124 @@ function renderList() {
             </div>`;
           }).join('')}
         </div>` : ''}
-        ${c.ai_analysis ? `<div style="margin-top:10px;padding:10px 12px;background:rgba(124,111,255,0.08);border-radius:10px;border:1px solid rgba(124,111,255,0.2)">
-          <div style="font-size:10px;font-weight:800;color:var(--purple);letter-spacing:0.5px;margin-bottom:5px">🤖 ANALISI AI</div>
-          <div style="font-size:12px;color:var(--t2);line-height:1.55">${c.ai_analysis}</div>
-        </div>` : ''}
+        ${c.ai_analysis ? renderAIAnalysis(c.ai_analysis) : ''}
         <div style="display:flex;gap:8px;margin-top:10px">
           <button class="btn btn-flat btn-sm" onclick="deleteCheck('${c.id}')">🗑️ Elimina</button>
         </div>
       </div>`;
   }).join('');
+}
+
+function renderAIAnalysis(raw) {
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch(e) {
+    return `<div style="margin-top:10px;padding:10px 12px;background:rgba(124,111,255,0.08);border-radius:10px;border:1px solid rgba(124,111,255,0.2)">
+      <div style="font-size:10px;font-weight:800;color:var(--purple);letter-spacing:0.5px;margin-bottom:5px">🤖 ANALISI AI</div>
+      <div style="font-size:12px;color:var(--t2);line-height:1.55">${raw}</div>
+    </div>`;
+  }
+
+  const a = data.analisi || {};
+  const and = data.andamento || {};
+  const p = data.piano || {};
+
+  const giudizioColor = {
+    'ottimo': '#00dc78', 'buono': '#7c6fff', 'attenzione': '#ff6a00', 'critico': '#ff3b30',
+    'baseline': 'var(--t3)'
+  };
+
+  const aderenzaColor = {
+    'eccellente': '#00dc78', 'buona': '#7c6fff', 'sufficiente': '#ff6a00',
+    'scarsa': '#ff3b30', 'insufficiente': '#ff3b30'
+  };
+
+  const verdettoEmoji = {
+    'PROSEGUI': '✅', 'MODIFICA DIETA': '🍽️', 'MODIFICA SCHEDA': '🏋️',
+    'MODIFICA ENTRAMBI': '🔄'
+  };
+
+  // 1. Analisi Corpo
+  let misureFocusHtml = '';
+  if (a.misure_focus?.length) {
+    misureFocusHtml = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px">
+      ${a.misure_focus.map(m => {
+        const col = giudizioColor[m.giudizio] || 'var(--t2)';
+        return `<div style="padding:8px 10px;background:rgba(255,255,255,0.03);border-radius:8px;border-left:3px solid ${col}">
+          <div style="font-size:11px;font-weight:800;color:var(--t1)">${m.zona}</div>
+          <div style="font-size:13px;font-weight:700;color:${col}">${m.valore} <span style="font-size:10px;color:var(--t3)">${m.delta || ''}</span></div>
+          <div style="font-size:9px;color:var(--t3);margin-top:2px">${m.trend || ''}</div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+
+  const scoreHtml = a.body_score != null ? `
+    <div style="display:flex;align-items:center;gap:10px;margin-top:12px;padding:10px 12px;background:rgba(124,111,255,0.06);border-radius:10px">
+      <div style="font-size:28px;font-weight:900;color:var(--purple)">${a.body_score}<span style="font-size:14px;color:var(--t3)">/10</span></div>
+      <div style="flex:1">
+        <div style="font-size:9px;font-weight:800;color:var(--t3);text-transform:uppercase;letter-spacing:0.5px">Body Score</div>
+        <div style="height:4px;background:rgba(255,255,255,0.08);border-radius:2px;margin-top:4px;overflow:hidden">
+          <div style="width:${a.body_score * 10}%;height:100%;background:linear-gradient(90deg,#7c6fff,#00dc78);border-radius:2px"></div>
+        </div>
+      </div>
+      ${a.tempo_valutazione ? `<div style="font-size:10px;color:var(--t3);text-align:right">${a.tempo_valutazione}</div>` : ''}
+    </div>` : '';
+
+  const analisiCard = `<div style="margin-top:12px;padding:14px;background:rgba(124,111,255,0.06);border-radius:14px;border:1px solid rgba(124,111,255,0.15)">
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+      <span style="font-size:14px">🔬</span>
+      <span style="font-size:10px;font-weight:800;color:var(--purple);letter-spacing:0.5px;text-transform:uppercase">Analisi Dettagliata</span>
+    </div>
+    ${a.titolo ? `<div style="font-size:15px;font-weight:900;color:var(--t1);margin-bottom:8px">${a.titolo}</div>` : ''}
+    <div style="font-size:12px;color:var(--t2);line-height:1.65">${a.body_review || ''}</div>
+    ${misureFocusHtml}
+    ${scoreHtml}
+  </div>`;
+
+  // 2. Andamento
+  const posHtml = (and.positivi || []).map(p =>
+    `<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:4px"><span style="color:#00dc78;font-size:12px;flex-shrink:0">▲</span><span style="font-size:12px;color:var(--t2);line-height:1.5">${p}</span></div>`
+  ).join('');
+  const negHtml = (and.negativi || []).map(n =>
+    `<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:4px"><span style="color:#ff3b30;font-size:12px;flex-shrink:0">▼</span><span style="font-size:12px;color:var(--t2);line-height:1.5">${n}</span></div>`
+  ).join('');
+  const aderCol = aderenzaColor[and.aderenza_giudizio] || 'var(--t2)';
+
+  const andamentoCard = `<div style="margin-top:8px;padding:14px;background:rgba(0,220,120,0.04);border-radius:14px;border:1px solid rgba(0,220,120,0.12)">
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px">
+      <span style="font-size:14px">📊</span>
+      <span style="font-size:10px;font-weight:800;color:#00dc78;letter-spacing:0.5px;text-transform:uppercase">Andamento</span>
+      ${and.aderenza_giudizio ? `<span style="margin-left:auto;font-size:10px;font-weight:800;color:${aderCol};background:${aderCol}15;padding:3px 8px;border-radius:20px;text-transform:uppercase">${and.aderenza_giudizio}</span>` : ''}
+    </div>
+    ${posHtml ? `<div style="margin-bottom:8px">${posHtml}</div>` : ''}
+    ${negHtml ? `<div style="margin-bottom:8px">${negHtml}</div>` : ''}
+    ${and.nota_allenamento ? `<div style="font-size:11px;color:var(--t3);line-height:1.5;padding-top:6px;border-top:1px solid rgba(255,255,255,0.05)">🏋️ ${and.nota_allenamento}</div>` : ''}
+  </div>`;
+
+  // 3. Piano d'Azione
+  const vEmoji = verdettoEmoji[p.verdetto] || '📋';
+  const vColor = p.verdetto === 'PROSEGUI' ? '#00dc78' : '#ff6a00';
+  const azioniHtml = (p.azioni || []).map((a, i) =>
+    `<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:5px"><span style="font-size:11px;font-weight:800;color:var(--orange);flex-shrink:0">${i + 1}.</span><span style="font-size:12px;color:var(--t2);line-height:1.5">${a}</span></div>`
+  ).join('');
+
+  const pianoCard = `<div style="margin-top:8px;padding:14px;background:rgba(255,106,0,0.04);border-radius:14px;border:1px solid rgba(255,106,0,0.12)">
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px">
+      <span style="font-size:14px">🎯</span>
+      <span style="font-size:10px;font-weight:800;color:var(--orange);letter-spacing:0.5px;text-transform:uppercase">Piano d'Azione</span>
+    </div>
+    ${p.verdetto ? `<div style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:${vColor}15;border-radius:20px;margin-bottom:10px">
+      <span style="font-size:14px">${vEmoji}</span>
+      <span style="font-size:13px;font-weight:900;color:${vColor}">${p.verdetto}</span>
+    </div>` : ''}
+    ${p.motivazione ? `<div style="font-size:12px;color:var(--t2);line-height:1.55;margin-bottom:10px">${p.motivazione}</div>` : ''}
+    ${azioniHtml}
+    ${p.prossimo_check_consigliato ? `<div style="margin-top:8px;padding:8px 10px;background:rgba(255,255,255,0.03);border-radius:8px;font-size:11px;color:var(--t3)">📅 Prossimo check consigliato: <b style="color:var(--t1)">${p.prossimo_check_consigliato}</b></div>` : ''}
+  </div>`;
+
+  return analisiCard + andamentoCard + pianoCard;
 }
 
 function renderMeasureDeltas(c, prev) {
@@ -579,8 +688,9 @@ window.openNewCheck = function() {
         <div class="fg" style="margin:0"><label class="fl">% Massa Muscolare</label>
           <input type="number" class="fi" id="ck-muscle-mass" step="0.1" placeholder="40.0"></div>
       </div>
-      <div class="fg" style="margin-top:12px"><label class="fl">Note</label>
-        <textarea class="fi" id="ck-notes" rows="2" placeholder="Come ti senti..."></textarea></div>
+      <div class="fg" style="margin-top:12px"><label class="fl">📝 Note per il Coach</label>
+        <textarea class="fi" id="ck-notes" rows="3" placeholder="Infortuni, problemi, contesto rilevante (es: settimana stressante, viaggio, malattia, cambio abitudini...)"></textarea>
+        <div style="font-size:10px;color:var(--t3);margin-top:4px">Più contesto dai, più l'analisi sarà accurata e personalizzata.</div></div>
     </div>
     <div class="card">
       <span class="clabel">📐 Misure corporee</span>
@@ -677,9 +787,39 @@ window.saveCheck = async function() {
 
     showToast('🤖 Analisi AI in corso...', 'info');
     try {
+      const uid = getUserId();
+      const prevCheck = checks.find(c => c.date < date);
+      const logsFrom = prevCheck ? prevCheck.date : null;
+
+      const fetches = [
+        getDoc(doc(db, 'users', uid, 'settings', 'app')).catch(() => null),
+        getDocs(query(collection(db, 'users', uid, 'programs'), limit(1))).catch(() => null),
+        getDocs(query(collection(db, 'users', uid, 'diet_plans'), limit(1))).catch(() => null),
+      ];
+      if (logsFrom) {
+        fetches.push(
+          getDocs(query(
+            collection(db, 'users', uid, 'daily_logs'),
+            where('date', '>=', logsFrom),
+            where('date', '<=', date),
+            orderBy('date', 'desc')
+          )).catch(() => null)
+        );
+      }
+
+      const [settingsSnap, progSnap, dietSnap, logsSnap] = await Promise.all(fetches);
+      const profile = settingsSnap?.data()?.profile || {};
+      const activeProgram = progSnap?.docs?.[0]?.data() || null;
+      const activeDiet = dietSnap?.docs?.[0]?.data() || null;
+      const dailyLogs = logsSnap?.docs?.map(d => d.data()) || [];
+
       const aiResult = await analyzeCheckProgress({
-        prevCheck: prev || null,
-        newCheck: { date, weight, measurements, photos: photoUrls }
+        newCheck: { date, weight, body_fat, muscle_mass, measurements, photos: photoUrls, notes: data.notes },
+        allChecks: checks,
+        profile,
+        dailyLogs,
+        activeProgram,
+        activeDiet
       });
       if (aiResult.success) {
         await setDoc(doc(db,'users',getUserId(),'checks',id), { ai_analysis: aiResult.analysis }, { merge: true });

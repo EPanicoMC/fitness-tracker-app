@@ -1,5 +1,5 @@
 import { db, getUserId } from './firebase-config.js';
-import { doc, getDoc } from './firebase-config.js';
+import { doc, getDoc, getDocs, collection, query, orderBy, limit, where } from './firebase-config.js';
 
 let cachedKey = null;
 let busy = false;
@@ -549,35 +549,163 @@ JSON richiesto:
 }
 
 // ── Analizza progressione check ─────────────────────────────
-export async function analyzeCheckProgress({ prevCheck, newCheck }) {
+export async function analyzeCheckProgress({ newCheck, allChecks, profile, dailyLogs, activeProgram, activeDiet }) {
   const key = await getKey();
   if (!key) return { success: false, error: 'API key mancante' };
 
-  const getMs = (ms, key) => {
-    if (ms[key] != null) return ms[key];
-    if (key === 'bicep') { const v = [ms.bicep_l, ms.bicep_r].filter(x => x != null); return v.length ? v.reduce((a,b)=>a+b)/v.length : null; }
-    if (key === 'thigh') { const v = [ms.thigh_l, ms.thigh_r].filter(x => x != null); return v.length ? v.reduce((a,b)=>a+b)/v.length : null; }
+  const getMs = (ms, k) => {
+    if (!ms) return null;
+    if (ms[k] != null) return ms[k];
+    if (k === 'bicep') { const v = [ms.bicep_l, ms.bicep_r].filter(x => x != null); return v.length ? v.reduce((a,b)=>a+b)/v.length : null; }
+    if (k === 'thigh') { const v = [ms.thigh_l, ms.thigh_r].filter(x => x != null); return v.length ? v.reduce((a,b)=>a+b)/v.length : null; }
     return null;
   };
 
-  const fmtMeasures = (check) => {
-    const ms = check.measurements || {};
-    const parts = [];
-    if (check.weight) parts.push(`Peso: ${check.weight}kg`);
-    if (ms.shoulders) parts.push(`Spalle: ${ms.shoulders}cm`);
-    if (ms.chest) parts.push(`Petto: ${ms.chest}cm`);
-    if (ms.waist) parts.push(`Vita: ${ms.waist}cm`);
-    const arm = getMs(ms, 'bicep'); if (arm != null) parts.push(`Braccia: ${arm.toFixed(1)}cm`);
-    const leg = getMs(ms, 'thigh'); if (leg != null) parts.push(`Gambe: ${leg.toFixed(1)}cm`);
-    return parts.join(', ') || 'nessuna misura';
+  const fmtCheck = (c) => {
+    const ms = c.measurements || {};
+    const p = [];
+    if (c.weight) p.push(`Peso:${c.weight}kg`);
+    if (c.body_fat) p.push(`BF:${c.body_fat}%`);
+    if (c.muscle_mass) p.push(`MM:${c.muscle_mass}%`);
+    ['shoulders','chest','waist','bicep','thigh'].forEach(k => {
+      const v = getMs(ms, k);
+      if (v != null) p.push(`${k}:${v.toFixed(1)}cm`);
+    });
+    return p.join(', ') || 'nessuna misura';
   };
 
-  let promptText = `Sei un coach personale esperto. Analizza la progressione corporea in italiano, sii diretto e motivante.`;
-  if (prevCheck) {
-    promptText += `\n\nCheck PRECEDENTE (${prevCheck.date}): ${fmtMeasures(prevCheck)}`;
+  // Profilo e contesto
+  const prof = profile || {};
+  let age = '';
+  if (prof.dob) {
+    const dob = new Date(prof.dob);
+    const now = new Date();
+    age = now.getFullYear() - dob.getFullYear();
+    const m = now.getMonth() - dob.getMonth();
+    if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age--;
   }
-  promptText += `\n\nCheck ATTUALE (${newCheck.date}): ${fmtMeasures(newCheck)}`;
-  promptText += `\n\nRispondi in max 120 parole con: 1) cosa è migliorato 2) cosa tenere d'occhio 3) un consiglio concreto. Usa un tono positivo e professionale.`;
+
+  const prevCheck = (allChecks || []).find(c => c.date < newCheck.date);
+  const daysSinceLastCheck = prevCheck
+    ? Math.round((new Date(newCheck.date) - new Date(prevCheck.date)) / 86400000)
+    : null;
+
+  // Storico check (ultimi 10)
+  const checkHistory = (allChecks || [])
+    .filter(c => c.date <= newCheck.date)
+    .slice(0, 10)
+    .map(c => `${c.date}: ${fmtCheck(c)}${c.notes ? ` [Note: ${c.notes}]` : ''}`)
+    .join('\n');
+
+  // Analisi daily_logs nel periodo tra i due check
+  const logs = dailyLogs || [];
+  let logsSection = '';
+  if (logs.length > 0) {
+    const totalDays = logs.length;
+    const avgKcal = Math.round(logs.reduce((s, l) => s + (l.nutrition?.totals?.kcal || 0), 0) / totalDays);
+    const avgProtein = Math.round(logs.reduce((s, l) => s + (l.nutrition?.totals?.protein || 0), 0) / totalDays);
+    const avgCarbs = Math.round(logs.reduce((s, l) => s + (l.nutrition?.totals?.carbs || 0), 0) / totalDays);
+    const avgFats = Math.round(logs.reduce((s, l) => s + (l.nutrition?.totals?.fats || 0), 0) / totalDays);
+    const trainingDays = logs.filter(l => l.is_training_day).length;
+    const workoutsDone = logs.filter(l => l.workout?.completed).length;
+    const avgSteps = Math.round(logs.reduce((s, l) => s + (l.steps || 0), 0) / totalDays);
+    const daysLogged = logs.filter(l => (l.nutrition?.totals?.kcal || 0) > 0).length;
+
+    // Note rilevanti dai daily logs
+    const relevantNotes = logs
+      .filter(l => l.daily_note && l.daily_note.trim())
+      .map(l => `${l.date}: ${l.daily_note.trim().substring(0, 80)}`)
+      .slice(0, 5);
+
+    logsSection = `
+═══ PERIODO TRA I CHECK (${totalDays} giorni) ═══
+Giorni loggati: ${daysLogged}/${totalDays}
+Media giornaliera: ${avgKcal} kcal | P:${avgProtein}g C:${avgCarbs}g F:${avgFats}g
+Giorni allenamento previsti: ${trainingDays} | Completati: ${workoutsDone}
+Aderenza allenamento: ${trainingDays > 0 ? Math.round((workoutsDone / trainingDays) * 100) : 0}%
+Passi medi: ${avgSteps}/giorno
+${relevantNotes.length ? 'Note periodo:\n' + relevantNotes.join('\n') : ''}`;
+  }
+
+  // Dieta attiva
+  let dietSection = '';
+  if (activeDiet) {
+    const on = activeDiet.day_on;
+    const off = activeDiet.day_off;
+    dietSection = `
+═══ DIETA ATTIVA: ${activeDiet.name || '—'} ═══
+Obiettivo: ${activeDiet.objective || '—'}
+ON:  ${on?.kcal || '?'} kcal | P:${on?.protein || '?'}g C:${on?.carbs || '?'}g F:${on?.fats || '?'}g
+OFF: ${off?.kcal || '?'} kcal | P:${off?.protein || '?'}g C:${off?.carbs || '?'}g F:${off?.fats || '?'}g`;
+  }
+
+  // Programma attivo
+  let programSection = '';
+  if (activeProgram) {
+    const schedule = activeProgram.schedule || {};
+    const sessioni = Object.entries(schedule)
+      .filter(([, s]) => s)
+      .map(([day, s]) => `${day}: ${typeof s === 'string' ? s : s.name || '?'} (${s.exercises?.length || 0} es.)`)
+      .join(' | ');
+    programSection = `
+═══ SCHEDA ATTIVA: ${activeProgram.name || '—'} ═══
+Obiettivo: ${activeProgram.objective || '—'}
+Sessioni: ${sessioni}`;
+  }
+
+  // Prompt principale
+  let promptText = `Sei KOVA Coach, un preparatore atletico e nutrizionista d'élite. Devi analizzare un check corporeo con la precisione e la profondità di un vero coach professionista. NON essere generico, NON essere scontato, NON dare consigli banali. Sii analitico, critico e specifico sui dati.
+
+═══ PROFILO ATLETA ═══
+Nome: ${prof.name || '—'} | Sesso: ${prof.sex === 'M' ? 'Maschio' : prof.sex === 'F' ? 'Femmina' : '—'} | Età: ${age || '—'} anni | Altezza: ${prof.height || '—'} cm
+Peso target: ${prof.weight_target || '—'} kg | BF% target: ${prof.fat_target || '—'}%
+
+═══ STORICO CHECK (dal più recente) ═══
+${checkHistory || 'Primo check in assoluto'}
+
+═══ CHECK ATTUALE (${newCheck.date}) ═══
+${fmtCheck(newCheck)}
+${newCheck.notes ? `Note utente: "${newCheck.notes}"` : 'Nessuna nota'}
+${daysSinceLastCheck ? `Giorni dall'ultimo check: ${daysSinceLastCheck}` : 'Primo check — nessun confronto disponibile'}
+${logsSection}${dietSection}${programSection}
+
+═══ REGOLE VINCOLANTI ═══
+1. Analisi COMMISURATA al tempo trascorso: se sono passati 7 giorni non aspettarti stravolgimenti, se ne sono passati 30 puoi essere più critico.
+2. Valuta i TREND, non solo il delta singolo. Se il peso cala costantemente da 3 check, è diverso da un calo isolato.
+3. Correla le misure tra loro: vita che scende + peso stabile = probabile ricomposizione. Peso che sale + braccia/petto che crescono in bulk = coerente.
+4. Se l'aderenza alla dieta è bassa, DILLO CHIARAMENTE. Se gli allenamenti sono stati saltati, CRITICALO.
+5. Per le foto: analizza visivamente composizione corporea, distribuzione grasso, definizione muscolare, postura. Confronta con foto precedenti se disponibili.
+6. Il verdetto (PROSEGUI/MODIFICA) deve essere MOTIVATO con numeri e dati, non generico.
+7. Valuta se la scheda e la dieta sono coerenti con l'obiettivo (cut/bulk/recomp) e con i risultati ottenuti.
+8. Se è il primo check, dai una valutazione di partenza onesta e stabilisci baseline chiare.
+9. Tono: professionale, diretto, analitico. Come un coach pagato 200€/h che non può permettersi di essere vago.
+
+═══ FORMATO RISPOSTA (JSON obbligatorio) ═══
+Rispondi SOLO con un JSON valido, nessun testo prima o dopo:
+{
+  "analisi": {
+    "titolo": "Titolo sintetico del check (es: 'Ricomposizione in corso', 'Stallo peso — attenzione', 'Bulk produttivo')",
+    "body_review": "Analisi dettagliata 200-300 parole. Parti dalla composizione corporea visibile nelle foto (se presenti), poi valuta le misure nel contesto dello storico. Collega alimentazione e allenamento ai risultati. Sii specifico con i numeri. Usa **grassetto** per i dati chiave.",
+    "misure_focus": [
+      { "zona": "Nome zona", "valore": "XXcm", "delta": "+/-Xcm vs precedente", "trend": "in crescita/calo/stabile da N check", "giudizio": "ottimo/buono/attenzione/critico" }
+    ],
+    "body_score": 7.5,
+    "tempo_valutazione": "Valutazione su N giorni"
+  },
+  "andamento": {
+    "positivi": ["Punto forte specifico con dati", "..."],
+    "negativi": ["Punto critico specifico con dati", "..."],
+    "aderenza_giudizio": "eccellente/buona/sufficiente/scarsa/insufficiente",
+    "nota_allenamento": "Valutazione specifica su aderenza e coerenza allenamento con obiettivo"
+  },
+  "piano": {
+    "verdetto": "PROSEGUI|MODIFICA DIETA|MODIFICA SCHEDA|MODIFICA ENTRAMBI",
+    "motivazione": "Motivazione del verdetto con riferimento ai dati (2-3 frasi)",
+    "azioni": ["Azione specifica 1", "Azione specifica 2", "Azione specifica 3"],
+    "prossimo_check_consigliato": "tra X giorni"
+  }
+}
+misure_focus: una entry per ogni zona misurata. body_score: da 1 a 10 (valutazione complessiva progressi). Se primo check senza confronto, metti delta e trend "baseline".`;
 
   const parts = [{ text: promptText }];
 
@@ -595,16 +723,50 @@ export async function analyzeCheckProgress({ prevCheck, newCheck }) {
             reader.onloadend = () => resolve(reader.result.split(',')[1]);
             reader.readAsDataURL(blob);
           });
-          if (v) parts.push({ text: `[Foto: ${v}]` });
+          if (v) parts.push({ text: `[Foto check ${newCheck.date} — vista: ${v}]` });
           parts.push({ inlineData: { mimeType: blob.type || 'image/jpeg', data: base64 } });
         }
       } catch(e) { console.warn('Photo fetch for AI failed:', e); }
     }
+
+    // Foto check precedente per confronto visivo
+    if (prevCheck?.photos?.length) {
+      parts.push({ text: `\n[Foto check PRECEDENTE (${prevCheck.date}) per confronto visivo:]` });
+      for (const photo of prevCheck.photos.slice(0, 3)) {
+        const u = typeof photo === 'string' ? photo : photo?.url;
+        const v = typeof photo === 'object' ? photo?.view : null;
+        if (!u) continue;
+        try {
+          const resp = await fetch(u);
+          if (resp.ok) {
+            const blob = await resp.blob();
+            const base64 = await new Promise(resolve => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve(reader.result.split(',')[1]);
+              reader.readAsDataURL(blob);
+            });
+            if (v) parts.push({ text: `[Foto precedente — vista: ${v}]` });
+            parts.push({ inlineData: { mimeType: blob.type || 'image/jpeg', data: base64 } });
+          }
+        } catch(e) { console.warn('Prev photo fetch failed:', e); }
+      }
+    }
   }
 
-  const res = await callGemini(key, null, { temperature: 0.7, maxOutputTokens: 512, parts });
+  const res = await callGemini(key, null, { temperature: 0.5, maxOutputTokens: 2048, parts });
   if (!res.success) return { success: false, error: 'Analisi non disponibile' };
-  return { success: true, analysis: res.text };
+
+  // Parse JSON response
+  const raw = res.text;
+  const s1 = raw.indexOf('{');
+  const s2 = raw.lastIndexOf('}');
+  if (s1 !== -1 && s2 !== -1) {
+    try {
+      const parsed = JSON.parse(raw.slice(s1, s2 + 1));
+      return { success: true, analysis: JSON.stringify(parsed) };
+    } catch(e) { /* fallthrough */ }
+  }
+  return { success: true, analysis: raw.trim() };
 }
 
 // ── Report settimanale AI (con dati ricchi per giorno) ──────
