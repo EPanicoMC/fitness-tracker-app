@@ -183,7 +183,7 @@ async function generateForSession(idx) {
   log(`[${session.date}] Generando feedback... (storico: ${sessionHistory.length} sessioni)`, 'pre-info');
 
   try {
-    const { generateSessionFeedbackAI, generateExerciseTipsAI } = await import('./js/gemini.js');
+    const { generateSessionFeedbackAI, generateExerciseTipsAI } = await import('./js/gemini.js?v=' + Date.now());
 
     const [feedbackResult, tipsResult] = await Promise.all([
       generateSessionFeedbackAI({
