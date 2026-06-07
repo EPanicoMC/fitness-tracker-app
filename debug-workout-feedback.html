@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Debug Workout Feedback</title>
+  <style>
+    body { font-family: monospace; background: #111; color: #eee; padding: 20px; font-size: 13px; }
+    pre { background: #1a1a2e; padding: 12px; border-radius: 8px; overflow-x: auto; white-space: pre-wrap; max-height: 400px; overflow-y: auto; }
+    button { background: #7c6fff; color: #fff; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; margin: 4px; }
+    button:hover { opacity: 0.85; }
+    button.orange { background: #ff6a00; }
+    button.green { background: #00dc78; color: #111; }
+    button.red { background: #ff453a; }
+    .section { margin: 20px 0; padding: 16px; border: 1px solid #333; border-radius: 12px; }
+    h2 { color: #7c6fff; }
+    #log { max-height: 700px; overflow-y: auto; }
+    .pre-ok { border-left: 3px solid #00dc78; }
+    .pre-err { border-left: 3px solid #ff453a; }
+    .pre-info { border-left: 3px solid #7c6fff; }
+    .pre-warn { border-left: 3px solid #ff6a00; }
+  </style>
+</head>
+<body>
+<h1>Debug Workout Feedback — Backfill Coach AI</h1>
+
+<div class="section">
+  <h2>1. Carica dati utente</h2>
+  <input id="uid" value="enricopanico@gmail.com" style="width:400px;padding:8px;background:#222;color:#eee;border:1px solid #444;border-radius:6px">
+  <br><br>
+  <button onclick="loadAll()">Carica Tutto (Logs + Profilo + Programma)</button>
+</div>
+
+<div class="section">
+  <h2>2. Sessioni trovate questa settimana</h2>
+  <div id="sessions-list" style="color:var(--t2)">Clicca "Carica Tutto" prima</div>
+</div>
+
+<div class="section">
+  <h2>3. Genera & Salva Feedback</h2>
+  <button class="orange" onclick="generateAllFeedback()">Genera Feedback per TUTTE le sessioni</button>
+  <button class="green" onclick="saveAllResults()">Salva TUTTI i risultati su Firestore</button>
+  <br><br>
+  <small style="color:#888">Oppure genera singolarmente cliccando sui bottoni accanto a ogni sessione</small>
+</div>
+
+<div class="section">
+  <h2>Log</h2>
+  <div id="log"></div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import {
+  getFirestore, collection, doc, getDoc, getDocs, setDoc, query, orderBy, limit
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+import {
+  getAuth, onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyC7bm-wJAScIaQfelZkGP4C7kw_FKI4Gv8",
+  authDomain: "fitness-tracker-app-b6792.firebaseapp.com",
+  projectId: "fitness-tracker-app-b6792",
+  storageBucket: "fitness-tracker-app-b6792.firebasestorage.app",
+  messagingSenderId: "458513477303",
+  appId: "1:458513477303:web:11c284ec5505e12a846732"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
+
+let allLogs = [];
+let weekSessions = [];
+let profile = {};
+let programData = null;
+let results = {};
+
+function log(msg, cls = '') {
+  const el = document.getElementById('log');
+  const pre = document.createElement('pre');
+  pre.className = cls;
+  pre.textContent = typeof msg === 'string' ? msg : JSON.stringify(msg, null, 2);
+  el.prepend(pre);
+}
+
+function getUid() { return document.getElementById('uid').value.trim(); }
+
+function getWeekStart() {
+  const now = new Date();
+  const day = now.getDay();
+  const diff = day === 0 ? 6 : day - 1;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - diff);
+  return monday.toISOString().slice(0, 10);
+}
+
+onAuthStateChanged(auth, u => {
+  if (u) log('Autenticato come: ' + u.email, 'pre-ok');
+  else log('NON autenticato — vai su index.html e logga prima', 'pre-err');
+});
+
+window.loadAll = async function() {
+  const uid = getUid();
+  if (!uid) { log('Inserisci email utente', 'pre-err'); return; }
+
+  log(`Caricamento dati per ${uid}...`, 'pre-info');
+
+  try {
+    const [logsSnap, profileSnap, progSnap] = await Promise.all([
+      getDocs(query(collection(db, 'users', uid, 'daily_logs'), orderBy('date', 'desc'), limit(60))),
+      getDoc(doc(db, 'users', uid, 'settings', 'app')),
+      getDocs(collection(db, 'users', uid, 'programs'))
+    ]);
+
+    allLogs = logsSnap.docs.map(d => d.data());
+    profile = profileSnap.exists() ? (profileSnap.data().profile || profileSnap.data()) : {};
+    const activeDoc = progSnap.docs.find(d => d.data().active);
+    programData = activeDoc ? activeDoc.data() : null;
+
+    log(`Logs: ${allLogs.length} | Profilo: ${profile.name || '?'} | Programma: ${programData?.name || 'nessuno'}`, 'pre-ok');
+
+    // Filtra sessioni completate di questa settimana
+    const weekStart = getWeekStart();
+    weekSessions = allLogs.filter(l =>
+      l.date >= weekStart && l.workout?.completed
+    );
+
+    log(`Sessioni completate questa settimana (da ${weekStart}): ${weekSessions.length}`, 'pre-info');
+
+    // Render lista sessioni
+    const listEl = document.getElementById('sessions-list');
+    if (weekSessions.length === 0) {
+      listEl.innerHTML = '<p style="color:#ff6a00">Nessuna sessione completata questa settimana</p>';
+      return;
+    }
+
+    listEl.innerHTML = weekSessions.map((s, i) => {
+      const w = s.workout;
+      const vol = (w.exercises || []).reduce((a, ex) =>
+        a + ex.sets.reduce((b, set) => b + (parseFloat(set.weight) || 0) * (parseFloat(set.reps) || 1), 0), 0);
+      const rpes = (w.exercises || []).map(e => e.rpe).filter(r => r != null);
+      const avgRpe = rpes.length ? (rpes.reduce((a, b) => a + b) / rpes.length).toFixed(1) : '–';
+      const hasFeedback = !!w.coach_feedback;
+      return `
+        <div style="padding:10px 14px;margin:6px 0;background:#1a1a2e;border-radius:8px;display:flex;justify-content:space-between;align-items:center;border-left:3px solid ${hasFeedback ? '#00dc78' : '#444'}">
+          <div>
+            <div style="font-weight:700;font-size:14px">${s.date} — ${w.session_name || w.session_day}</div>
+            <div style="font-size:12px;color:#888;margin-top:2px">
+              ${w.exercises?.length || 0} esercizi · ${Math.round(vol)}kg vol · RPE medio ${avgRpe}
+              ${w.notes ? ' · "' + w.notes + '"' : ''}
+              ${hasFeedback ? ' · <span style="color:#00dc78">FEEDBACK GIA PRESENTE</span>' : ''}
+            </div>
+          </div>
+          <div>
+            <button onclick="generateSingle(${i})" style="font-size:12px;padding:6px 12px">Genera</button>
+            <button class="green" onclick="saveSingle(${i})" style="font-size:12px;padding:6px 12px">Salva</button>
+          </div>
+        </div>`;
+    }).join('');
+
+  } catch(e) {
+    log('ERRORE: ' + e.message, 'pre-err');
+    console.error(e);
+  }
+};
+
+async function generateForSession(idx) {
+  const session = weekSessions[idx];
+  if (!session) { log(`Sessione ${idx} non trovata`, 'pre-err'); return null; }
+
+  const w = session.workout;
+  const dayKey = w.session_day;
+
+  // Storico sessioni dello stesso tipo
+  const sessionHistory = allLogs
+    .filter(l => l.date !== session.date && l.workout?.completed && l.workout?.session_day === dayKey)
+    .slice(0, 5);
+
+  const previousSession = sessionHistory[0]?.workout || null;
+
+  log(`[${session.date}] Generando feedback... (storico: ${sessionHistory.length} sessioni)`, 'pre-info');
+
+  try {
+    const { generateSessionFeedbackAI, generateExerciseTipsAI } = await import('./js/gemini.js');
+
+    const [feedbackResult, tipsResult] = await Promise.all([
+      generateSessionFeedbackAI({
+        currentSession: w,
+        previousSession,
+        sessionHistory,
+        profile,
+        programObjective: programData?.objective || null,
+        programName: programData?.name || null
+      }),
+      generateExerciseTipsAI({
+        exercises: w.exercises,
+        previousExercises: previousSession?.exercises || [],
+        sessionHistory,
+        programObjective: programData?.objective || null,
+        profileWeight: profile?.current_weight || profile?.weight || null
+      })
+    ]);
+
+    const result = { date: session.date, dayKey, feedbackResult, tipsResult };
+    results[session.date] = result;
+
+    if (feedbackResult?.success) {
+      log(`[${session.date}] FEEDBACK OK:`, 'pre-ok');
+      log(feedbackResult.feedback);
+    } else {
+      log(`[${session.date}] FEEDBACK ERRORE: ${feedbackResult?.error}`, 'pre-err');
+    }
+
+    if (tipsResult?.success && tipsResult.tips?.length) {
+      log(`[${session.date}] TIPS OK (${tipsResult.tips.length} suggerimenti):`, 'pre-ok');
+      tipsResult.tips.forEach(t => {
+        log(`  ${t.exercise_name}: [${t.suggestion_type}] ${t.suggestion_text} — ${t.detail}`);
+      });
+    } else if (tipsResult?.success) {
+      log(`[${session.date}] TIPS: nessun suggerimento generato`, 'pre-warn');
+    } else {
+      log(`[${session.date}] TIPS ERRORE: ${tipsResult?.error}`, 'pre-err');
+    }
+
+    return result;
+  } catch(e) {
+    log(`[${session.date}] ERRORE: ${e.message}`, 'pre-err');
+    console.error(e);
+    return null;
+  }
+}
+
+window.generateSingle = async function(idx) {
+  await generateForSession(idx);
+};
+
+window.generateAllFeedback = async function() {
+  log(`=== GENERAZIONE BATCH: ${weekSessions.length} sessioni ===`, 'pre-info');
+  for (let i = 0; i < weekSessions.length; i++) {
+    await generateForSession(i);
+    if (i < weekSessions.length - 1) {
+      log('Attendo 2s per evitare rate limit...', 'pre-info');
+      await new Promise(r => setTimeout(r, 2000));
+    }
+  }
+  log(`=== GENERAZIONE COMPLETATA ===`, 'pre-ok');
+};
+
+async function saveForSession(date) {
+  const r = results[date];
+  if (!r) { log(`Nessun risultato per ${date}. Genera prima!`, 'pre-err'); return; }
+
+  const uid = getUid();
+
+  try {
+    // Salva feedback nel daily_log
+    if (r.feedbackResult?.success && r.feedbackResult.feedback) {
+      const fb = { ...r.feedbackResult.feedback, generated_at: new Date().toISOString() };
+      await setDoc(doc(db, 'users', uid, 'daily_logs', date),
+        { workout: { coach_feedback: fb } }, { merge: true });
+      log(`[${date}] Feedback salvato in daily_logs`, 'pre-ok');
+    }
+
+    // Salva tips nel last_sessions
+    if (r.tipsResult?.success && r.tipsResult.tips?.length && r.dayKey) {
+      const mergeData = { exercise_tips: r.tipsResult.tips };
+      if (r.feedbackResult?.success && r.feedbackResult.feedback) {
+        mergeData.last_coach_summary = {
+          summary_title: r.feedbackResult.feedback.summary_title,
+          prossima_sessione: r.feedbackResult.feedback.prossima_sessione
+        };
+      }
+      await setDoc(doc(db, 'users', uid, 'last_sessions', r.dayKey),
+        mergeData, { merge: true });
+      log(`[${date}] Tips + summary salvati in last_sessions/${r.dayKey}`, 'pre-ok');
+    }
+  } catch(e) {
+    log(`[${date}] ERRORE salvataggio: ${e.message}`, 'pre-err');
+  }
+}
+
+window.saveSingle = async function(idx) {
+  const session = weekSessions[idx];
+  if (!session) return;
+  await saveForSession(session.date);
+};
+
+window.saveAllResults = async function() {
+  const dates = Object.keys(results);
+  if (dates.length === 0) { log('Nessun risultato da salvare. Genera prima!', 'pre-err'); return; }
+  log(`=== SALVATAGGIO: ${dates.length} risultati ===`, 'pre-info');
+  for (const date of dates) {
+    await saveForSession(date);
+  }
+  log(`=== SALVATAGGIO COMPLETATO ===`, 'pre-ok');
+};
+</script>
+</body>
+</html>

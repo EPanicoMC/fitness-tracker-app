@@ -49,6 +49,14 @@ async function callGemini(key, prompt, opts = {}) {
   return { success: false, error: 'Tutti i modelli occupati. Riprova tra 1 minuto.' };
 }
 
+// ── Alimenti legittimamente a 0 kcal ────────────────────────
+const ZERO_KCAL_ALLOWED = ['acqua', 'water', 'caffe nero', 'caffè nero', 'te senza zucchero', 'tè senza zucchero', 'te verde', 'tè verde'];
+
+function isZeroKcalAllowed(name) {
+  const n = (name || '').toLowerCase().replace(/\s*\(\d+g?\)/g, '').trim();
+  return ZERO_KCAL_ALLOWED.some(z => n.includes(z));
+}
+
 // ── Validazione coerenza macro ↔ kcal ───────────────────────
 function validateAndFixMacros(parsed) {
   let protein = Math.max(0, Number(parsed.protein) || 0);
@@ -56,6 +64,19 @@ function validateAndFixMacros(parsed) {
   let fats    = Math.max(0, Number(parsed.fats)    || 0);
   let items   = parsed.items || [];
   const declaredKcal = Math.max(0, Number(parsed.kcal) || 0);
+
+  // 0. Guardia anti-zero: se tutto è 0 ma ci sono item con nomi reali → sospetto
+  let _zeroSuspect = false;
+  if (declaredKcal === 0 && protein === 0 && carbs === 0 && fats === 0) {
+    const hasRealItems = items.some(i => i.name && !isZeroKcalAllowed(i.name));
+    if (hasRealItems) _zeroSuspect = true;
+  }
+  // Anche per singoli item: se un item ha grams > 0 e kcal = 0 e non è acqua/caffè
+  for (const item of items) {
+    if ((Number(item.grams) || 0) > 0 && (Number(item.kcal) || 0) === 0 && !isZeroKcalAllowed(item.name)) {
+      _zeroSuspect = true;
+    }
+  }
 
   // 1. Cross-check items breakdown vs totali (se la somma items è più affidabile)
   if (items.length > 0) {
@@ -88,7 +109,8 @@ function validateAndFixMacros(parsed) {
     carbs: parseFloat(carbs.toFixed(1)),
     fats: parseFloat(fats.toFixed(1)),
     items,
-    _corrected: corrected
+    _corrected: corrected,
+    _zeroSuspect
   };
 }
 
@@ -128,7 +150,35 @@ const REFERENCE_TABLE = `Valori nutrizionali di riferimento per 100g di prodotto
    LEGUMI:
    - Ceci (secchi/crudi): ~330 kcal, 50g Carb, 20g Pro, 6g Fat → COTTI: ~120 kcal, 20g Carb, 8g Pro, 2g Fat
    - Lenticchie (secche/crude): ~290 kcal, 46g Carb, 24g Pro, 2g Fat → COTTE: ~120 kcal, 20g Carb, 8g Pro, 2g Fat
-   - Fagioli (secchi/crudi): ~280 kcal, 45g Carb, 22g Pro, 2g Fat → COTTI: ~100 kcal, 17g Carb, 7g Pro, 1g Fat`;
+   - Fagioli (secchi/crudi): ~280 kcal, 45g Carb, 22g Pro, 2g Fat → COTTI: ~100 kcal, 17g Carb, 7g Pro, 1g Fat
+   BEVANDE ALCOLICHE (le kcal dell'alcol = 7 kcal/g, NON sono 0!):
+   - Vino rosso/bianco (1 calice ~125ml): ~85 kcal, 3g Carb, 0g Pro, 0g Fat
+   - Birra (330ml lattina): ~140 kcal, 12g Carb, 1g Pro, 0g Fat
+   - Birra (500ml pinta): ~210 kcal, 18g Carb, 2g Pro, 0g Fat
+   - Spritz (1 bicchiere ~180ml): ~120 kcal, 8g Carb, 0g Pro, 0g Fat
+   - Prosecco (1 calice ~125ml): ~80 kcal, 2g Carb, 0g Pro, 0g Fat
+   - Amaro/digestivo (1 bicchierino ~40ml): ~70 kcal, 8g Carb, 0g Pro, 0g Fat
+   BEVANDE NON ALCOLICHE:
+   - Succo d'arancia (200ml): ~90 kcal, 22g Carb, 1g Pro, 0g Fat
+   - Coca Cola/bibita (330ml): ~140 kcal, 35g Carb, 0g Pro, 0g Fat
+   - Cappuccino (150ml): ~80 kcal, 6g Carb, 4g Pro, 4g Fat
+   - Latte macchiato (200ml): ~100 kcal, 8g Carb, 5g Pro, 5g Fat
+   SNACK E DOLCI:
+   - Cioccolato fondente: ~540 kcal, 50g Carb, 5g Pro, 35g Fat
+   - Cioccolato al latte: ~540 kcal, 55g Carb, 8g Pro, 30g Fat
+   - Biscotti secchi: ~440 kcal, 75g Carb, 7g Pro, 13g Fat
+   - Gelato (crema): ~200 kcal, 25g Carb, 4g Pro, 10g Fat
+   - Cornetto/Brioche: ~350 kcal, 45g Carb, 8g Pro, 15g Fat (1 cornetto ~60g = ~210 kcal)
+   - Crackers/Grissini: ~430 kcal, 70g Carb, 10g Pro, 12g Fat
+   CONDIMENTI E SALSE:
+   - Maionese: ~680 kcal, 1g Carb, 1g Pro, 75g Fat
+   - Ketchup: ~100 kcal, 25g Carb, 1g Pro, 0g Fat
+   - Miele: ~310 kcal, 80g Carb, 0g Pro, 0g Fat
+   - Marmellata: ~250 kcal, 60g Carb, 0g Pro, 0g Fat
+   CIBI PREPARATI COMUNI:
+   - Pizza Margherita (1 pizza intera ~300g): ~720 kcal, 90g Carb, 25g Pro, 28g Fat
+   - Hamburger completo (~250g): ~550 kcal, 35g Carb, 25g Pro, 30g Fat
+   - Insalata mista condita: ~50 kcal/100g, 5g Carb, 2g Pro, 2g Fat`;
 
 const COOKING_RULE = `REGOLA COTTURA (FONDAMENTALE):
 DEFAULT = CRUDO. Se l'utente scrive una quantità in grammi SENZA specificare "cotto/bollito/lessato/al vapore", usa SEMPRE i valori del prodotto CRUDO.
@@ -152,6 +202,15 @@ async function loadFoodLibrary() {
     _foodLibLoaded = true;
   }
   return _foodLibCache;
+}
+
+function sanityCheckPer100g(per100g) {
+  const kcal = Number(per100g.kcal) || 0;
+  if (kcal <= 0 || kcal > 950) return false;
+  const computed = ((per100g.protein || 0) * 4) + ((per100g.carbs || 0) * 4) + ((per100g.fats || 0) * 9);
+  if (computed > 0 && Math.abs(computed - kcal) / Math.max(kcal, 1) > 0.25) return false;
+  if ((per100g.protein || 0) > 90) return false;
+  return true;
 }
 
 async function saveToFoodLibrary(name, per100g) {
@@ -256,18 +315,72 @@ export async function saveAICorrection(foodName, aiValues, userValues) {
   }
 }
 
+// ── Numeri italiani scritti → valore numerico ───────────────
+const ITALIAN_NUMBERS = {
+  'un': 1, 'uno': 1, 'una': 1, 'due': 2, 'tre': 3, 'quattro': 4,
+  'cinque': 5, 'sei': 6, 'sette': 7, 'otto': 8, 'nove': 9, 'dieci': 10,
+  'mezzo': 0.5, 'mezza': 0.5
+};
+
+// ── Unità non in grammi → grammi approssimativi ─────────────
+const UNIT_TO_GRAMS = {
+  'calice': 125, 'calici': 125,
+  'bicchiere': 200, 'bicchieri': 200,
+  'fetta': 40, 'fette': 40,
+  'cucchiaio': 10, 'cucchiai': 10, 'cucchiaino': 5, 'cucchiaini': 5,
+  'porzione': 150, 'porzioni': 150,
+  'pezzo': 100, 'pezzi': 100,
+  'tazza': 250, 'tazze': 250,
+  'lattina': 330, 'lattine': 330,
+  'bottiglia': 750, 'bottiglie': 750,
+  'piatto': 200, 'piatti': 200,
+  'ciotola': 250, 'ciotole': 250,
+  'manciata': 30, 'manciate': 30,
+  'scatoletta': 80, 'scatolette': 80,
+};
+
+// ── Item contabili senza unità (grammi per singolo pezzo) ───
+const COUNTABLE_ITEMS = {
+  'uovo': 60, 'uova': 60,
+  'banana': 120, 'banane': 120,
+  'mela': 180, 'mele': 180,
+  'pera': 180, 'pere': 180,
+  'arancia': 200, 'arance': 200,
+  'kiwi': 80,
+  'brioche': 60, 'cornetto': 60, 'cornetti': 60,
+  'fetta biscottata': 10, 'fette biscottate': 10,
+  'biscotto': 8, 'biscotti': 8,
+  'galletta': 8, 'gallette': 8,
+  'wasa': 12,
+  'pizza': 300, 'pizze': 300,
+  'hamburger': 250,
+};
+
+const IT_NUM_PATTERN = 'un[oa]?|due|tre|quattro|cinque|sei|sette|otto|nove|dieci|mezz[oa]';
+const UNIT_PATTERN = Object.keys(UNIT_TO_GRAMS).join('|');
+
 // ── Input Parser & Food Library Matching ────────────────────
 function parseStructuredInput(text) {
-  // Match patterns: "150g pollo", "pollo 150g", "150 g riso", "2 uova", "1 cucchiaio olio"
-  const patterns = [
+  const items = [];
+  const seen = new Set();
+
+  function addItem(qty, name) {
+    const n = name.trim().toLowerCase();
+    if (qty > 0 && n.length > 1 && !seen.has(n)) {
+      seen.add(n);
+      items.push({ qty, name: name.trim() });
+    }
+  }
+
+  // Fase 1: pattern grammi (originali) — hanno priorità
+  const gramPatterns = [
     /(\d+(?:[.,]\d+)?)\s*g\s+(?:di\s+)?([a-zàèéìòùA-Z\s]+?)(?=[,;\n]|$)/gi,
     /([a-zàèéìòùA-Z\s]+?)\s+(\d+(?:[.,]\d+)?)\s*g(?=[,;\n]|$)/gi,
   ];
 
-  const items = [];
-  const seen = new Set();
+  const matchedRanges = [];
 
-  for (const pattern of patterns) {
+  for (const pattern of gramPatterns) {
     let match;
     while ((match = pattern.exec(text)) !== null) {
       let qty, name;
@@ -278,10 +391,48 @@ function parseStructuredInput(text) {
         name = match[1].trim();
         qty = parseFloat(match[2].replace(',', '.'));
       }
-      if (qty > 0 && name.length > 1 && !seen.has(name.toLowerCase())) {
-        seen.add(name.toLowerCase());
-        items.push({ qty, name: name.trim() });
+      if (qty > 0 && name.length > 1) {
+        addItem(qty, name);
+        matchedRanges.push([match.index, match.index + match[0].length]);
       }
+    }
+  }
+
+  // Helper: controlla se una posizione è già stata matchata dai pattern grammi
+  function isAlreadyMatched(idx, len) {
+    return matchedRanges.some(([s, e]) => idx < e && (idx + len) > s);
+  }
+
+  // Fase 2: numero + unità + cibo — "2 calici di vino", "un bicchiere di latte"
+  const unitRegex = new RegExp(
+    `(?:(?:(\\d+(?:[.,]\\d+)?)|(${IT_NUM_PATTERN}))\\s+)(${UNIT_PATTERN})\\s+(?:di\\s+)?([a-zàèéìòùA-Z][a-zàèéìòùA-Z\\s]*?)(?=[,;\\.\\n]|$)`, 'gi'
+  );
+  let match;
+  while ((match = unitRegex.exec(text)) !== null) {
+    if (isAlreadyMatched(match.index, match[0].length)) continue;
+    const numStr = match[1] || match[2];
+    const count = match[1] ? parseFloat(match[1].replace(',', '.')) : (ITALIAN_NUMBERS[numStr.toLowerCase()] || 1);
+    const unit = match[3].toLowerCase();
+    const foodName = match[4].trim();
+    const gramsPerUnit = UNIT_TO_GRAMS[unit] || 100;
+    addItem(count * gramsPerUnit, foodName);
+    matchedRanges.push([match.index, match.index + match[0].length]);
+  }
+
+  // Fase 3: numero + cibo contabile — "2 uova", "una banana", "3 cornetti"
+  const countableRegex = new RegExp(
+    `(?:(\\d+)|(${IT_NUM_PATTERN}))\\s+([a-zàèéìòùA-Z][a-zàèéìòùA-Z\\s]*?)(?=[,;\\.\\n]|$)`, 'gi'
+  );
+  while ((match = countableRegex.exec(text)) !== null) {
+    if (isAlreadyMatched(match.index, match[0].length)) continue;
+    const numStr = match[1] || match[2];
+    const count = match[1] ? parseFloat(match[1]) : (ITALIAN_NUMBERS[numStr.toLowerCase()] || 1);
+    const foodName = match[3].trim();
+    const foodKey = foodName.toLowerCase().replace(/\s+/g, ' ');
+    const gramsPerPiece = COUNTABLE_ITEMS[foodKey];
+    if (gramsPerPiece) {
+      addItem(count * gramsPerPiece, foodName);
+      matchedRanges.push([match.index, match.index + match[0].length]);
     }
   }
 
@@ -362,7 +513,8 @@ ${itemsText}
 
 Se trovi errori evidenti (>15% di scostamento dai valori reali), correggi SOLO quelli e ricalcola il totale.
 Se tutto è corretto, rispondi con lo stesso JSON invariato.
-Rispondi SOLO con un JSON valido (includi SEMPRE il campo grams per ogni item):
+IMPORTANTE: Mantieni lo STESSO ordine degli ingredienti nella risposta. Non riordinare.
+Rispondi SOLO con un JSON valido (includi SEMPRE il campo grams e name per ogni item):
 {"kcal":0,"protein":0,"carbs":0,"fats":0,"items":[{"name":"...","grams":0,"kcal":0,"protein":0,"carbs":0,"fats":0}]}`;
 
   try {
@@ -424,18 +576,23 @@ export async function calcMacrosFromText(text) {
 Pasto: "${text}"
 
 Regole fondamentali e VINCOLANTI:
-1. kcal = (Proteine * 4) + (Carboidrati * 4) + (Grassi * 9). PRIMA calcola i macro, POI le kcal dalla formula.
+1. kcal = (Proteine * 4) + (Carboidrati * 4) + (Grassi * 9). PRIMA calcola i macro per ogni singolo ingrediente, POI sommali, POI verifica con la formula.
 2. ${COOKING_RULE}
 3. Porzioni standard se non specificate: piatto di pasta = 80g crudo, petto di pollo = 150g crudo, 1 cucchiaio d'olio = 10g, uovo medio = 60g, 1 frutto = 150g, bicchiere di latte = 200ml.
+3b. Porzioni bevande: 1 calice di vino = 125ml, 1 bicchiere = 200ml, 1 birra/lattina = 330ml, 1 bottiglia birra = 500ml, 1 spritz = 180ml.
+3c. Porzioni italiane: 1 fetta di pane = 40g, 1 cucchiaio = 10g, 1 cucchiaino = 5g, 1 cornetto/brioche = 60g, 1 fetta biscottata = 10g.
+3d. Numeri italiani: "un/uno/una" = 1, "due" = 2, "tre" = 3, "quattro" = 4, "cinque" = 5, "mezzo/mezza" = 0.5.
 4. ${REFERENCE_TABLE}
 5. SANITY CHECK: ingrediente < 200g NON può avere > 900 kcal (eccezione: olio/burro/frutta secca). Proteine/100g mai > 35g (eccezione: whey).
-6. Output SOLO JSON valido, no markdown.
+6. REGOLA ZERO (CRITICA): NESSUN alimento reale ha 0 kcal (eccezioni: acqua, caffè nero senza zucchero). Se un ingrediente è un cibo o bevanda reale, DEVE avere kcal > 0. Se non conosci i valori esatti, STIMA comunque un valore plausibile, MAI 0.
+7. BEVANDE ALCOLICHE: l'alcol ha 7 kcal per grammo. Un calice di vino (~125ml) = ~85 kcal. Una birra (330ml) = ~140 kcal. Non restituire MAI 0 kcal per bevande alcoliche. I macro delle bevande alcoliche sono principalmente carboidrati, con proteine e grassi a 0.
+8. Output SOLO JSON valido, no markdown, no commenti, no spiegazioni.
 ${libraryHints}${correctionHints}
 
 JSON richiesto:
 {
   "kcal": 0, "protein": 0, "carbs": 0, "fats": 0,
-  "items": [{ "name": "Alimento (XXXg)", "grams": 0, "kcal": 0, "protein": 0, "carbs": 0, "fats": 0 }]
+  "items": [{ "name": "Alimento (XXXg o XXXml)", "grams": 0, "kcal": 0, "protein": 0, "carbs": 0, "fats": 0 }]
 }`;
 
     const res = await callGemini(key, prompt, { temperature: 0.1, maxOutputTokens: 1024 });
@@ -479,58 +636,102 @@ JSON richiesto:
       parsed.fats = totals.fats;
     }
 
-    // 7. Double-pass verification for complex meals
+    // 7. Double-pass verification for complex meals (merge per nome, non per indice)
     if (parsed.items?.length >= 2 && (parsed.kcal || 0) > 300) {
       const verified = await verifyMacrosAI(parsed.items, key);
-      if (verified) {
-        // Merge: keep library items untouched, use verified for AI-only items
-        if (verified.items?.length > 0) {
-          for (let i = 0; i < verified.items.length; i++) {
-            const origItem = parsed.items[i];
-            if (origItem?._source === 'library') continue; // don't override library
-            if (verified.items[i]) {
-              // Preserve grams and _source from original if verified doesn't have them
-              parsed.items[i] = {
-                grams: origItem?.grams,
-                _source: origItem?._source,
-                ...verified.items[i]
-              };
+      if (verified?.items?.length > 0) {
+        for (const verItem of verified.items) {
+          const verNorm = normalize(verItem.name || '');
+          // Trova l'item originale corrispondente per nome
+          let matchIdx = parsed.items.findIndex(orig => {
+            if (orig._source === 'library') return false;
+            const origNorm = normalize(orig.name || '');
+            return origNorm === verNorm ||
+                   origNorm.includes(verNorm) ||
+                   verNorm.includes(origNorm) ||
+                   verNorm.split(/\s+/).some(w => w.length >= 4 && origNorm.includes(w));
+          });
+          // Fallback: se nessun match per nome, prova per indice
+          if (matchIdx < 0) {
+            const verIdx = verified.items.indexOf(verItem);
+            if (verIdx < parsed.items.length && parsed.items[verIdx]?._source !== 'library') {
+              matchIdx = verIdx;
             }
           }
-          // Recalc totals
-          const vTotals = parsed.items.reduce((a, it) => ({
-            kcal: a.kcal + (Number(it.kcal) || 0),
-            protein: a.protein + (Number(it.protein) || 0),
-            carbs: a.carbs + (Number(it.carbs) || 0),
-            fats: a.fats + (Number(it.fats) || 0)
-          }), { kcal: 0, protein: 0, carbs: 0, fats: 0 });
-          parsed.kcal = vTotals.kcal;
-          parsed.protein = vTotals.protein;
-          parsed.carbs = vTotals.carbs;
-          parsed.fats = vTotals.fats;
+          if (matchIdx >= 0) {
+            parsed.items[matchIdx] = {
+              grams: parsed.items[matchIdx]?.grams,
+              _source: parsed.items[matchIdx]?._source,
+              ...verItem
+            };
+          }
         }
+        // Recalc totals
+        const vTotals = parsed.items.reduce((a, it) => ({
+          kcal: a.kcal + (Number(it.kcal) || 0),
+          protein: a.protein + (Number(it.protein) || 0),
+          carbs: a.carbs + (Number(it.carbs) || 0),
+          fats: a.fats + (Number(it.fats) || 0)
+        }), { kcal: 0, protein: 0, carbs: 0, fats: 0 });
+        parsed.kcal = vTotals.kcal;
+        parsed.protein = vTotals.protein;
+        parsed.carbs = vTotals.carbs;
+        parsed.fats = vTotals.fats;
       }
     }
 
     // 8. Final validation
-    const validated = validateAndFixMacros(parsed);
+    let validated = validateAndFixMacros(parsed);
 
-    // 9. Auto-save new foods to library (fire-and-forget)
-    if (parsed.items?.length > 0) {
+    // 8b. Retry: se risultato zero-suspect, riprova UNA volta con prompt più esplicito
+    if (validated._zeroSuspect) {
+      const zeroItems = (validated.items || [])
+        .filter(i => (Number(i.kcal) || 0) === 0 && i.name && !isZeroKcalAllowed(i.name))
+        .map(i => i.name);
+      if (zeroItems.length > 0) {
+        const retryPrompt = `CORREZIONE URGENTE: la stima precedente per "${text}" ha restituito 0 kcal per: ${zeroItems.join(', ')}.
+Questo è IMPOSSIBILE — ogni alimento e bevanda reale ha calorie > 0.
+${REFERENCE_TABLE}
+Ricalcola CORRETTAMENTE i macronutrienti per il pasto completo.
+Regola: kcal = (Proteine * 4) + (Carboidrati * 4) + (Grassi * 9). L'alcol ha 7 kcal/g.
+1 calice di vino = ~85 kcal. 1 birra (330ml) = ~140 kcal. 1 banana = ~108 kcal.
+Rispondi SOLO con JSON valido:
+{"kcal":0,"protein":0,"carbs":0,"fats":0,"items":[{"name":"...","grams":0,"kcal":0,"protein":0,"carbs":0,"fats":0}]}`;
+        try {
+          const retryRes = await callGemini(key, retryPrompt, { temperature: 0.1, maxOutputTokens: 1024 });
+          if (retryRes.success) {
+            const rRaw = retryRes.text;
+            const rs1 = rRaw.indexOf('{');
+            const rs2 = rRaw.lastIndexOf('}');
+            if (rs1 !== -1 && rs2 !== -1) {
+              const retryParsed = JSON.parse(rRaw.slice(rs1, rs2 + 1));
+              const retryValidated = validateAndFixMacros(retryParsed);
+              if (!retryValidated._zeroSuspect && retryValidated.kcal > 0) {
+                parsed = retryParsed;
+                validated = retryValidated;
+              }
+            }
+          }
+        } catch(e) { /* retry fallito, usa il risultato originale */ }
+      }
+    }
+
+    // 9. Auto-save new foods to library (fire-and-forget, con sanity check)
+    if (parsed.items?.length > 0 && !validated._zeroSuspect) {
       for (const item of parsed.items) {
-        if (item._source === 'library') continue; // already in library
+        if (item._source === 'library') continue;
         const grams = Number(item.grams) || 0;
         if (grams >= 10 && (Number(item.kcal) || 0) > 0) {
           const per100g = {
             kcal: (item.kcal / grams) * 100,
-            protein: (item.protein / grams) * 100,
-            carbs: (item.carbs / grams) * 100,
-            fats: (item.fats / grams) * 100
+            protein: ((item.protein || 0) / grams) * 100,
+            carbs: ((item.carbs || 0) / grams) * 100,
+            fats: ((item.fats || 0) / grams) * 100
           };
-          // Clean the name (remove grams info)
+          if (!sanityCheckPer100g(per100g)) continue;
           const cleanName = (item.name || '').replace(/\s*\(\d+g?\)/g, '').replace(/\d+g\s*/g, '').trim();
           if (cleanName.length >= 2) {
-            saveToFoodLibrary(cleanName, per100g); // fire-and-forget
+            saveToFoodLibrary(cleanName, per100g);
           }
         }
       }
@@ -904,8 +1105,8 @@ Struttura JSON richiesta:
     const parsed = JSON.parse(raw.slice(s1, s2 + 1));
     const validated = validateAndFixMacros(parsed);
 
-    // Auto-save scanned items to food library (fire-and-forget)
-    if (parsed.items?.length > 0) {
+    // Auto-save scanned items to food library (con sanity check)
+    if (parsed.items?.length > 0 && !validated._zeroSuspect) {
       for (const item of parsed.items) {
         const grams = Number(item.grams) || 0;
         if (grams >= 10 && (Number(item.kcal) || 0) > 0) {
@@ -915,6 +1116,7 @@ Struttura JSON richiesta:
             carbs: ((item.carbs || 0) / grams) * 100,
             fats: ((item.fats || 0) / grams) * 100
           };
+          if (!sanityCheckPer100g(per100g)) continue;
           const cleanName = (item.name || '').replace(/\s*\(\d+g?\)/g, '').replace(/\d+g\s*/g, '').trim();
           if (cleanName.length >= 2) {
             saveToFoodLibrary(cleanName, per100g);
@@ -1260,5 +1462,220 @@ insights: 3-5 elementi. Scegli i più rilevanti tra: macro (proteine/carbs/grass
     } catch(e) { /* fallthrough */ }
   }
   return { success: true, advice: raw.trim(), insights: [] };
+}
+
+// ── Coach Feedback Post-Sessione ─────────────────────────────
+export async function generateSessionFeedbackAI({ currentSession, previousSession, sessionHistory, profile, programObjective, programName }) {
+  const key = await getKey();
+  if (!key) return { success: false, error: 'API key mancante.' };
+
+  const cur = currentSession;
+  const prev = previousSession;
+
+  // Pre-calcola delta volume
+  const curVol = (cur.exercises || []).reduce((a, ex) =>
+    a + ex.sets.reduce((b, s) => b + (parseFloat(s.weight) || 0) * (parseFloat(s.reps) || 1), 0), 0);
+  const prevVol = prev ? (prev.exercises || []).reduce((a, ex) =>
+    a + ex.sets.reduce((b, s) => b + (parseFloat(s.weight) || 0) * (parseFloat(s.reps) || 1), 0), 0) : null;
+  const volDelta = prevVol != null ? `${curVol > prevVol ? '+' : ''}${Math.round(curVol - prevVol)}kg (${prevVol > 0 ? ((curVol - prevVol) / prevVol * 100).toFixed(1) : '0'}%)` : 'Prima sessione';
+
+  // Pre-calcola delta per esercizio
+  const exDeltas = (cur.exercises || []).map(ex => {
+    const prevEx = prev?.exercises?.find(e => e.name === ex.name);
+    const curMaxW = Math.max(...ex.sets.map(s => parseFloat(s.weight) || 0));
+    const prevMaxW = prevEx ? Math.max(...prevEx.sets.map(s => parseFloat(s.weight) || 0)) : null;
+    const curTotalReps = ex.sets.reduce((a, s) => a + (parseInt(s.reps) || 0), 0);
+    const prevTotalReps = prevEx ? prevEx.sets.reduce((a, s) => a + (parseInt(s.reps) || 0), 0) : null;
+
+    // Trend storico per esercizio (ultime 3-5 sessioni)
+    const histWeights = (sessionHistory || []).map(h => {
+      const hEx = h.workout?.exercises?.find(e => e.name === ex.name);
+      return hEx ? Math.max(...hEx.sets.map(s => parseFloat(s.weight) || 0)) : null;
+    }).filter(w => w != null);
+
+    return {
+      nome: ex.name,
+      rpe: ex.rpe || '–',
+      peso_max: curMaxW,
+      peso_prev: prevMaxW,
+      delta_peso: prevMaxW != null ? `${curMaxW > prevMaxW ? '+' : ''}${(curMaxW - prevMaxW).toFixed(1)}kg` : 'Prima volta',
+      reps_totali: curTotalReps,
+      reps_prev: prevTotalReps,
+      serie_completate: `${ex.sets.filter(s => s.done !== false).length}/${ex.sets.length}`,
+      trend_peso: histWeights.length > 1 ? histWeights.map(w => w + 'kg').join(' → ') : null
+    };
+  });
+
+  // RPE medio
+  const rpes = (cur.exercises || []).map(e => e.rpe).filter(r => r != null);
+  const avgRpe = rpes.length > 0 ? (rpes.reduce((a, b) => a + b) / rpes.length).toFixed(1) : 'Non inserito';
+  const prevRpes = prev ? (prev.exercises || []).map(e => e.rpe).filter(r => r != null) : [];
+  const prevAvgRpe = prevRpes.length > 0 ? (prevRpes.reduce((a, b) => a + b) / prevRpes.length).toFixed(1) : null;
+
+  const prompt = `Sei KOVA Coach, un personal trainer d'élite. Analizza questa sessione di allenamento e dai un feedback ONESTO e strutturato.
+
+NON ESSERE UN YES-MAN. Se la sessione è stata mediocre, dillo. Se l'atleta ha fatto bene, riconoscilo con misura. Basati SOLO sui dati, non inventare.
+
+═══ PROFILO ATLETA ═══
+Nome: ${profile?.name || 'Atleta'} | ${profile?.sex === 'M' ? 'Uomo' : profile?.sex === 'F' ? 'Donna' : ''} ${profile?.age ? profile.age + ' anni' : ''}
+Peso: ${profile?.current_weight ? profile.current_weight + 'kg' : '?'}
+Obiettivo programma: ${programObjective ? programObjective.toUpperCase() : 'Non specificato'}${programName ? ' (' + programName + ')' : ''}
+
+═══ SESSIONE ATTUALE: ${cur.session_name || cur.session_day || 'Allenamento'} ═══
+Volume totale: ${Math.round(curVol)}kg | Delta vs precedente: ${volDelta}
+RPE medio: ${avgRpe}${prevAvgRpe ? ' (prec: ' + prevAvgRpe + ')' : ''}
+Note atleta: ${cur.notes || 'Nessuna'}
+
+═══ DETTAGLIO ESERCIZI ═══
+${exDeltas.map(d => `• ${d.nome}: peso max ${d.peso_max}kg (${d.delta_peso}), RPE ${d.rpe}, reps tot ${d.reps_totali}${d.reps_prev != null ? ' (prec: ' + d.reps_prev + ')' : ''}, serie ${d.serie_completate}${d.trend_peso ? ', trend: ' + d.trend_peso : ''}`).join('\n')}
+
+═══ STORICO (ultime ${(sessionHistory || []).length} sessioni stesso tipo) ═══
+${(sessionHistory || []).length > 0 ? sessionHistory.map(h => {
+    const hVol = (h.workout?.exercises || []).reduce((a, ex) => a + ex.sets.reduce((b, s) => b + (parseFloat(s.weight) || 0) * (parseFloat(s.reps) || 1), 0), 0);
+    const hRpes = (h.workout?.exercises || []).map(e => e.rpe).filter(r => r != null);
+    const hAvg = hRpes.length ? (hRpes.reduce((a, b) => a + b) / hRpes.length).toFixed(1) : '–';
+    return `${h.date}: vol ${Math.round(hVol)}kg, RPE medio ${hAvg}`;
+  }).join('\n') : 'Nessuno storico disponibile'}
+
+═══ REGOLE ═══
+1. Sii diretto e onesto. Se l'RPE è basso e non ha aumentato peso = non sta spingendo abbastanza. Dillo.
+2. Se RPE alto su tutti gli esercizi = rischio sovraccarico. Dillo.
+3. Se le note dell'atleta menzionano dolore/fastidio, integralo nel feedback.
+4. Considera l'obiettivo del programma (cut/bulk/recomp) nella valutazione.
+5. In CUT: RPE più alto è accettabile, il focus è mantenere i carichi.
+6. In BULK: se non c'è progressione di peso/reps, è un problema.
+7. "da_migliorare" NON deve essere generico tipo "continua così". Deve essere specifico e azionabile.
+8. Se è la prima sessione (nessuno storico), valuta solo in base ai dati assoluti e alle note.
+
+═══ FORMATO RISPOSTA (JSON obbligatorio) ═══
+Rispondi SOLO con un JSON valido:
+{
+  "summary_title": "Frase breve e incisiva (max 8 parole)",
+  "overall_rating": "eccellente|buono|sufficiente|da_migliorare",
+  "body": "Analisi 150-200 parole. Usa **grassetto** per numeri chiave. Sii diretto, no giri di parole.",
+  "positivi": ["punto 1 specifico", "punto 2 specifico"],
+  "da_migliorare": ["azione specifica 1", "azione specifica 2"],
+  "prossima_sessione": "Un consiglio strategico concreto per la prossima sessione di questo tipo (max 30 parole)"
+}`;
+
+  try {
+    const result = await callGemini(key, prompt, { temperature: 0.5, maxOutputTokens: 1200 });
+    if (!result.success) return { success: false, error: result.error };
+
+    const raw = result.text;
+    const s1 = raw.indexOf('{');
+    const s2 = raw.lastIndexOf('}');
+    if (s1 !== -1 && s2 !== -1) {
+      try {
+        const parsed = JSON.parse(raw.slice(s1, s2 + 1));
+        return {
+          success: true,
+          feedback: {
+            summary_title: parsed.summary_title || 'Feedback sessione',
+            overall_rating: parsed.overall_rating || 'buono',
+            body: parsed.body || '',
+            positivi: Array.isArray(parsed.positivi) ? parsed.positivi : [],
+            da_migliorare: Array.isArray(parsed.da_migliorare) ? parsed.da_migliorare : [],
+            prossima_sessione: parsed.prossima_sessione || ''
+          }
+        };
+      } catch(e) { /* fallthrough */ }
+    }
+    return { success: false, error: 'Risposta AI non valida.' };
+  } catch(e) {
+    return { success: false, error: e.message };
+  }
+}
+
+// ── Suggerimenti Smart per Esercizio ─────────────────────────
+export async function generateExerciseTipsAI({ exercises, previousExercises, sessionHistory, programObjective, profileWeight }) {
+  const key = await getKey();
+  if (!key) return { success: false, error: 'API key mancante.' };
+
+  // Costruisci contesto per ogni esercizio
+  const exContext = (exercises || []).map(ex => {
+    const prevEx = (previousExercises || []).find(e => e.name === ex.name);
+    const curMaxW = Math.max(...ex.sets.map(s => parseFloat(s.weight) || 0));
+    const prevMaxW = prevEx ? Math.max(...prevEx.sets.map(s => parseFloat(s.weight) || 0)) : null;
+    const curReps = ex.sets.map(s => parseInt(s.reps) || 0);
+    const prevReps = prevEx ? prevEx.sets.map(s => parseInt(s.reps) || 0) : [];
+
+    // Trend storico (ultime 3-5 sessioni)
+    const history = (sessionHistory || []).map(h => {
+      const hEx = h.workout?.exercises?.find(e => e.name === ex.name);
+      if (!hEx) return null;
+      return {
+        peso_max: Math.max(...hEx.sets.map(s => parseFloat(s.weight) || 0)),
+        rpe: hEx.rpe || null,
+        reps: hEx.sets.map(s => parseInt(s.reps) || 0)
+      };
+    }).filter(Boolean);
+
+    const stagnante = history.length >= 3 && history.every(h => Math.abs(h.peso_max - curMaxW) < 1);
+
+    return `• ${ex.name}:
+  Oggi: ${ex.sets.map(s => `${s.weight}kg×${s.reps}`).join(', ')} | RPE: ${ex.rpe || '–'}
+  Precedente: ${prevEx ? prevEx.sets.map(s => `${s.weight}kg×${s.reps}`).join(', ') + ' | RPE: ' + (prevEx.rpe || '–') : 'Prima volta'}
+  Trend (${history.length} sessioni): ${history.length > 0 ? history.map(h => `${h.peso_max}kg RPE${h.rpe || '?'}`).join(' → ') : 'Nessuno'}
+  Serie completate: ${ex.sets.filter(s => s.done !== false).length}/${ex.sets.length}
+  Stagnazione: ${stagnante ? 'SÌ (3+ sessioni stesso peso)' : 'No'}`;
+  }).join('\n\n');
+
+  const prompt = `Sei KOVA Coach. Per ogni esercizio, genera un suggerimento SMART per la prossima sessione.
+
+═══ CONTESTO ═══
+Peso atleta: ${profileWeight ? profileWeight + 'kg' : '?'}
+Obiettivo: ${programObjective ? programObjective.toUpperCase() : 'Non specificato'}
+
+═══ ESERCIZI ═══
+${exContext}
+
+═══ REGOLE VINCOLANTI ═══
+1. Incrementi peso SOLO in multipli di 2.5kg (piastre standard).
+2. Mai suggerire >5kg di aumento in una sessione.
+3. Se RPE >= 9: priorità RECUPERO. Suggerisci mantenere peso o ridurre, MAI aumentare.
+4. Se RPE <= 6.5 per 2+ sessioni: suggerisci aumento peso specifico (es. "Passa a 77.5kg").
+5. Se RPE 7-8.5 e peso stabile: suggerisci micro-progressione (reps o peso).
+6. Se stagnazione 3+ sessioni: suggerisci variazione tecnica (tempo, pausa, range of motion), NON solo "aumenta peso".
+7. In CUT: la priorità è MANTENERE i carichi, non aumentare. Se mantiene, è positivo.
+8. In BULK: la progressione è attesa. Se non progredisce, segnalalo.
+9. Se non c'è nulla di significativo da dire → NON includere quell'esercizio. L'array può avere meno elementi degli esercizi.
+10. "maintain" è un suggerimento valido — non forzare sempre un cambiamento.
+11. Ogni suggerimento deve essere CONCRETO e NUMERICO dove possibile.
+
+═══ FORMATO RISPOSTA (JSON obbligatorio) ═══
+Rispondi SOLO con un JSON valido:
+{
+  "tips": [
+    {
+      "exercise_name": "Nome Esercizio (esatto come nell'input)",
+      "suggestion_type": "increase_weight|increase_reps|tempo_change|technique|deload|maintain",
+      "suggestion_text": "Frase breve e diretta (max 10 parole)",
+      "detail": "Spiegazione 1-2 frasi del perché",
+      "based_on": "Dato specifico su cui si basa (es. 'RPE 6.5 stabile da 3 sessioni')"
+    }
+  ]
+}`;
+
+  try {
+    const result = await callGemini(key, prompt, { temperature: 0.3, maxOutputTokens: 1024 });
+    if (!result.success) return { success: false, error: result.error };
+
+    const raw = result.text;
+    const s1 = raw.indexOf('{');
+    const s2 = raw.lastIndexOf('}');
+    if (s1 !== -1 && s2 !== -1) {
+      try {
+        const parsed = JSON.parse(raw.slice(s1, s2 + 1));
+        return {
+          success: true,
+          tips: Array.isArray(parsed.tips) ? parsed.tips : []
+        };
+      } catch(e) { /* fallthrough */ }
+    }
+    return { success: false, error: 'Risposta AI non valida.' };
+  } catch(e) {
+    return { success: false, error: e.message };
+  }
 }
 

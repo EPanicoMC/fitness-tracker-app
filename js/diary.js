@@ -188,6 +188,16 @@ window.closeDay = function() {
   renderGrid(currentMonth.getFullYear(), currentMonth.getMonth());
 };
 
+window.toggleCoachFeedback = function(dateStr) {
+  const body = document.getElementById(`fb-body-${dateStr}`);
+  const toggle = document.getElementById(`fb-toggle-${dateStr}`);
+  if (body && toggle) {
+    const show = body.style.display === 'none';
+    body.style.display = show ? 'block' : 'none';
+    toggle.textContent = show ? '▲ Nascondi' : '▼ Mostra';
+  }
+};
+
 window.showDay = async function(dateStr) {
   const det = document.getElementById('day-detail');
 
@@ -284,6 +294,29 @@ window.showDay = async function(dateStr) {
     const vol = (w.exercises || []).reduce((a, ex) =>
       a + ex.sets.reduce((b, s) => b + (parseFloat(s.weight) || 0) * (parseFloat(s.reps) || 1), 0), 0);
     const notesHtml = w.notes ? `<div style="font-size:12px;color:var(--t3);margin-top:4px;font-style:italic">"${w.notes}"</div>` : '';
+    // Coach feedback collassabile
+    let feedbackHtml = '';
+    if (w.coach_feedback) {
+      const fb = w.coach_feedback;
+      const ratingBadge = { eccellente: '🟢', buono: '🔵', sufficiente: '🟡', da_migliorare: '🟠' };
+      feedbackHtml = `
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.05)">
+          <div style="cursor:pointer;display:flex;align-items:center;gap:8px" onclick="window.toggleCoachFeedback('${dateStr}')">
+            <span style="font-size:14px">🧠</span>
+            <span style="font-size:12px;font-weight:700;color:var(--accent)">Coach Feedback</span>
+            <span style="font-size:11px">${ratingBadge[fb.overall_rating] || '🔵'} ${fb.overall_rating}</span>
+            <span id="fb-toggle-${dateStr}" style="font-size:11px;color:var(--t3);margin-left:auto">▼ Mostra</span>
+          </div>
+          <div id="fb-body-${dateStr}" style="display:none;margin-top:8px;padding:10px;background:rgba(124,111,255,0.04);border-radius:8px;border:1px solid rgba(124,111,255,0.1)">
+            <div style="font-size:13px;font-weight:800;margin-bottom:6px">${fb.summary_title}</div>
+            <div style="font-size:12px;color:var(--t2);line-height:1.6;margin-bottom:8px">${fb.body}</div>
+            ${fb.positivi?.length ? `<div style="margin-bottom:6px">${fb.positivi.map(p => `<div style="font-size:11px;color:var(--green);padding:1px 0">✅ ${p}</div>`).join('')}</div>` : ''}
+            ${fb.da_migliorare?.length ? `<div style="margin-bottom:6px">${fb.da_migliorare.map(p => `<div style="font-size:11px;color:var(--orange);padding:1px 0">⚠️ ${p}</div>`).join('')}</div>` : ''}
+            ${fb.prossima_sessione ? `<div style="font-size:11px;color:var(--accent);font-weight:600">📌 ${fb.prossima_sessione}</div>` : ''}
+          </div>
+        </div>`;
+    }
+
     workoutHtml = `
       <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
@@ -297,6 +330,7 @@ window.showDay = async function(dateStr) {
             <button class="btn-del" style="padding:5px 10px;font-size:11px" onclick="confirmDeleteWorkout('${dateStr}')">🗑️</button>
           </div>
         </div>
+        ${feedbackHtml}
       </div>`;
   } else if (isOn) {
     workoutHtml = `<div style="margin-top:12px;font-size:13px;color:var(--orange)">⚠️ Sessione non completata</div>`;

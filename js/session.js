@@ -14,6 +14,7 @@ function calcTotalVolume() {
     }, 0), 0);
 }
 import { AutoComplete, saveToLibrary } from './autocomplete.js';
+import { generateSessionFeedbackAI, generateExerciseTipsAI } from './gemini.js';
 
 const TODAY = getTodayString();
 let programData      = null;
@@ -142,10 +143,15 @@ window.startWithSession = async function(dayKey) {
   const lastDocRef = doc(db, 'users', getUserId(), 'last_sessions', dayKey);
   const dailyLogsQuery = query(collection(db, 'users', getUserId(), 'daily_logs'), orderBy('date', 'desc'), limit(20));
 
+  let exerciseTips = [];
+  let lastCoachSummary = null;
   try {
     const lastSnap = await getDoc(lastDocRef);
     if (lastSnap.exists()) {
-      prevLog = { workout: { exercises: lastSnap.data().exercises } };
+      const lastData = lastSnap.data();
+      prevLog = { workout: { exercises: lastData.exercises } };
+      exerciseTips = lastData.exercise_tips || [];
+      lastCoachSummary = lastData.last_coach_summary || null;
     } else {
       const snap = await getDocs(dailyLogsQuery);
       for (const d of snap.docs) {
@@ -159,19 +165,21 @@ window.startWithSession = async function(dayKey) {
     console.warn('Pre-fill load error:', e.message);
   }
 
-  buildExState(session, dayKey, prevLog);
-  sessionData = { dayKey, name: session.name, cardio: session.cardio || null };
+  buildExState(session, dayKey, prevLog, exerciseTips);
+  sessionData = { dayKey, name: session.name, cardio: session.cardio || null, lastCoachSummary };
   launchActive(session.name, `${DAYS_IT[dayKey]} · ${session.exercises?.length||0} esercizi`);
 };
 
-function buildExState(session, dayKey, prevLog) {
+function buildExState(session, dayKey, prevLog, tips) {
   exState = (session.exercises || []).map(ex => {
     const prevEx   = prevLog?.workout?.exercises?.find(e => e.name === ex.name);
+    const tip      = (tips || []).find(t => t.exercise_name?.toLowerCase() === ex.name?.toLowerCase()) || null;
     const setCount = typeof ex.sets === 'number' ? ex.sets : (ex.sets?.length || 3);
     return {
       name: ex.name,
       rest_seconds: ex.rest_seconds || 90,
       notes: ex.notes || '',
+      tip,
       sets: Array.from({ length: setCount }, (_, i) => {
         const prevSet = prevEx?.sets?.[i];
         const w = prevSet?.weight ?? (ex.weight_per_set?.[i] || 0);
@@ -222,6 +230,27 @@ function launchActive(title, sub) {
   if (pauseBtn) pauseBtn.style.display = 'none';
   if (liveEl)   liveEl.style.display   = 'none';
   if (hintEl)   hintEl.style.display   = 'block';
+
+  // Mostra feedback coach della sessione precedente (se disponibile)
+  const coachContainer = document.getElementById('s-exercises');
+  if (sessionData?.lastCoachSummary) {
+    const cs = sessionData.lastCoachSummary;
+    const coachCard = document.createElement('div');
+    coachCard.id = 'last-coach-card';
+    coachCard.innerHTML = `
+      <div style="margin-bottom:12px;padding:10px 14px;background:rgba(124,111,255,0.06);border:1px solid rgba(124,111,255,0.12);border-radius:10px">
+        <div style="cursor:pointer;display:flex;align-items:center;gap:8px" onclick="const d=document.getElementById('lc-detail');d.style.display=d.style.display==='none'?'block':'none';this.querySelector('.lc-arr').textContent=d.style.display==='none'?'▼':'▲'">
+          <span style="font-size:14px">📋</span>
+          <span style="font-size:12px;font-weight:700;color:var(--accent)">Feedback ultima sessione</span>
+          <span class="lc-arr" style="font-size:11px;color:var(--t3);margin-left:auto">▼</span>
+        </div>
+        <div id="lc-detail" style="display:none;margin-top:8px">
+          <div style="font-size:13px;font-weight:700;color:var(--t1);margin-bottom:4px">${cs.summary_title}</div>
+          ${cs.prossima_sessione ? `<div style="font-size:12px;color:var(--t2)">📌 ${cs.prossima_sessione}</div>` : ''}
+        </div>
+      </div>`;
+    coachContainer.before(coachCard);
+  }
 
   renderExercises();
 }
@@ -297,6 +326,14 @@ function renderExCard(ex, ei) {
         </select>
       </div>
 
+      ${ex.tip ? `
+      <div style="margin:6px 0 10px;padding:8px 12px;background:rgba(124,111,255,0.08);border:1px solid rgba(124,111,255,0.15);border-radius:8px;font-size:12px;color:var(--t2);display:flex;align-items:flex-start;gap:8px">
+        <span style="font-size:14px;flex-shrink:0">🧠</span>
+        <div>
+          <div style="font-weight:700;color:var(--accent);font-size:11px;margin-bottom:2px">${ex.tip.suggestion_text}</div>
+          <div style="font-size:11px;color:var(--t3)">${ex.tip.detail}</div>
+        </div>
+      </div>` : ''}
       ${ex.notes ? `<div class="ex-note" id="enote-${ei}">${ex.notes}</div>` : ''}
       <div id="sets-wrap-${ei}">
         ${ex.sets.map((s, si) => renderSetRow(ex, ei, si, s)).join('')}
@@ -589,11 +626,11 @@ window.finishSession = async function() {
 
     showToast('🏁 Sessione completata! 💪');
 
-    // Calculate autoperiodization advice
+    // Autoperiodizzazione base
     const rpes = exState.map(ex => ex.rpe).filter(r => r != null);
     let adviceTitle = "Allenamento Completato!";
     let adviceText = "Ottimo lavoro! Continua così per massimizzare la costanza e superare i tuoi limiti.";
-    
+
     if (rpes.length > 0) {
       const avgRpe = rpes.reduce((a, b) => a + b) / rpes.length;
       if (avgRpe < 7) {
@@ -608,10 +645,95 @@ window.finishSession = async function() {
       }
     }
 
-    // Show beautiful advice modal before returning to home
+    // ── Coach AI Feedback (best-effort, non blocca il salvataggio) ──
+    let coachHtml = '';
+    try {
+      // Carica profilo e storico in parallelo
+      const [profileSnap, historySnap] = await Promise.all([
+        getDoc(doc(db, 'users', getUserId(), 'settings', 'app')),
+        getDocs(query(collection(db, 'users', getUserId(), 'daily_logs'), orderBy('date', 'desc'), limit(30)))
+      ]);
+      const profile = profileSnap.exists() ? profileSnap.data() : {};
+
+      // Storico sessioni dello stesso tipo (esclusa quella appena salvata)
+      const sessionHistory = historySnap.docs
+        .map(d => d.data())
+        .filter(l => l.date !== TODAY && l.workout?.completed && l.workout?.session_day === sessionData.dayKey)
+        .slice(0, 5);
+
+      const previousSession = sessionHistory[0]?.workout || null;
+
+      // Chiama entrambe le AI in parallelo con timeout 15s
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 15000));
+
+      const [feedbackResult, tipsResult] = await Promise.race([
+        Promise.all([
+          generateSessionFeedbackAI({
+            currentSession: workoutLog,
+            previousSession,
+            sessionHistory,
+            profile,
+            programObjective: programData?.objective || null,
+            programName: programData?.name || null
+          }),
+          generateExerciseTipsAI({
+            exercises: workoutLog.exercises,
+            previousExercises: previousSession?.exercises || [],
+            sessionHistory,
+            programObjective: programData?.objective || null,
+            profileWeight: profile?.current_weight || null
+          })
+        ]),
+        timeoutPromise
+      ]);
+
+      // Salva feedback nel daily_log
+      if (feedbackResult?.success && feedbackResult.feedback) {
+        const fb = feedbackResult.feedback;
+        fb.generated_at = new Date().toISOString();
+        await setDoc(doc(db, 'users', getUserId(), 'daily_logs', TODAY),
+          { workout: { coach_feedback: fb } }, { merge: true });
+
+        // Costruisci HTML per il modale
+        const ratingBadge = { eccellente: '🟢', buono: '🔵', sufficiente: '🟡', da_migliorare: '🟠' };
+        coachHtml = `
+          <div style="margin-top:16px;border-top:1px solid rgba(255,255,255,0.08);padding-top:14px">
+            <div style="cursor:pointer;display:flex;align-items:center;gap:8px;margin-bottom:8px" onclick="document.getElementById('coach-fb-detail').style.display = document.getElementById('coach-fb-detail').style.display === 'none' ? 'block' : 'none'; this.querySelector('.fb-arrow').textContent = document.getElementById('coach-fb-detail').style.display === 'none' ? '▼' : '▲'">
+              <span style="font-size:16px">🧠</span>
+              <span style="font-size:14px;font-weight:800;color:var(--accent)">Coach Feedback</span>
+              <span style="font-size:12px">${ratingBadge[fb.overall_rating] || '🔵'} ${fb.overall_rating}</span>
+              <span class="fb-arrow" style="font-size:11px;color:var(--t3);margin-left:auto">▼</span>
+            </div>
+            <div style="font-size:13px;font-weight:700;margin-bottom:6px">${fb.summary_title}</div>
+            <div id="coach-fb-detail" style="display:none">
+              <div style="font-size:13px;color:var(--t2);line-height:1.6;margin-bottom:10px">${fb.body}</div>
+              ${fb.positivi?.length ? fb.positivi.map(p => `<div style="font-size:12px;color:var(--green);padding:2px 0">✅ ${p}</div>`).join('') : ''}
+              ${fb.da_migliorare?.length ? fb.da_migliorare.map(p => `<div style="font-size:12px;color:var(--orange);padding:2px 0">⚠️ ${p}</div>`).join('') : ''}
+              ${fb.prossima_sessione ? `<div style="margin-top:8px;font-size:12px;color:var(--accent);font-weight:600">📌 ${fb.prossima_sessione}</div>` : ''}
+            </div>
+          </div>`;
+      }
+
+      // Salva tips e summary nel last_sessions
+      if (tipsResult?.success && tipsResult.tips?.length) {
+        const mergeData = { exercise_tips: tipsResult.tips };
+        if (feedbackResult?.success && feedbackResult.feedback) {
+          mergeData.last_coach_summary = {
+            summary_title: feedbackResult.feedback.summary_title,
+            prossima_sessione: feedbackResult.feedback.prossima_sessione
+          };
+        }
+        await setDoc(doc(db, 'users', getUserId(), 'last_sessions', sessionData.dayKey),
+          mergeData, { merge: true });
+      }
+
+    } catch(aiErr) {
+      console.warn('Coach AI non disponibile:', aiErr.message);
+    }
+
     showModal({
       title: adviceTitle,
-      text: adviceText,
+      text: adviceText + coachHtml,
       confirmLabel: 'Ok, andiamo! ⚡',
       onConfirm: () => { window.location.href = 'index.html'; }
     });
