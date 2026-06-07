@@ -1691,9 +1691,10 @@ window.openAddMeal = function(prefillData, editIndex) {
             const hasSlices = it.slices > 0;
             const remSlices = hasSlices ? (it.slices_remaining ?? it.slices) : null;
             const disabled = hasSlices && remSlices <= 0 ? 'disabled' : '';
+            const ownerTag = it._owner && it._owner !== getUserId() ? ` [${it._owner.split('@')[0]}]` : '';
             const label = hasSlices
-              ? `${it.name} (${remSlices}/${it.slices} fette)`
-              : it.name;
+              ? `${it.name}${ownerTag} (${remSlices}/${it.slices} fette)`
+              : `${it.name}${ownerTag}`;
             return `<option value="${fi}" ${disabled}>${label}</option>`;
           }).join('')}
         </select>
@@ -1915,25 +1916,25 @@ window.saveExtraMeal = async function(editIndex) {
   // Scala le fette dalla Dispensa se il pasto proviene da essa
   if (_selectedFridgeIdx >= 0 && fridgeItems[_selectedFridgeIdx]) {
     const fi = fridgeItems[_selectedFridgeIdx];
+    const fiOwner = fi._owner || getUserId();
     _selectedFridgeIdx = -1;
     if (fi.slices > 0) {
       const slicesUsed = parseInt(document.getElementById('am-fridge-slices')?.value) || 1;
       const newRem = Math.max(0, (fi.slices_remaining ?? fi.slices) - slicesUsed);
-      updateFridgeItem(fi.id, { slices_remaining: newRem }).then(() => {
-        const idx = fridgeItems.findIndex(x => x.id === fi.id);
+      updateFridgeItem(fi.id, { slices_remaining: newRem }, fiOwner).then(() => {
+        const idx = fridgeItems.findIndex(x => x.id === fi.id && x._owner === fiOwner);
         if (idx >= 0) fridgeItems[idx] = { ...fi, slices_remaining: newRem };
         if (newRem === 0) {
-          removeFridgeItem(fi.id).then(() => {
-            fridgeItems = fridgeItems.filter(x => x.id !== fi.id);
+          removeFridgeItem(fi.id, fiOwner).then(() => {
+            fridgeItems = fridgeItems.filter(x => !(x.id === fi.id && x._owner === fiOwner));
           }).catch(() => {});
           showToast('🎉 Ultime fette consumate! Piatto rimosso dalla Dispensa.');
         }
         buildMeals();
       }).catch(() => {});
     } else {
-      // Piatto senza fette: rimuovi dalla dispensa
-      removeFridgeItem(fi.id).then(() => {
-        fridgeItems = fridgeItems.filter(x => x.id !== fi.id);
+      removeFridgeItem(fi.id, fiOwner).then(() => {
+        fridgeItems = fridgeItems.filter(x => !(x.id === fi.id && x._owner === fiOwner));
         buildMeals();
       }).catch(() => {});
     }
@@ -2685,8 +2686,21 @@ window.refreshSmartAdvisor = async function(silent = false) {
 async function loadFridgeFromFirebase() {
   if (!getUserId()) return;
   try {
-    const snap = await getDocs(collection(db, 'users', getUserId(), 'fridge'));
-    fridgeItems = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const mySnap = await getDocs(collection(db, 'users', getUserId(), 'fridge'));
+    const myItems = mySnap.docs.map(d => ({ id: d.id, ...d.data(), _owner: getUserId() }));
+
+    let friendItems = [];
+    const friendEmail = appSettings?.friend_email?.trim().toLowerCase();
+    if (friendEmail && friendEmail !== getUserId()) {
+      try {
+        const fSnap = await getDocs(collection(db, 'users', friendEmail, 'fridge'));
+        friendItems = fSnap.docs.map(d => ({ id: d.id, ...d.data(), _owner: friendEmail }));
+      } catch(e) {
+        console.warn('Friend fridge load error:', e.message);
+      }
+    }
+
+    fridgeItems = [...myItems, ...friendItems];
     fridgeItems.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
   } catch(e) {
     console.warn('Fridge load error:', e.message);
@@ -2698,12 +2712,14 @@ async function saveFridgeItem(item) {
   return ref.id;
 }
 
-async function updateFridgeItem(id, data) {
-  await setDoc(doc(db, 'users', getUserId(), 'fridge', id), data, { merge: true });
+async function updateFridgeItem(id, data, owner) {
+  const ownerId = owner || getUserId();
+  await setDoc(doc(db, 'users', ownerId, 'fridge', id), data, { merge: true });
 }
 
-async function removeFridgeItem(id) {
-  await deleteDoc(doc(db, 'users', getUserId(), 'fridge', id));
+async function removeFridgeItem(id, owner) {
+  const ownerId = owner || getUserId();
+  await deleteDoc(doc(db, 'users', ownerId, 'fridge', id));
 }
 
 function buildFridgeHtml() {
@@ -2721,14 +2737,19 @@ function buildFridgeHtml() {
     const perSlicePro = hasSlices ? ((item.total_protein || 0) / totSlices).toFixed(1) : (item.total_protein || 0);
     const perSliceCarb = hasSlices ? ((item.total_carbs || 0) / totSlices).toFixed(1) : (item.total_carbs || 0);
     const perSliceFat = hasSlices ? ((item.total_fats || 0) / totSlices).toFixed(1) : (item.total_fats || 0);
+    const isFromFriend = item._owner && item._owner !== getUserId();
+    const friendLabel = isFromFriend ? item._owner.split('@')[0] : '';
     const statusText = hasSlices
       ? `${remSlices}/${totSlices} fette rimaste`
       : 'Disponibile';
     return `
-      <div style="background:var(--bg);border-radius:10px;padding:10px 12px;border:1px solid rgba(255,255,255,0.06)">
+      <div style="background:var(--bg);border-radius:10px;padding:10px 12px;border:1px solid ${isFromFriend ? 'rgba(139,92,246,0.15)' : 'rgba(255,255,255,0.06)'}">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${hasSlices ? '6px' : '4px'}">
           <div style="flex:1;min-width:0;margin-right:8px">
-            <div style="font-size:13px;font-weight:700;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item.name}</div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <div style="font-size:13px;font-weight:700;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item.name}</div>
+              ${isFromFriend ? `<span style="font-size:9px;background:rgba(139,92,246,0.15);color:rgb(139,92,246);padding:1px 6px;border-radius:8px;white-space:nowrap;font-weight:600">${friendLabel}</span>` : ''}
+            </div>
             <div style="font-size:11px;color:var(--t3);margin-top:2px">
               ${hasSlices ? `Per fetta: ${perSliceKcal} kcal · P:${perSlicePro}g C:${perSliceCarb}g F:${perSliceFat}g` : `Totale: ${item.total_kcal||0} kcal · P:${item.total_protein||0}g C:${item.total_carbs||0}g F:${item.total_fats||0}g`}
             </div>
@@ -2754,7 +2775,7 @@ function buildFridgeHtml() {
           <span style="font-size:15px">❄️</span>
           <div>
             <div style="font-size:12px;font-weight:800;color:rgb(20,184,166);letter-spacing:0.5px">DISPENSA</div>
-            <div style="font-size:10px;color:var(--t3)">${hasItems ? `${items.length} piatt${items.length === 1 ? 'o' : 'i'} salvat${items.length === 1 ? 'o' : 'i'} · seleziona da "Aggiungi Pasto"` : 'Vuota — aggiungi un piatto preparato'}</div>
+            <div style="font-size:10px;color:var(--t3)">${hasItems ? `${items.length} piatt${items.length === 1 ? 'o' : 'i'}${items.some(i => i._owner && i._owner !== getUserId()) ? ' · condivisa' : ''} · seleziona da "Aggiungi Pasto"` : 'Vuota — aggiungi un piatto preparato'}</div>
           </div>
         </div>
         <button class="btn btn-ghost btn-sm" style="font-size:11px;border-color:rgba(20,184,166,0.4);color:rgb(20,184,166)" onclick="window.openAddFridgeModal()">
@@ -2885,7 +2906,7 @@ window.confirmAddFridge = async function() {
   };
   try {
     const id = await saveFridgeItem(item);
-    fridgeItems.unshift({ id, ...item });
+    fridgeItems.unshift({ id, ...item, _owner: getUserId() });
     document.querySelector('.modal-bg.fridge-modal')?.remove();
     buildMeals();
     showToast('❄️ Piatto salvato in Dispensa!');
@@ -2899,7 +2920,7 @@ window.deleteFridgeItemUI = async function(idx) {
   if (!item) return;
   if (!confirm(`Eliminare "${item.name}" dalla Dispensa?`)) return;
   try {
-    await removeFridgeItem(item.id);
+    await removeFridgeItem(item.id, item._owner);
     fridgeItems.splice(idx, 1);
     buildMeals();
     showToast('🗑️ Rimosso dalla Dispensa.');
