@@ -16,21 +16,28 @@ async function getApiKey() {
 }
 
 const MODELS = [
-  'gemini-3.5-flash',
   'gemini-3.1-flash-lite',
-  'gemini-2.5-flash-lite'
+  'gemini-2.5-flash-lite',
+  'gemini-3.5-flash'
 ];
 
 const _delay = ms => new Promise(r => setTimeout(r, ms));
+let _lastCallTime = 0;
+const _THROTTLE_MS = 4000;
 
 async function callGemini(messages, systemPrompt) {
   const key = await getApiKey();
   if (!key) return { success: false, error: 'API key mancante nelle impostazioni.' };
 
+  const now = Date.now();
+  const wait = _THROTTLE_MS - (now - _lastCallTime);
+  if (wait > 0) await _delay(wait);
+
   for (const model of MODELS) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         if (attempt > 0) await _delay(2000);
+        _lastCallTime = Date.now();
         const r = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
           {

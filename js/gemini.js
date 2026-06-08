@@ -15,21 +15,28 @@ async function getKey() {
 
 // ── Model list ──────────────────────────────────────────────
 const MODELS = [
-  'gemini-3.5-flash',
   'gemini-3.1-flash-lite',
-  'gemini-2.5-flash-lite'
+  'gemini-2.5-flash-lite',
+  'gemini-3.5-flash'
 ];
 
 const _delay = ms => new Promise(r => setTimeout(r, ms));
+let _lastCallTime = 0;
+const _THROTTLE_MS = 4000;
 
 async function callGemini(key, prompt, opts = {}) {
   const { temperature = 0.7, maxOutputTokens = 1024, parts } = opts;
   const contentParts = parts || [{ text: prompt }];
 
+  const now = Date.now();
+  const wait = _THROTTLE_MS - (now - _lastCallTime);
+  if (wait > 0) await _delay(wait);
+
   for (const model of MODELS) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         if (attempt > 0) await _delay(2000);
+        _lastCallTime = Date.now();
         const r = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
           {
@@ -640,8 +647,8 @@ JSON richiesto:
       parsed.fats = totals.fats;
     }
 
-    // 7. Double-pass verification for complex meals (merge per nome, non per indice)
-    if (parsed.items?.length >= 2 && (parsed.kcal || 0) > 300) {
+    // 7. Double-pass verification solo per pasti complessi (4+ ingredienti, >500 kcal)
+    if (parsed.items?.length >= 4 && (parsed.kcal || 0) > 500) {
       const verified = await verifyMacrosAI(parsed.items, key);
       if (verified?.items?.length > 0) {
         for (const verItem of verified.items) {
