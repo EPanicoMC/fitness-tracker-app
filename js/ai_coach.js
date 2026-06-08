@@ -21,33 +21,38 @@ const MODELS = [
   'gemini-2.5-flash-lite'
 ];
 
+const _delay = ms => new Promise(r => setTimeout(r, ms));
+
 async function callGemini(messages, systemPrompt) {
   const key = await getApiKey();
   if (!key) return { success: false, error: 'API key mancante nelle impostazioni.' };
 
   for (const model of MODELS) {
-    try {
-      const r = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: systemPrompt }] },
-            contents: messages,
-            generationConfig: { temperature: 0.7, maxOutputTokens: 8192 }
-          })
-        }
-      );
-      if (r.status === 429) { console.warn('[Coach]', model, '→ 429, next model...'); continue; }
-      if (r.status === 404) { console.warn('[Coach]', model, '→ 404, not found'); continue; }
-      if (!r.ok) { console.warn('[Coach]', model, '→', r.status); continue; }
-      const d = await r.json();
-      const text = d.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
-      if (!text) { console.warn('[Coach]', model, '→ empty'); continue; }
-      console.log('[Coach]', model, '→ OK', text.length, 'chars');
-      return { success: true, text, model };
-    } catch(e) { console.warn('[Coach]', model, '→', e.message); continue; }
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        if (attempt > 0) await _delay(2000);
+        const r = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              systemInstruction: { parts: [{ text: systemPrompt }] },
+              contents: messages,
+              generationConfig: { temperature: 0.7, maxOutputTokens: 8192 }
+            })
+          }
+        );
+        if (r.status === 429) { console.warn('[Coach]', model, '→ 429', attempt === 0 ? '→ retry 2s' : '→ next model'); continue; }
+        if (r.status === 404) { console.warn('[Coach]', model, '→ 404'); break; }
+        if (!r.ok) { console.warn('[Coach]', model, '→', r.status); break; }
+        const d = await r.json();
+        const text = d.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
+        if (!text) { console.warn('[Coach]', model, '→ empty'); break; }
+        console.log('[Coach]', model, '→ OK', text.length, 'chars');
+        return { success: true, text, model };
+      } catch(e) { console.warn('[Coach]', model, '→', e.message); break; }
+    }
   }
   return { success: false, error: 'Tutti i modelli occupati. Riprova tra 1 minuto.' };
 }

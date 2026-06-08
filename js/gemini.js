@@ -20,30 +20,35 @@ const MODELS = [
   'gemini-2.5-flash-lite'
 ];
 
+const _delay = ms => new Promise(r => setTimeout(r, ms));
+
 async function callGemini(key, prompt, opts = {}) {
   const { temperature = 0.7, maxOutputTokens = 1024, parts } = opts;
   const contentParts = parts || [{ text: prompt }];
 
   for (const model of MODELS) {
-    try {
-      const r = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ role: 'user', parts: contentParts }],
-            generationConfig: { temperature, maxOutputTokens }
-          })
-        }
-      );
-      if (r.status === 429) { console.warn(model, '429'); continue; }
-      if (!r.ok) { console.warn(model, 'error', r.status); continue; }
-      const d = await r.json();
-      const text = d.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('');
-      if (!text) continue;
-      return { success: true, text: text.trim(), model };
-    } catch(e) { console.warn(model, 'failed:', e.message); continue; }
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        if (attempt > 0) await _delay(2000);
+        const r = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ role: 'user', parts: contentParts }],
+              generationConfig: { temperature, maxOutputTokens }
+            })
+          }
+        );
+        if (r.status === 429) { console.warn(model, '429', attempt === 0 ? '→ retry 2s' : '→ next model'); continue; }
+        if (!r.ok) { console.warn(model, 'error', r.status); break; }
+        const d = await r.json();
+        const text = d.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('');
+        if (!text) break;
+        return { success: true, text: text.trim(), model };
+      } catch(e) { console.warn(model, 'failed:', e.message); break; }
+    }
   }
   return { success: false, error: 'Tutti i modelli occupati. Riprova tra 1 minuto.' };
 }
