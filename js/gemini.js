@@ -41,16 +41,8 @@ async function callGemini(key, prompt, opts = {}) {
             })
           }
         );
-        if (r.status === 429) {
-          const body = await r.json().catch(() => ({}));
-          console.warn(model, '429', JSON.stringify(body), attempt === 0 ? '→ retry 2s' : '→ next model');
-          continue;
-        }
-        if (!r.ok) {
-          const body = await r.text().catch(() => '');
-          console.warn(model, 'error', r.status, body);
-          break;
-        }
+        if (r.status === 429) { console.warn(model, '429', attempt === 0 ? '→ retry 2s' : '→ next model'); continue; }
+        if (!r.ok) { console.warn(model, 'error', r.status); break; }
         const d = await r.json();
         const text = d.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('');
         if (!text) break;

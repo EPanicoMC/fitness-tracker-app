@@ -43,17 +43,9 @@ async function callGemini(messages, systemPrompt) {
             })
           }
         );
-        if (r.status === 429) {
-          const body = await r.json().catch(() => ({}));
-          console.warn('[Coach]', model, '→ 429', JSON.stringify(body), attempt === 0 ? '→ retry 2s' : '→ next model');
-          continue;
-        }
+        if (r.status === 429) { console.warn('[Coach]', model, '→ 429', attempt === 0 ? '→ retry 2s' : '→ next model'); continue; }
         if (r.status === 404) { console.warn('[Coach]', model, '→ 404'); break; }
-        if (!r.ok) {
-          const body = await r.text().catch(() => '');
-          console.warn('[Coach]', model, '→', r.status, body);
-          break;
-        }
+        if (!r.ok) { console.warn('[Coach]', model, '→', r.status); break; }
         const d = await r.json();
         const text = d.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
         if (!text) { console.warn('[Coach]', model, '→ empty'); break; }
