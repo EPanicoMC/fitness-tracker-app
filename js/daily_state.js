@@ -2062,7 +2062,7 @@ window.captureFoodImage = async function() {
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
   window.stopFoodCamera();
 
-  showToast('⏳ Analisi immagine cibo con AI...', 'info');
+  showToast('⏳ Analisi immagine con AI...', 'info');
 
   try {
     const base64Image = canvas.toDataURL('image/jpeg').split(',')[1];
@@ -2080,7 +2080,7 @@ window.captureFoodImage = async function() {
     if (document.getElementById('am-carbs')) document.getElementById('am-carbs').value = r.carbs;
     if (document.getElementById('am-fats')) document.getElementById('am-fats').value = r.fats;
 
-    showToast('🥗 Cibo scansionato con successo!');
+    showToast(r._source === 'barcode' ? '📦 Barcode riconosciuto!' : '🥗 Cibo scansionato con successo!');
   } catch(e) {
     showToast('Errore durante la scansione', 'err');
     console.error(e);
@@ -2133,7 +2133,7 @@ window.captureMealImage = async function(mi) {
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
   window.stopMealCamera(mi);
 
-  showToast('⏳ Analisi immagine cibo con AI...', 'info');
+  showToast('⏳ Analisi immagine con AI...', 'info');
 
   try {
     const base64Image = canvas.toDataURL('image/jpeg').split(',')[1];
@@ -2168,7 +2168,7 @@ window.captureMealImage = async function(mi) {
       }
     }
 
-    showToast('🥗 Cibo scansionato con successo!');
+    showToast(r._source === 'barcode' ? '📦 Barcode riconosciuto!' : '🥗 Cibo scansionato con successo!');
   } catch(e) {
     showToast('Errore durante la scansione', 'err');
     console.error(e);

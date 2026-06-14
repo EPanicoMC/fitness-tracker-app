@@ -594,10 +594,12 @@ Regole fondamentali e VINCOLANTI:
 3c. Porzioni italiane: 1 fetta di pane = 40g, 1 cucchiaio = 10g, 1 cucchiaino = 5g, 1 cornetto/brioche = 60g, 1 fetta biscottata = 10g.
 3d. Numeri italiani: "un/uno/una" = 1, "due" = 2, "tre" = 3, "quattro" = 4, "cinque" = 5, "mezzo/mezza" = 0.5.
 4. ${REFERENCE_TABLE}
-5. SANITY CHECK: ingrediente < 200g NON può avere > 900 kcal (eccezione: olio/burro/frutta secca). Proteine/100g mai > 35g (eccezione: whey).
-6. REGOLA ZERO (CRITICA): NESSUN alimento reale ha 0 kcal (eccezioni: acqua, caffè nero senza zucchero). Se un ingrediente è un cibo o bevanda reale, DEVE avere kcal > 0. Se non conosci i valori esatti, STIMA comunque un valore plausibile, MAI 0.
+5. SANITY CHECK: ingrediente < 200g NON può avere > 900 kcal (eccezione: olio/burro/frutta secca). Proteine/100g mai > 35g (eccezione: whey/proteine in polvere).
+6. REGOLA ZERO (CRITICA): NESSUN alimento reale ha 0 kcal (eccezioni: acqua pura, caffè nero senza zucchero). Se un ingrediente è un cibo o bevanda reale, DEVE avere kcal > 0. Se non conosci i valori esatti, STIMA comunque un valore plausibile, MAI 0.
 7. BEVANDE ALCOLICHE: l'alcol ha 7 kcal per grammo. Un calice di vino (~125ml) = ~85 kcal. Una birra (330ml) = ~140 kcal. Non restituire MAI 0 kcal per bevande alcoliche. I macro delle bevande alcoliche sono principalmente carboidrati, con proteine e grassi a 0.
-8. Output SOLO JSON valido, no markdown, no commenti, no spiegazioni.
+8. INTERPRETAZIONE SEMANTICA (CRITICA): Quando l'utente scrive "da Xg di proteine/carbs/grassi", "con Xg di proteine", "X proteine", sta descrivendo il CONTENUTO NUTRIZIONALE, NON il peso dell'alimento. Esempio: "acqua proteica da 14g di proteine" → 14g di PROTEINE (non 14g di peso!), quindi protein=14, kcal≥56. "barretta da 20g di proteine" → protein=20, NON 20g di peso. Usa queste informazioni esplicitamente dichiarate dall'utente come VINCOLO da rispettare nel risultato.
+9. BEVANDE PROTEICHE/INTEGRATORI: acqua proteica, shake proteici, barrette proteiche hanno i macro indicati sull'etichetta. Se l'utente specifica il contenuto proteico, USA QUEL VALORE. Esempio: "acqua proteica da 14g di proteine" = circa 60 kcal, 14g Pro, 0-2g Carb, 0g Fat.
+10. Output SOLO JSON valido, no markdown, no commenti, no spiegazioni.
 ${libraryHints}${correctionHints}
 
 JSON richiesto:
@@ -616,36 +618,10 @@ JSON richiesto:
 
     let parsed = JSON.parse(raw.slice(s1, s2 + 1));
 
-    // 6. If library had matches, prefer library values for those items
-    if (matched.length > 0 && parsed.items?.length > 0) {
-      for (const libItem of matched) {
-        // Find corresponding AI item and replace with library-calculated values
-        const aiItem = parsed.items.find(ai => {
-          const aiNorm = normalize(ai.name || '');
-          const libNorm = normalize(libItem._libraryName || '');
-          return aiNorm.includes(libNorm) || libNorm.split(/\s+/).some(w => w.length >= 3 && aiNorm.includes(w));
-        });
-        if (aiItem) {
-          aiItem.kcal = libItem.kcal;
-          aiItem.protein = libItem.protein;
-          aiItem.carbs = libItem.carbs;
-          aiItem.fats = libItem.fats;
-          aiItem.grams = libItem.grams;
-          aiItem._source = 'library';
-        }
-      }
-      // Recalc totals from items
-      const totals = parsed.items.reduce((a, i) => ({
-        kcal: a.kcal + (Number(i.kcal) || 0),
-        protein: a.protein + (Number(i.protein) || 0),
-        carbs: a.carbs + (Number(i.carbs) || 0),
-        fats: a.fats + (Number(i.fats) || 0)
-      }), { kcal: 0, protein: 0, carbs: 0, fats: 0 });
-      parsed.kcal = totals.kcal;
-      parsed.protein = totals.protein;
-      parsed.carbs = totals.carbs;
-      parsed.fats = totals.fats;
-    }
+    // 6. [RIMOSSO] Non sovrascriviamo più i valori AI con quelli della food library.
+    // La library serve solo come HINT nel prompt (step 4). L'AI ha l'ultima parola.
+    // Il parser strutturato non capisce la semantica (es. "14g di proteine" ≠ "14g di un alimento")
+    // e il fuzzy match genera falsi positivi che corrompono il risultato.
 
     // 7. Double-pass verification solo per pasti complessi (4+ ingredienti, >500 kcal)
     if (parsed.items?.length >= 4 && (parsed.kcal || 0) > 500) {
@@ -653,26 +629,22 @@ JSON richiesto:
       if (verified?.items?.length > 0) {
         for (const verItem of verified.items) {
           const verNorm = normalize(verItem.name || '');
-          // Trova l'item originale corrispondente per nome
           let matchIdx = parsed.items.findIndex(orig => {
-            if (orig._source === 'library') return false;
             const origNorm = normalize(orig.name || '');
             return origNorm === verNorm ||
                    origNorm.includes(verNorm) ||
                    verNorm.includes(origNorm) ||
                    verNorm.split(/\s+/).some(w => w.length >= 4 && origNorm.includes(w));
           });
-          // Fallback: se nessun match per nome, prova per indice
           if (matchIdx < 0) {
             const verIdx = verified.items.indexOf(verItem);
-            if (verIdx < parsed.items.length && parsed.items[verIdx]?._source !== 'library') {
+            if (verIdx < parsed.items.length) {
               matchIdx = verIdx;
             }
           }
           if (matchIdx >= 0) {
             parsed.items[matchIdx] = {
               grams: parsed.items[matchIdx]?.grams,
-              _source: parsed.items[matchIdx]?._source,
               ...verItem
             };
           }
@@ -727,26 +699,8 @@ Rispondi SOLO con JSON valido:
       }
     }
 
-    // 9. Auto-save new foods to library (fire-and-forget, con sanity check)
-    if (parsed.items?.length > 0 && !validated._zeroSuspect) {
-      for (const item of parsed.items) {
-        if (item._source === 'library') continue;
-        const grams = Number(item.grams) || 0;
-        if (grams >= 10 && (Number(item.kcal) || 0) > 0) {
-          const per100g = {
-            kcal: (item.kcal / grams) * 100,
-            protein: ((item.protein || 0) / grams) * 100,
-            carbs: ((item.carbs || 0) / grams) * 100,
-            fats: ((item.fats || 0) / grams) * 100
-          };
-          if (!sanityCheckPer100g(per100g)) continue;
-          const cleanName = (item.name || '').replace(/\s*\(\d+g?\)/g, '').replace(/\d+g\s*/g, '').trim();
-          if (cleanName.length >= 2) {
-            saveToFoodLibrary(cleanName, per100g);
-          }
-        }
-      }
-    }
+    // 9. [RIMOSSO] Auto-save disabilitato — il salvataggio automatico nella food library
+    // generava troppi falsi positivi e inquinava i risultati futuri.
 
     return {
       success: true,
@@ -1075,11 +1029,100 @@ Mantieni il report compatto ed efficace (circa 220-280 parole). Non aggiungere n
   return { success: true, report: res.text };
 }
 
-// ── Analisi immagine cibo ───────────────────────────────────
+// ── Barcode lookup via Open Food Facts (gratuito, no API key) ─
+async function lookupBarcode(code) {
+  try {
+    const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name,nutriments,brands,quantity`);
+    if (!r.ok) return null;
+    const d = await r.json();
+    if (d.status !== 1 || !d.product) return null;
+    const p = d.product;
+    const n = p.nutriments || {};
+    const name = [p.brands, p.product_name].filter(Boolean).join(' - ') || 'Prodotto scansionato';
+    const qty = p.quantity || '';
+
+    // nutriments values are per 100g
+    const kcal100 = n['energy-kcal_100g'] || n['energy-kcal'] || 0;
+    const pro100 = n.proteins_100g || n.proteins || 0;
+    const carb100 = n.carbohydrates_100g || n.carbohydrates || 0;
+    const fat100 = n.fat_100g || n.fat || 0;
+
+    // Try to extract serving size from quantity field
+    let servingG = 100;
+    const qtyMatch = qty.match(/(\d+)\s*(?:g|ml)/i);
+    if (qtyMatch) servingG = parseInt(qtyMatch[1]);
+
+    const factor = servingG / 100;
+    return {
+      success: true,
+      name: name + (qty ? ` (${qty})` : ''),
+      kcal: Math.round(kcal100 * factor),
+      protein: parseFloat((pro100 * factor).toFixed(1)),
+      carbs: parseFloat((carb100 * factor).toFixed(1)),
+      fats: parseFloat((fat100 * factor).toFixed(1)),
+      ingredients: `${name} ${qty}`,
+      _source: 'barcode',
+      _barcode: code,
+      _per100g: { kcal: Math.round(kcal100), protein: parseFloat(pro100.toFixed(1)), carbs: parseFloat(carb100.toFixed(1)), fats: parseFloat(fat100.toFixed(1)) }
+    };
+  } catch(e) {
+    console.warn('lookupBarcode error:', e.message);
+    return null;
+  }
+}
+
+// ── Analisi immagine cibo (ibrida: cibo + barcode auto-detect) ──
 export async function analyzeFoodImageAI(base64Image, mimeType = 'image/jpeg') {
   const key = await getKey();
   if (!key) return { success: false, error: 'API key mancante.' };
 
+  // Step 1: Ask AI to classify the image (food vs barcode)
+  const classifyPrompt = `Osserva questa immagine e rispondi SOLO con un JSON valido.
+
+Se vedi un CODICE A BARRE o QR CODE leggibile su un prodotto alimentare, rispondi:
+{"type":"barcode","code":"NUMERO_BARCODE"}
+
+Se vedi CIBO/PIATTO/ALIMENTO (senza barcode visibile), rispondi:
+{"type":"food"}
+
+Se l'immagine è ambigua, poco chiara, o non contiene né cibo né barcode, rispondi:
+{"type":"unknown"}
+
+Rispondi SOLO con il JSON, niente altro.`;
+
+  const classifyParts = [
+    { text: classifyPrompt },
+    { inlineData: { mimeType, data: base64Image } }
+  ];
+
+  const classRes = await callGemini(key, null, { temperature: 0.05, maxOutputTokens: 128, parts: classifyParts });
+  
+  let imageType = 'food';
+  let barcodeNum = null;
+  
+  if (classRes.success) {
+    try {
+      const cr = classRes.text;
+      const cs1 = cr.indexOf('{');
+      const cs2 = cr.lastIndexOf('}');
+      if (cs1 !== -1 && cs2 !== -1) {
+        const classification = JSON.parse(cr.slice(cs1, cs2 + 1));
+        imageType = classification.type || 'food';
+        barcodeNum = classification.code || null;
+      }
+    } catch(e) { /* fallback: treat as food */ }
+  }
+
+  // Step 2a: If barcode detected, lookup on Open Food Facts
+  if (imageType === 'barcode' && barcodeNum) {
+    const barcodeResult = await lookupBarcode(barcodeNum);
+    if (barcodeResult && barcodeResult.kcal > 0) {
+      return barcodeResult;
+    }
+    // Barcode not found in database — fall through to food analysis
+  }
+
+  // Step 2b: Standard food analysis
   const promptText = `Analizza l'immagine di questo cibo e stima accuratamente i macronutrienti (Proteine, Carboidrati, Grassi) e le Calorie (kcal).
 Identifica ogni ingrediente visibile, stima le quantità in grammi e calcola i macro per ciascuno.
 
@@ -1089,7 +1132,8 @@ Regole fondamentali e VINCOLANTI:
 3. IMPORTANTE: il cibo visibile in foto è COTTO/preparato. Usa i valori nutrizionali per il prodotto COTTO (pasta cotta, riso cotto, pollo cotto, ecc.), NON i valori a crudo.
 4. ${REFERENCE_TABLE}
 5. SANITY CHECK: ingrediente < 200g NON può avere > 900 kcal (eccezione: olio/burro/frutta secca). Proteine/100g mai > 35g.
-6. Rispondi esclusivamente con un oggetto JSON valido, no markdown.
+6. Se vedi un'ETICHETTA NUTRIZIONALE leggibile, LEGGI i valori dall'etichetta e usali.
+7. Rispondi esclusivamente con un oggetto JSON valido, no markdown.
 
 Struttura JSON richiesta:
 {
@@ -1115,26 +1159,6 @@ Struttura JSON richiesta:
   try {
     const parsed = JSON.parse(raw.slice(s1, s2 + 1));
     const validated = validateAndFixMacros(parsed);
-
-    // Auto-save scanned items to food library (con sanity check)
-    if (parsed.items?.length > 0 && !validated._zeroSuspect) {
-      for (const item of parsed.items) {
-        const grams = Number(item.grams) || 0;
-        if (grams >= 10 && (Number(item.kcal) || 0) > 0) {
-          const per100g = {
-            kcal: (item.kcal / grams) * 100,
-            protein: ((item.protein || 0) / grams) * 100,
-            carbs: ((item.carbs || 0) / grams) * 100,
-            fats: ((item.fats || 0) / grams) * 100
-          };
-          if (!sanityCheckPer100g(per100g)) continue;
-          const cleanName = (item.name || '').replace(/\s*\(\d+g?\)/g, '').replace(/\d+g\s*/g, '').trim();
-          if (cleanName.length >= 2) {
-            saveToFoodLibrary(cleanName, per100g);
-          }
-        }
-      }
-    }
 
     return {
       success: true,
