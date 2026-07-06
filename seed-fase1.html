@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KOVA. – Seed Fase 1</title>
+  <link href="https://cdn.jsdelivr.net/npm/remixicon@4.2.0/fonts/remixicon.css" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="ph"><h1>🌱 Seed Fase 1 — Mini-cut</h1></div>
+  <div class="card">
+    <p style="color:var(--t2);font-size:14px;margin-bottom:12px">
+      Carica la <b>scheda Upper/Lower ×2</b> e il <b>piano dieta 2.300 kcal</b> per Fase 1 (07/07 – 08/08/2026).
+    </p>
+    <p style="color:var(--orange);font-size:12px;margin-bottom:16px">
+      ⚠️ Le schede/piani esistenti NON vengono toccati. Verranno creati nuovi documenti.
+    </p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-v" id="seed-all" onclick="window.seedAll()">🚀 Carica Tutto</button>
+      <button class="btn btn-flat" id="seed-prog" onclick="window.seedProgram()">💪 Solo Scheda</button>
+      <button class="btn btn-flat" id="seed-diet" onclick="window.seedDiet()">🥗 Solo Dieta</button>
+    </div>
+  </div>
+  <div id="log" style="font-size:13px;font-family:monospace;color:var(--t2);line-height:2;margin-top:16px"></div>
+</div>
+
+<script type="module">
+import {
+  db, getUserId, doc, setDoc, collection, addDoc
+} from './js/firebase-config.js';
+import { requireAuth } from './js/app.js';
+
+function log(msg, ok = true) {
+  const el = document.getElementById('log');
+  el.innerHTML += `<div style="color:${ok ? 'var(--green)' : 'var(--red)'}">${msg}</div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  SCHEDA ALLENAMENTO — Upper/Lower ×2, Fase 1
+// ═══════════════════════════════════════════════════════════════
+const PROGRAM = {
+  name: "Upper/Lower ×2 — Fase 1 Mini-cut",
+  objective: "cut",
+  start_date: "2026-07-07",
+  weeks: 5,
+  active: true,
+  progression_rule: `DOPPIA PROGRESSIONE
+Sett. 1 (07–12/07): Calibrazione — RPE 7, fondo dei range, annota ogni carico. Priorità tecnica su RDL e hip thrust.
+Sett. 2 (13–19/07): Stessi carichi, +1 rep per serie dove RPE resta ≤8.
+Sett. 3 (20–26/07): Doppia progressione a regime — chiudi tutte le serie al vertice del range con RPE ≤8 → +2,5 kg (upper/manubri) o +5 kg (macchine gambe) e riparti dal fondo del range. RPE 8.
+Sett. 4 (27/07–02/08): Continua doppia progressione, ultima serie di ogni esercizio a RPE 8–9. Settimana top.
+Sett. 5 (03–08/08): Carichi della sett. 4, −1 serie su tutti gli isolamenti (alzate, curl, leg extension…), RPE 8. Scarico pre-viaggio.
+
+REGOLA: se un carico cala >5% per 2 sedute consecutive, non forzare — segnalo al check. In deficit la forza deve restare stabile, non salire per forza.
+
+RISCALDAMENTO 6:00 (12 min obbligatorio):
+• 4 min tapis roulant in salita (6–8%, passo svelto) o ellittica. MAI cyclette (sella preme coccige).
+• Circuito mobilità (4 min): chin tuck ×8 → cat-camel ×8 → rotazioni toraciche quadrupedia ×6/lato → band pull-apart ×15 → extrarotazioni elastico ×12/lato.
+  Nei giorni gambe: + leg swing ×10/lato + squat corpo libero ×10.
+  Nei giorni upper: + scap push-up ×10 + wall slide ×8.
+• Avvicinamenti primo esercizio (4 min): 50%×8 → 70%×5 → 85%×2-3, poi serie allenanti.
+
+RISCALDAMENTO SABATO 9:00 (7–8 min): 3 min cardio + circuito mobilità rapida + avvicinamenti.
+
+VINCOLI FASE 1: esclusi panca inclinata bilanciere (trigger cervicale), military press in piedi e back squat (compressione assiale collo), stacco da terra (si ricostruisce dal rumeno). Fastidio cervicale/coccige >3/10 → stop, passa alla variante indicata.`,
+
+  schedule: {
+    monday: null,
+
+    tuesday: {
+      name: "Lower A — Focus Quadricipiti",
+      time: "06:00",
+      cardio: null,
+      exercises: [
+        {
+          name: "Hack Squat",
+          sets: 4, reps: "8-10", rest_seconds: 150,
+          weight_per_set: [],
+          notes: "RPE 7–8. Schiena e testa aderenti allo schienale, scendi sotto il parallelo solo se il bacino non retroverte. Se pressione coccige a fine discesa: piedi più alti sulla pedana o passa a Leg Press 45°. [Classica: Back Squat — rientro in Fase 3]"
+        },
+        {
+          name: "Affondi Inversi con Manubri",
+          sets: 3, reps: "10/gamba", rest_seconds: 90,
+          weight_per_set: [],
+          notes: "RPE 8. Passo indietro, tibia verticale, busto leggermente avanti. Carico nelle mani = zero compressione collo. Se troppo facili → Bulgarian Split Squat."
+        },
+        {
+          name: "Leg Extension",
+          sets: 3, reps: "12-15", rest_seconds: 75,
+          weight_per_set: [],
+          notes: "RPE 8–9. Fermata 1\" in alto. Sedile scomodo sul coccige? Asciugamano ripiegato sotto i glutei."
+        },
+        {
+          name: "Leg Curl Sdraiato",
+          sets: 3, reps: "10-12", rest_seconds: 90,
+          weight_per_set: [],
+          notes: "RPE 8. Bacino schiacciato sul pad, niente inarcamento lombare."
+        },
+        {
+          name: "Calf alla Leg Press",
+          sets: 4, reps: "10-12", rest_seconds: 60,
+          weight_per_set: [],
+          notes: "RPE 8–9. Fermata 2\" in allungo sotto. Alla pressa = zero carico assiale sul collo."
+        },
+        {
+          name: "Plank + Pallof Press",
+          sets: 3, reps: "Plank 45\" + Pallof 12/lato", rest_seconds: 45,
+          weight_per_set: [],
+          notes: "Appoggio avambracci e piedi, coccige libero, sguardo al pavimento."
+        }
+      ]
+    },
+
+    wednesday: {
+      name: "Upper A — Spinta + Dorso spessore + Delta",
+      time: "06:00",
+      cardio: { enabled: true, type: "Camminata in salita", duration_minutes: 10, notes: "Post seduta, opzionale. Tapis roulant pendenza 6-8%." },
+      exercises: [
+        {
+          name: "Spinte Manubri Panca Piana",
+          sets: 4, reps: "8-10", rest_seconds: 120,
+          weight_per_set: [],
+          notes: "RPE 7–8. Nuca sempre appoggiata, scapole addotte, niente colpi di collo per chiudere l'ultima rep. Parti ~26–28 kg per mano. [Classica: Panca Bilanciere Piana — reintroducibile a RPE ≤7 se zero fastidi per 2 settimane]"
+        },
+        {
+          name: "Rematore Petto in Appoggio",
+          sets: 4, reps: "10-12", rest_seconds: 120,
+          weight_per_set: [],
+          notes: "RPE 8. Panca 30° + manubri, o T-bar con appoggio. Petto incollato al pad, collo neutro (guarda pavimento), gomito verso il fianco. [Classica: Rematore Bilanciere Libero — torna quando l'hinge è ricostruito]"
+        },
+        {
+          name: "Chest Press Inclinata (macchina con poggiatesta)",
+          sets: 3, reps: "10-12", rest_seconds: 90,
+          weight_per_set: [],
+          notes: "RPE 7–8. Il pattern che ha infiammato: teniamo, ma leggero e con testa supportata. L'inclinata bilanciere resta fuori tutta la fase."
+        },
+        {
+          name: "Alzate Laterali Manubri",
+          sets: 4, reps: "12-15", rest_seconds: 65,
+          weight_per_set: [],
+          notes: "RPE 8–9. Sale il gomito, non la mano; fermati ad altezza spalla; trapezi giù, collo lungo."
+        },
+        {
+          name: "Face Pull ai Cavi",
+          sets: 3, reps: "15", rest_seconds: 60,
+          weight_per_set: [],
+          notes: "RPE 7–8. Corda verso la fronte, extraruota. Lavoro posturale per cervicale: pulito, non a cedimento. In superserie col pushdown se corto col tempo."
+        },
+        {
+          name: "Pushdown alla Corda",
+          sets: 3, reps: "10-12", rest_seconds: 60,
+          weight_per_set: [],
+          notes: "RPE 8. Gomiti fermi ai fianchi, apri la corda in basso."
+        }
+      ]
+    },
+
+    thursday: null,
+
+    friday: {
+      name: "Lower B — Catena Posteriore",
+      time: "06:00",
+      cardio: null,
+      exercises: [
+        {
+          name: "Stacco Rumeno Bilanciere",
+          sets: 4, reps: "8-10", rest_seconds: 150,
+          weight_per_set: [],
+          notes: "RPE 6–7 (sett. 1–2), poi 8. Ricostruiamo l'hinge. Bilanciere a contatto cosce, sedere indietro, schiena neutra, collo neutro: sguardo al pavimento 2m avanti, mai allo specchio a metà rep. Parti ~50 kg. [Classica: Stacco da Terra — Fase 4]"
+        },
+        {
+          name: "Hip Thrust Bilanciere",
+          sets: 3, reps: "10-12", rest_seconds: 120,
+          weight_per_set: [],
+          notes: "RPE 8. Scapole sul bordo panca, pad sul bacino, mento verso il petto. Con dischi da 20 il sedere non tocca terra. Sfregamento/pressione coccige in discesa? → Hyperextension 45° a focus glutei o Glute Drive Machine."
+        },
+        {
+          name: "Leg Curl Seduto",
+          sets: 3, reps: "10-12", rest_seconds: 90,
+          weight_per_set: [],
+          notes: "RPE 8–9. Cuscino sopra le ginocchia ben stretto. Sedile fastidioso sul coccige → Sdraiato."
+        },
+        {
+          name: "Leg Press 45° Piedi Alti e Larghi",
+          sets: 3, reps: "12", rest_seconds: 90,
+          weight_per_set: [],
+          notes: "RPE 8. Piedi alti = più femorali e glutei. Non scendere fino a retrovertire il bacino: protegge coccige e lombari."
+        },
+        {
+          name: "Calf alla Leg Press",
+          sets: 4, reps: "12-15", rest_seconds: 60,
+          weight_per_set: [],
+          notes: "RPE 8–9. Come martedì."
+        },
+        {
+          name: "Crunch ai Cavi in Ginocchio + Side Plank",
+          sets: 3, reps: "Crunch 12-15 + Side Plank 30\"/lato", rest_seconds: 45,
+          weight_per_set: [],
+          notes: "Il movimento parte dalle coste, la testa segue senza strattoni: niente trazioni sul collo."
+        }
+      ]
+    },
+
+    saturday: {
+      name: "Upper B — Dorso larghezza + Spalle + Braccia",
+      time: "09:00",
+      cardio: { enabled: true, type: "LISS", duration_minutes: 10, notes: "Opzionale, post seduta." },
+      exercises: [
+        {
+          name: "Trazioni Presa Prona Media",
+          sets: 4, reps: "6-9", rest_seconds: 150,
+          weight_per_set: [],
+          notes: "RPE 8. Discesa controllata 2\". Non estendere il collo per portare il mento sopra la sbarra: conta la clavicola, non il mento. Obiettivo fase: 4×10 pulite."
+        },
+        {
+          name: "Lat Machine Presa Larga",
+          sets: 3, reps: "10-12", rest_seconds: 90,
+          weight_per_set: [],
+          notes: "RPE 8–9. Tira alla clavicola, gomiti sotto la sbarra."
+        },
+        {
+          name: "Shoulder Press Macchina (schienale alto)",
+          sets: 3, reps: "8-10", rest_seconds: 120,
+          weight_per_set: [],
+          notes: "RPE 7–8. Nuca appoggiata quando possibile, niente spinte di collo. Alternativa: manubri seduto a 75–80°. [Classica: Military in piedi — sospesa in Fase 1]"
+        },
+        {
+          name: "Alzate Laterali al Cavo (singolo braccio)",
+          sets: 3, reps: "12-15", rest_seconds: 60,
+          weight_per_set: [],
+          notes: "RPE 8–9. Seconda dose settimanale per i delta, tensione continua."
+        },
+        {
+          name: "Croci Inverse ai Cavi",
+          sets: 3, reps: "15", rest_seconds: 60,
+          weight_per_set: [],
+          notes: "RPE 8. Gomiti alti, zero slancio. Alternativa: Peck Deck Inverso."
+        },
+        {
+          name: "Curl Bilanciere EZ + French Press EZ su Panca (superserie)",
+          sets: 3, reps: "8-12 + 10-12", rest_seconds: 75,
+          weight_per_set: [],
+          notes: "RPE 8. Nel french press testa appoggiata alla panca; se dà fastidio alla cervicale → solo estensioni al cavo."
+        },
+        {
+          name: "Curl a Martello",
+          sets: 2, reps: "12-15", rest_seconds: 60,
+          weight_per_set: [],
+          notes: "RPE 9. Chiusura."
+        }
+      ]
+    },
+
+    sunday: null
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  PIANO DIETA — 2.300 kcal Mini-cut
+// ═══════════════════════════════════════════════════════════════
+
+const MEALS_ON = [
+  {
+    type: "post_workout",
+    label: "Colazione / Post-WO",
+    time: "07:30",
+    items: "Crema di riso 70g + whey 35g + 1 banana + burro d'arachidi 15g + miele 10g + creatina 5g",
+    kcal: 640, protein: 38, carbs: 100, fats: 10,
+    variants: [
+      { label: "Opzione B", detail: "Yogurt greco 0% 300g + avena 80g + 1 banana + burro d'arachidi 15g + creatina" },
+      { label: "Opzione C (veloce)", detail: "Bevanda Milboa 35g pro + 80g pane con marmellata 30g + 1 banana + creatina" }
+    ]
+  },
+  {
+    type: "pranzo",
+    label: "Pranzo",
+    time: "13:00",
+    items: "Petto di pollo/tacchino 150g + riso basmati 100g + verdura + olio EVO 15g",
+    kcal: 690, protein: 40, carbs: 82, fats: 20,
+    variants: [
+      { label: "Opzione B", detail: "Merluzzo 200g o tonno al naturale 160g sgocciolato + patate 450g + verdura + olio 15g" },
+      { label: "Opzione C (fuori)", detail: "Poke: base riso, doppia proteina (pollo o salmone), verdure, no fritti, salse a metà dose" }
+    ]
+  },
+  {
+    type: "spuntino",
+    label: "Spuntino ~17:00",
+    time: "17:00",
+    items: "Yogurt greco 0% 200g + 1 frutto + mandorle 15g",
+    kcal: 300, protein: 24, carbs: 30, fats: 10,
+    variants: [
+      { label: "Opzione B", detail: "Quark Milboa 200g + 1 frutto + mandorle 15g" },
+      { label: "Opzione C (veloce)", detail: "Bevanda Milboa + mandorle 20g" }
+    ]
+  },
+  {
+    type: "cena",
+    label: "Cena",
+    time: "20:30",
+    items: "Pesce bianco 200g + 4 fette pancarrè 8 cereali + verdura + olio 12g",
+    kcal: 575, protein: 48, carbs: 52, fats: 17,
+    variants: [
+      { label: "Opzione B", detail: "Pollo/tacchino 180g o carne rossa magra 150g (max 2×/sett.) + patate 350g + verdura + olio 10g" },
+      { label: "Opzione C", detail: "Frittata: 3 uova + 100g albume + 4 fette pancarrè + verdura (senza olio aggiunto)" }
+    ]
+  },
+  {
+    type: "spuntino",
+    label: "Sera (opzionale)",
+    time: "22:00",
+    items: "Quark Milboa 150g",
+    kcal: 95, protein: 15, carbs: 6, fats: 1,
+    variants: [
+      { label: "Opzione B", detail: "Yogurt greco 150g" },
+      { label: "Opzione C", detail: "Whey 20g in acqua" }
+    ]
+  }
+];
+
+const MEALS_OFF = [
+  {
+    type: "colazione",
+    label: "Colazione",
+    time: "08:00",
+    items: "Crema di riso 70g + whey 35g + 1 banana + burro d'arachidi 15g + miele 10g + creatina 5g",
+    kcal: 640, protein: 38, carbs: 100, fats: 10,
+    variants: [
+      { label: "Opzione B", detail: "Yogurt greco 0% 300g + avena 80g + 1 banana + burro d'arachidi 15g + creatina" },
+      { label: "Opzione C (veloce)", detail: "Bevanda Milboa 35g pro + 80g pane con marmellata 30g + 1 banana + creatina" }
+    ]
+  },
+  {
+    type: "pranzo",
+    label: "Pranzo",
+    time: "13:00",
+    items: "Petto di pollo/tacchino 150g + riso basmati 100g + verdura + olio EVO 15g",
+    kcal: 690, protein: 40, carbs: 82, fats: 20,
+    variants: [
+      { label: "Opzione B", detail: "Merluzzo 200g o tonno al naturale 160g sgocciolato + patate 450g + verdura + olio 15g" },
+      { label: "Opzione C (fuori)", detail: "Poke: base riso, doppia proteina (pollo o salmone), verdure, no fritti, salse a metà dose" }
+    ]
+  },
+  {
+    type: "spuntino",
+    label: "Spuntino ~17:00",
+    time: "17:00",
+    items: "Yogurt greco 0% 200g + 1 frutto + mandorle 15g",
+    kcal: 300, protein: 24, carbs: 30, fats: 10,
+    variants: [
+      { label: "Opzione B", detail: "Quark Milboa 200g + 1 frutto + mandorle 15g" },
+      { label: "Opzione C (veloce)", detail: "Bevanda Milboa + mandorle 20g" }
+    ]
+  },
+  {
+    type: "cena",
+    label: "Cena",
+    time: "20:30",
+    items: "Pesce bianco 200g + 4 fette pancarrè 8 cereali + verdura + olio 12g",
+    kcal: 575, protein: 48, carbs: 52, fats: 17,
+    variants: [
+      { label: "Opzione B", detail: "Pollo/tacchino 180g o carne rossa magra 150g (max 2×/sett.) + patate 350g + verdura + olio 10g" },
+      { label: "Opzione C", detail: "Frittata: 3 uova + 100g albume + 4 fette pancarrè + verdura (senza olio aggiunto)" }
+    ]
+  },
+  {
+    type: "spuntino",
+    label: "Sera (opzionale)",
+    time: "22:00",
+    items: "Quark Milboa 150g",
+    kcal: 95, protein: 15, carbs: 6, fats: 1,
+    variants: [
+      { label: "Opzione B", detail: "Yogurt greco 150g" },
+      { label: "Opzione C", detail: "Whey 20g in acqua" }
+    ]
+  }
+];
+
+function sumMeals(meals) {
+  return meals.reduce((a, m) => ({
+    kcal: a.kcal + (m.kcal || 0),
+    protein: a.protein + (m.protein || 0),
+    carbs: a.carbs + (m.carbs || 0),
+    fats: a.fats + (m.fats || 0)
+  }), { kcal: 0, protein: 0, carbs: 0, fats: 0 });
+}
+
+const totOn = sumMeals(MEALS_ON);
+const totOff = sumMeals(MEALS_OFF);
+
+const DIET = {
+  name: "Mini-cut 2.300 kcal — Fase 1",
+  active: true,
+  updated_at: new Date().toISOString(),
+  day_on: {
+    kcal: totOn.kcal,
+    protein: totOn.protein,
+    carbs: totOn.carbs,
+    fats: totOn.fats,
+    meals: MEALS_ON
+  },
+  day_off: {
+    kcal: totOff.kcal,
+    protein: totOff.protein,
+    carbs: totOff.carbs,
+    fats: totOff.fats,
+    meals: MEALS_OFF
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  SEED FUNCTIONS
+// ═══════════════════════════════════════════════════════════════
+
+async function deactivateExisting(userId, collName) {
+  const { getDocs: gd } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js");
+  const snap = await gd(collection(db, 'users', userId, collName));
+  for (const d of snap.docs) {
+    if (d.data().active) {
+      await setDoc(doc(db, 'users', userId, collName, d.id), { active: false }, { merge: true });
+      log(`  ↳ Disattivato: ${d.data().name || d.id}`);
+    }
+  }
+}
+
+window.seedProgram = async function() {
+  const userId = getUserId();
+  if (!userId) { log('❌ Utente non autenticato! Fai login prima.', false); return; }
+  log(`👤 Utente: ${userId}`);
+
+  try {
+    log('💪 Disattivo schede esistenti...');
+    await deactivateExisting(userId, 'programs');
+
+    log('💪 Creazione scheda Upper/Lower ×2...');
+    const ref = await addDoc(collection(db, 'users', userId, 'programs'), PROGRAM);
+    log(`✅ Scheda creata! ID: ${ref.id}`);
+
+    const exCount = Object.values(PROGRAM.schedule)
+      .filter(Boolean)
+      .reduce((sum, day) => sum + (day.exercises?.length || 0), 0);
+    const dayCount = Object.values(PROGRAM.schedule).filter(Boolean).length;
+    log(`📊 ${dayCount} giorni, ${exCount} esercizi totali, ${PROGRAM.weeks} settimane`);
+  } catch(e) {
+    log(`❌ Errore scheda: ${e.message}`, false);
+    console.error(e);
+  }
+};
+
+window.seedDiet = async function() {
+  const userId = getUserId();
+  if (!userId) { log('❌ Utente non autenticato! Fai login prima.', false); return; }
+  log(`👤 Utente: ${userId}`);
+
+  try {
+    log('🥗 Disattivo piani dieta esistenti...');
+    await deactivateExisting(userId, 'diet_plans');
+
+    log('🥗 Creazione piano dieta 2.300 kcal...');
+    const ref = await addDoc(collection(db, 'users', userId, 'diet_plans'), DIET);
+    log(`✅ Piano dieta creato! ID: ${ref.id}`);
+    log(`📊 ON: ${DIET.day_on.kcal} kcal (P:${DIET.day_on.protein}g C:${DIET.day_on.carbs}g F:${DIET.day_on.fats}g) — ${DIET.day_on.meals.length} pasti`);
+    log(`📊 OFF: ${DIET.day_off.kcal} kcal (P:${DIET.day_off.protein}g C:${DIET.day_off.carbs}g F:${DIET.day_off.fats}g) — ${DIET.day_off.meals.length} pasti`);
+  } catch(e) {
+    log(`❌ Errore dieta: ${e.message}`, false);
+    console.error(e);
+  }
+};
+
+window.seedAll = async function() {
+  document.getElementById('seed-all').disabled = true;
+  document.getElementById('seed-all').textContent = '⏳ Caricamento...';
+  log('🚀 Inizio seed completo Fase 1...');
+  log('─'.repeat(40));
+
+  await window.seedProgram();
+  log('─'.repeat(40));
+  await window.seedDiet();
+
+  log('─'.repeat(40));
+  log('🎉 Seed completato! Torna alla home per verificare.');
+  document.getElementById('seed-all').textContent = '✅ Fatto!';
+};
+
+(async function() {
+  await requireAuth();
+  const userId = getUserId();
+  if (userId) {
+    log(`🔐 Autenticato come: ${userId}`);
+  } else {
+    log('⚠️ Non autenticato — fai login prima', false);
+  }
+})();
+</script>
+</body>
+</html>
