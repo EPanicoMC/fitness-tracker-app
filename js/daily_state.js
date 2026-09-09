@@ -3058,8 +3058,6 @@ async function buildPhaseAppointments() {
     }
 
     // ── WIDGET APPUNTAMENTI ──
-    const upcoming = events.filter(e => e.data >= TODAY && e.tipo !== 'fase').slice(0, 3);
-
     if (upcoming.length) {
       box.innerHTML = `
         <div style="background:linear-gradient(135deg,var(--bg2),#141416);border:1px solid var(--border);border-radius:16px;padding:16px;overflow:hidden">
