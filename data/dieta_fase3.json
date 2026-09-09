@@ -1,0 +1,1383 @@
+{
+  "meta": {
+    "atleta": "Enrico",
+    "fase": "Fase 3 - Cut",
+    "versione": "2026-09-09-r2",
+    "valido_dal": "2026-09-14",
+    "valido_al": "2026-12-06",
+    "stato_calorie": "PROVVISORIE - taratura sul trend reale il 21/09 e il 05/10",
+    "grammature": "a crudo",
+    "tdee_stimato_kcal": 2550,
+    "deficit_medio_kcal": -575,
+    "tolleranza": "Target giornalieri = somma delle opzioni A. Le altre opzioni stanno entro +/-40 kcal, +/-8 g P, +/-10 g C, +/-5 g G. Differenze fino a +/-60 kcal e +/-8 g per macro rispetto a un altro database sono normali.",
+    "pre_workout": "Solo caffe' (1-2 espressi) alle 5:40. Nessun cibo. Il whey pre-seduta e' stato eliminato e spostato nel post-workout (40 g). Se calo di energia negli ultimi 20 min per 2 sedute di fila: aggiungere 1 banana piccola alle 5:40."
+  },
+  "valori_riferimento_per_100g": {
+    "whey_prozis_real_whey": {
+      "kcal": 380,
+      "P": 78,
+      "C": 6,
+      "G": 5
+    },
+    "farina_di_riso": {
+      "kcal": 360,
+      "P": 6,
+      "C": 80,
+      "G": 1
+    },
+    "fiocchi_avena": {
+      "kcal": 370,
+      "P": 13,
+      "C": 60,
+      "G": 7
+    },
+    "corn_flakes": {
+      "kcal": 370,
+      "P": 7,
+      "C": 84,
+      "G": 1
+    },
+    "banana": {
+      "kcal": 89,
+      "P": 1,
+      "C": 23,
+      "G": 0.3
+    },
+    "frutto_medio": {
+      "kcal": 52,
+      "P": 0.3,
+      "C": 12,
+      "G": 0.1
+    },
+    "frutti_di_bosco": {
+      "kcal": 57,
+      "P": 0.7,
+      "C": 14,
+      "G": 0.3
+    },
+    "yogurt_greco_0": {
+      "kcal": 57,
+      "P": 10,
+      "C": 4,
+      "G": 0.2
+    },
+    "quark_magro": {
+      "kcal": 67,
+      "P": 12,
+      "C": 4,
+      "G": 0.2
+    },
+    "fiocchi_di_latte_magri": {
+      "kcal": 80,
+      "P": 12,
+      "C": 3,
+      "G": 2
+    },
+    "milbona_35g_pezzo": {
+      "kcal": 250,
+      "P": 35,
+      "C": 22,
+      "G": 3.5
+    },
+    "petto_pollo": {
+      "kcal": 110,
+      "P": 23,
+      "C": 0,
+      "G": 1.5
+    },
+    "pollo_tacchino_grigliato_pronto": {
+      "kcal": 120,
+      "P": 25,
+      "C": 0,
+      "G": 2
+    },
+    "tonno_naturale_sgocciolato": {
+      "kcal": 110,
+      "P": 25,
+      "C": 0,
+      "G": 1
+    },
+    "pesce_bianco": {
+      "kcal": 90,
+      "P": 19,
+      "C": 0,
+      "G": 2
+    },
+    "gamberi": {
+      "kcal": 85,
+      "P": 20,
+      "C": 0,
+      "G": 0.8
+    },
+    "salmone_fresco": {
+      "kcal": 200,
+      "P": 20,
+      "C": 0,
+      "G": 13
+    },
+    "salmone_affumicato": {
+      "kcal": 180,
+      "P": 22,
+      "C": 0,
+      "G": 10
+    },
+    "uovo_intero_pezzo_60g": {
+      "kcal": 86,
+      "P": 7.6,
+      "C": 0.3,
+      "G": 5.9
+    },
+    "albume": {
+      "kcal": 48,
+      "P": 11,
+      "C": 0.7,
+      "G": 0
+    },
+    "riso_basmati": {
+      "kcal": 350,
+      "P": 8,
+      "C": 78,
+      "G": 1
+    },
+    "pasta": {
+      "kcal": 355,
+      "P": 12,
+      "C": 72,
+      "G": 1.5
+    },
+    "cous_cous": {
+      "kcal": 360,
+      "P": 12,
+      "C": 72,
+      "G": 1.5
+    },
+    "patate": {
+      "kcal": 77,
+      "P": 2,
+      "C": 17,
+      "G": 0.1
+    },
+    "pancarre_8_cereali_fetta_30g": {
+      "kcal": 75,
+      "P": 2.7,
+      "C": 12.5,
+      "G": 1.3
+    },
+    "verdura_mista_200g": {
+      "kcal": 50,
+      "P": 3,
+      "C": 8,
+      "G": 0.5
+    },
+    "olio_evo": {
+      "kcal": 900,
+      "P": 0,
+      "C": 0,
+      "G": 100
+    },
+    "mandorle": {
+      "kcal": 600,
+      "P": 20,
+      "C": 7,
+      "G": 53
+    },
+    "noci": {
+      "kcal": 670,
+      "P": 15,
+      "C": 7,
+      "G": 67
+    },
+    "burro_arachidi_100": {
+      "kcal": 600,
+      "P": 25,
+      "C": 15,
+      "G": 50
+    },
+    "miele": {
+      "kcal": 300,
+      "P": 0,
+      "C": 80,
+      "G": 0
+    }
+  },
+  "target_giornalieri": {
+    "allenamento": {
+      "giorni": [
+        "martedi",
+        "mercoledi",
+        "venerdi",
+        "sabato"
+      ],
+      "kcal": 2140,
+      "P": 189,
+      "C": 219,
+      "G": 53
+    },
+    "riposo": {
+      "giorni": [
+        "lunedi",
+        "giovedi",
+        "domenica"
+      ],
+      "kcal": 1800,
+      "P": 173,
+      "C": 139,
+      "G": 58
+    },
+    "media_settimanale": {
+      "kcal": 1995,
+      "P": 182,
+      "C": 185,
+      "G": 55
+    },
+    "regole": [
+      "Se la seduta slitta a domenica o lunedi, quel giorno diventa giorno di allenamento (colazione post-workout) e il giorno originario diventa di riposo. Le kcal seguono la seduta.",
+      "Le proteine si raggiungono ogni giorno (tolleranza 170-195 g). Se salta un pasto, si recuperano con whey o quark, non con carboidrati.",
+      "Verdura libera, minimo 200 g a pranzo e cena, conteggiata 50 kcal/200 g.",
+      "Acqua 2.5-3 L/die. Sale normale. Frutta 2 porzioni/die, gia' nel piano.",
+      "Giorno completo = tutte le righe fatte con un'opzione del piano e kcal entro +/-100 dal target.",
+      "La leva calorica si tocca solo con aderenza settimanale >= 90%."
+    ]
+  },
+  "giorno_allenamento": [
+    {
+      "pasto": "Pre-workout",
+      "ora": "05:40",
+      "target": {
+        "kcal": 0,
+        "P": 0,
+        "C": 0,
+        "G": 0
+      },
+      "opzioni": [
+        {
+          "id": "A",
+          "alimenti": [
+            {
+              "nome": "Caffe espresso",
+              "n": "1-2"
+            }
+          ],
+          "kcal": 0,
+          "P": 0,
+          "C": 0,
+          "G": 0
+        }
+      ]
+    },
+    {
+      "pasto": "Post-workout (entro 45 min)",
+      "ora": "07:15",
+      "target": {
+        "kcal": 440,
+        "P": 35,
+        "C": 65,
+        "G": 3
+      },
+      "opzioni": [
+        {
+          "id": "A",
+          "alimenti": [
+            {
+              "nome": "Farina di riso",
+              "g": 45
+            },
+            {
+              "nome": "Whey",
+              "g": 40
+            },
+            {
+              "nome": "Banana",
+              "g": 120
+            }
+          ],
+          "kcal": 421,
+          "P": 35,
+          "C": 65,
+          "G": 3
+        },
+        {
+          "id": "B",
+          "alimenti": [
+            {
+              "nome": "Fiocchi d'avena",
+              "g": 60
+            },
+            {
+              "nome": "Whey",
+              "g": 40
+            },
+            {
+              "nome": "Mirtilli",
+              "g": 100
+            }
+          ],
+          "kcal": 431,
+          "P": 40,
+          "C": 52,
+          "G": 6
+        },
+        {
+          "id": "C",
+          "alimenti": [
+            {
+              "nome": "Yogurt greco 0%",
+              "g": 200
+            },
+            {
+              "nome": "Whey",
+              "g": 30
+            },
+            {
+              "nome": "Corn flakes",
+              "g": 55
+            }
+          ],
+          "kcal": 432,
+          "P": 47,
+          "C": 56,
+          "G": 3
+        }
+      ]
+    },
+    {
+      "pasto": "Pranzo",
+      "ora": "12:45",
+      "target": {
+        "kcal": 610,
+        "P": 49,
+        "C": 60,
+        "G": 19
+      },
+      "opzioni": [
+        {
+          "id": "A",
+          "alimenti": [
+            {
+              "nome": "Petto di pollo",
+              "g": 180
+            },
+            {
+              "nome": "Riso basmati",
+              "g": 65
+            },
+            {
+              "nome": "Verdura mista",
+              "g": "libera, min 200"
+            },
+            {
+              "nome": "Olio EVO",
+              "g": 15
+            }
+          ],
+          "kcal": 611,
+          "P": 49,
+          "C": 59,
+          "G": 19
+        },
+        {
+          "id": "B",
+          "alimenti": [
+            {
+              "nome": "Tonno al naturale sgocciolato",
+              "g": 150
+            },
+            {
+              "nome": "Pasta",
+              "g": 80
+            },
+            {
+              "nome": "Verdura mista",
+              "g": "libera, min 200"
+            },
+            {
+              "nome": "Olio EVO",
+              "g": 15
+            }
+          ],
+          "kcal": 634,
+          "P": 50,
+          "C": 66,
+          "G": 18
+        },
+        {
+          "id": "C",
+          "alimenti": [
+            {
+              "nome": "Gamberi",
+              "g": 200
+            },
+            {
+              "nome": "Patate",
+              "g": 300
+            },
+            {
+              "nome": "Verdura mista",
+              "g": "libera, min 200"
+            },
+            {
+              "nome": "Olio EVO",
+              "g": 18
+            }
+          ],
+          "kcal": 613,
+          "P": 49,
+          "C": 60,
+          "G": 20
+        },
+        {
+          "id": "D",
+          "alimenti": [
+            {
+              "nome": "Uova intere",
+              "n": 3
+            },
+            {
+              "nome": "Albume",
+              "g": 100
+            },
+            {
+              "nome": "Riso basmati",
+              "g": 70
+            },
+            {
+              "nome": "Verdura mista",
+              "g": "libera, min 200"
+            }
+          ],
+          "kcal": 600,
+          "P": 43,
+          "C": 64,
+          "G": 19,
+          "nota": "senza EVO, padella antiaderente"
+        },
+        {
+          "id": "E",
+          "alimenti": [
+            {
+              "nome": "Salmone affumicato",
+              "g": 150
+            },
+            {
+              "nome": "Patate",
+              "g": 300
+            },
+            {
+              "nome": "Verdura mista",
+              "g": "libera, min 200"
+            },
+            {
+              "nome": "Olio EVO",
+              "g": 5
+            }
+          ],
+          "kcal": 596,
+          "P": 42,
+          "C": 60,
+          "G": 21
+        }
+      ]
+    },
+    {
+      "pasto": "Spuntino",
+      "ora": "16:30",
+      "target": {
+        "kcal": 320,
+        "P": 36,
+        "C": 38,
+        "G": 4
+      },
+      "opzioni": [
+        {
+          "id": "A",
+          "alimenti": [
+            {
+              "nome": "Milbona high protein 35 g",
+              "n": 1
+            },
+            {
+              "nome": "Frutto",
+              "g": 150
+            }
+          ],
+          "kcal": 328,
+          "P": 36,
+          "C": 40,
+          "G": 4
+        },
+        {
+          "id": "B",
+          "alimenti": [
+            {
+              "nome": "Quark magro",
+              "g": 250
+            },
+            {
+              "nome": "Frutto",
+              "g": 150
+            },
+            {
+              "nome": "Miele",
+              "g": 10
+            }
+          ],
+          "kcal": 276,
+          "P": 31,
+          "C": 36,
+          "G": 1
+        },
+        {
+          "id": "C",
+          "alimenti": [
+            {
+              "nome": "Yogurt greco 0%",
+              "g": 200
+            },
+            {
+              "nome": "Whey",
+              "g": 30
+            },
+            {
+              "nome": "Frutto",
+              "g": 150
+            }
+          ],
+          "kcal": 306,
+          "P": 44,
+          "C": 28,
+          "G": 2
+        }
+      ]
+    },
+    {
+      "pasto": "Cena",
+      "ora": "20:15",
+      "target": {
+        "kcal": 545,
+        "P": 45,
+        "C": 46,
+        "G": 16
+      },
+      "opzioni": [
+        {
+          "id": "A",
+          "alimenti": [
+            {
+              "nome": "Pesce bianco (merluzzo/orata/branzino)",
+              "g": 180
+            },
+            {
+              "nome": "Pancarre 8 cereali",
+              "fette": 3
+            },
+            {
+              "nome": "Verdura mista",
+              "g": "libera, min 200"
+            },
+            {
+              "nome": "Olio EVO",
+              "g": 12
+            }
+          ],
+          "kcal": 545,
+          "P": 45,
+          "C": 46,
+          "G": 16
+        },
+        {
+          "id": "B",
+          "alimenti": [
+            {
+              "nome": "Pollo/tacchino grigliato pronto",
+              "g": 150
+            },
+            {
+              "nome": "Pancarre 8 cereali",
+              "fette": 3
+            },
+            {
+              "nome": "Verdura mista",
+              "g": "libera, min 200"
+            },
+            {
+              "nome": "Olio EVO",
+              "g": 10
+            }
+          ],
+          "kcal": 545,
+          "P": 49,
+          "C": 46,
+          "G": 15
+        },
+        {
+          "id": "C",
+          "alimenti": [
+            {
+              "nome": "Gamberi",
+              "g": 200
+            },
+            {
+              "nome": "Cous cous",
+              "g": 60
+            },
+            {
+              "nome": "Verdura mista",
+              "g": "libera, min 200"
+            },
+            {
+              "nome": "Olio EVO",
+              "g": 12
+            }
+          ],
+          "kcal": 544,
+          "P": 50,
+          "C": 51,
+          "G": 15
+        },
+        {
+          "id": "D",
+          "alimenti": [
+            {
+              "nome": "Salmone fresco",
+              "g": 150
+            },
+            {
+              "nome": "Verdura mista",
+              "g": 300
+            },
+            {
+              "nome": "Pancarre 8 cereali",
+              "fette": 1
+            }
+          ],
+          "kcal": 450,
+          "P": 37,
+          "C": 25,
+          "G": 22,
+          "nota": "senza EVO. Se scelta, la sera prendere opzione B"
+        }
+      ]
+    },
+    {
+      "pasto": "Sera",
+      "ora": "22:30",
+      "target": {
+        "kcal": 235,
+        "P": 24,
+        "C": 10,
+        "G": 11
+      },
+      "opzioni": [
+        {
+          "id": "A",
+          "alimenti": [
+            {
+              "nome": "Yogurt greco 0%",
+              "g": 200
+            },
+            {
+              "nome": "Mandorle",
+              "g": 20
+            }
+          ],
+          "kcal": 234,
+          "P": 24,
+          "C": 9,
+          "G": 11
+        },
+        {
+          "id": "B",
+          "alimenti": [
+            {
+              "nome": "Quark magro",
+              "g": 250
+            },
+            {
+              "nome": "Burro di arachidi 100%",
+              "g": 10
+            }
+          ],
+          "kcal": 228,
+          "P": 33,
+          "C": 12,
+          "G": 6
+        },
+        {
+          "id": "C",
+          "alimenti": [
+            {
+              "nome": "Fiocchi di latte magri",
+              "g": 200
+            },
+            {
+              "nome": "Noci",
+              "g": 10
+            }
+          ],
+          "kcal": 227,
+          "P": 25,
+          "C": 7,
+          "G": 11
+        }
+      ]
+    }
+  ],
+  "giorno_riposo": [
+    {
+      "pasto": "Colazione",
+      "ora": "08:00",
+      "target": {
+        "kcal": 310,
+        "P": 25,
+        "C": 28,
+        "G": 11
+      },
+      "opzioni": [
+        {
+          "id": "A",
+          "alimenti": [
+            {
+              "nome": "Yogurt greco 0%",
+              "g": 200
+            },
+            {
+              "nome": "Frutto",
+              "g": 150
+            },
+            {
+              "nome": "Mandorle",
+              "g": 20
+            }
+          ],
+          "kcal": 312,
+          "P": 25,
+          "C": 28,
+          "G": 11
+        },
+        {
+          "id": "B",
+          "alimenti": [
+            {
+              "nome": "Quark magro",
+              "g": 250
+            },
+            {
+              "nome": "Frutti di bosco",
+              "g": 100
+            },
+            {
+              "nome": "Burro di arachidi 100%",
+              "g": 15
+            }
+          ],
+          "kcal": 315,
+          "P": 34,
+          "C": 26,
+          "G": 8
+        },
+        {
+          "id": "C",
+          "alimenti": [
+            {
+              "nome": "Uova intere",
+              "n": 2
+            },
+            {
+              "nome": "Albume",
+              "g": 120
+            },
+            {
+              "nome": "Pancarre 8 cereali",
+              "fette": 1
+            }
+          ],
+          "kcal": 304,
+          "P": 31,
+          "C": 14,
+          "G": 13
+        }
+      ]
+    },
+    {
+      "pasto": "Pranzo",
+      "ora": "12:45",
+      "target": {
+        "kcal": 560,
+        "P": 48,
+        "C": 47,
+        "G": 19
+      },
+      "opzioni": [
+        {
+          "id": "A",
+          "alimenti": [
+            {
+              "nome": "Petto di pollo",
+              "g": 180
+            },
+            {
+              "nome": "Riso basmati",
+              "g": 50
+            },
+            {
+              "nome": "Verdura mista",
+              "g": "libera, min 200"
+            },
+            {
+              "nome": "Olio EVO",
+              "g": 15
+            }
+          ],
+          "kcal": 558,
+          "P": 48,
+          "C": 47,
+          "G": 19
+        },
+        {
+          "id": "B",
+          "alimenti": [
+            {
+              "nome": "Tonno al naturale sgocciolato",
+              "g": 150
+            },
+            {
+              "nome": "Pasta",
+              "g": 60
+            },
+            {
+              "nome": "Verdura mista",
+              "g": "libera, min 200"
+            },
+            {
+              "nome": "Olio EVO",
+              "g": 15
+            }
+          ],
+          "kcal": 563,
+          "P": 47,
+          "C": 51,
+          "G": 18
+        },
+        {
+          "id": "C",
+          "alimenti": [
+            {
+              "nome": "Gamberi",
+              "g": 200
+            },
+            {
+              "nome": "Patate",
+              "g": 200
+            },
+            {
+              "nome": "Verdura mista",
+              "g": "libera, min 200"
+            },
+            {
+              "nome": "Olio EVO",
+              "g": 18
+            }
+          ],
+          "kcal": 536,
+          "P": 47,
+          "C": 42,
+          "G": 20
+        },
+        {
+          "id": "D",
+          "alimenti": [
+            {
+              "nome": "Uova intere",
+              "n": 3
+            },
+            {
+              "nome": "Albume",
+              "g": 100
+            },
+            {
+              "nome": "Riso basmati",
+              "g": 50
+            },
+            {
+              "nome": "Verdura mista",
+              "g": "libera, min 200"
+            }
+          ],
+          "kcal": 530,
+          "P": 41,
+          "C": 48,
+          "G": 19,
+          "nota": "senza EVO"
+        },
+        {
+          "id": "E",
+          "alimenti": [
+            {
+              "nome": "Salmone affumicato",
+              "g": 150
+            },
+            {
+              "nome": "Patate",
+              "g": 200
+            },
+            {
+              "nome": "Verdura mista",
+              "g": "libera, min 200"
+            },
+            {
+              "nome": "Olio EVO",
+              "g": 5
+            }
+          ],
+          "kcal": 519,
+          "P": 40,
+          "C": 42,
+          "G": 21
+        }
+      ]
+    },
+    {
+      "pasto": "Spuntino",
+      "ora": "16:30",
+      "target": {
+        "kcal": 250,
+        "P": 35,
+        "C": 22,
+        "G": 4
+      },
+      "opzioni": [
+        {
+          "id": "A",
+          "alimenti": [
+            {
+              "nome": "Milbona high protein 35 g",
+              "n": 1
+            }
+          ],
+          "kcal": 250,
+          "P": 35,
+          "C": 22,
+          "G": 4
+        },
+        {
+          "id": "B",
+          "alimenti": [
+            {
+              "nome": "Quark magro",
+              "g": 250
+            },
+            {
+              "nome": "Frutto piccolo",
+              "g": 100
+            }
+          ],
+          "kcal": 220,
+          "P": 30,
+          "C": 22,
+          "G": 1
+        },
+        {
+          "id": "C",
+          "alimenti": [
+            {
+              "nome": "Whey in acqua",
+              "g": 30
+            },
+            {
+              "nome": "Frutto",
+              "g": 150
+            }
+          ],
+          "kcal": 192,
+          "P": 24,
+          "C": 20,
+          "G": 2
+        }
+      ]
+    },
+    {
+      "pasto": "Cena",
+      "ora": "20:15",
+      "target": {
+        "kcal": 495,
+        "P": 42,
+        "C": 33,
+        "G": 18
+      },
+      "opzioni": [
+        {
+          "id": "A",
+          "alimenti": [
+            {
+              "nome": "Pesce bianco (merluzzo/orata/branzino)",
+              "g": 180
+            },
+            {
+              "nome": "Pancarre 8 cereali",
+              "fette": 2
+            },
+            {
+              "nome": "Verdura mista",
+              "g": "libera, min 200"
+            },
+            {
+              "nome": "Olio EVO",
+              "g": 15
+            }
+          ],
+          "kcal": 497,
+          "P": 42,
+          "C": 33,
+          "G": 18
+        },
+        {
+          "id": "B",
+          "alimenti": [
+            {
+              "nome": "Pollo/tacchino grigliato pronto",
+              "g": 150
+            },
+            {
+              "nome": "Pancarre 8 cereali",
+              "fette": 2
+            },
+            {
+              "nome": "Verdura mista",
+              "g": "libera, min 200"
+            },
+            {
+              "nome": "Olio EVO",
+              "g": 12
+            }
+          ],
+          "kcal": 488,
+          "P": 46,
+          "C": 33,
+          "G": 16
+        },
+        {
+          "id": "C",
+          "alimenti": [
+            {
+              "nome": "Gamberi",
+              "g": 200
+            },
+            {
+              "nome": "Cous cous",
+              "g": 40
+            },
+            {
+              "nome": "Verdura mista",
+              "g": "libera, min 200"
+            },
+            {
+              "nome": "Olio EVO",
+              "g": 15
+            }
+          ],
+          "kcal": 499,
+          "P": 48,
+          "C": 37,
+          "G": 18
+        },
+        {
+          "id": "D",
+          "alimenti": [
+            {
+              "nome": "Salmone fresco",
+              "g": 150
+            },
+            {
+              "nome": "Verdura mista",
+              "g": 300
+            },
+            {
+              "nome": "Pancarre 8 cereali",
+              "fette": 1
+            }
+          ],
+          "kcal": 450,
+          "P": 37,
+          "C": 25,
+          "G": 22,
+          "nota": "senza EVO"
+        }
+      ]
+    },
+    {
+      "pasto": "Sera",
+      "ora": "22:30",
+      "target": {
+        "kcal": 190,
+        "P": 23,
+        "C": 9,
+        "G": 7
+      },
+      "opzioni": [
+        {
+          "id": "A",
+          "alimenti": [
+            {
+              "nome": "Yogurt greco 0%",
+              "g": 200
+            },
+            {
+              "nome": "Mandorle",
+              "g": 12
+            }
+          ],
+          "kcal": 186,
+          "P": 23,
+          "C": 9,
+          "G": 7
+        },
+        {
+          "id": "B",
+          "alimenti": [
+            {
+              "nome": "Quark magro",
+              "g": 250
+            },
+            {
+              "nome": "Burro di arachidi 100%",
+              "g": 8
+            }
+          ],
+          "kcal": 216,
+          "P": 32,
+          "C": 11,
+          "G": 5
+        },
+        {
+          "id": "C",
+          "alimenti": [
+            {
+              "nome": "Fiocchi di latte magri",
+              "g": 200
+            },
+            {
+              "nome": "Noci",
+              "g": 8
+            }
+          ],
+          "kcal": 213,
+          "P": 25,
+          "C": 7,
+          "G": 10
+        }
+      ]
+    }
+  ],
+  "pasti_fuori_casa": {
+    "frequenza": "2-3 a settimana",
+    "regole": [
+      "Proteina prima: una porzione di carne o pesce grande almeno come il palmo aperto.",
+      "Un carboidrato solo: pane oppure primo oppure patate. Mai due.",
+      "Verdura in ogni pasto fuori.",
+      "Condimenti, salse, formaggi extra e fritti a parte o assenti.",
+      "Il pasto fuori sostituisce: quel giorno lo spuntino diventa solo proteine (quark o whey), senza frutta.",
+      "Pasto fuori a pranzo in giorno di riposo -> cena opzione D o A con 1 sola fetta di pane."
+    ]
+  },
+  "protocollo_weekend_alcol": {
+    "frequenza_attesa": "3-4 serate al mese",
+    "regole": [
+      "Numero di drink deciso da sobrio prima di uscire, massimo 4. Scritto nelle note del telefono prima del primo.",
+      "Pre-load proteico 25 min prima: 30 g whey o 250 g quark.",
+      "Cena della serata = proteine + verdura, senza carboidrati. I drink prendono il posto dei carboidrati di quella cena.",
+      "Drink lunghi e chiari: gin+soda+lime, vodka+soda, spritz allungato. Mai cocktail dolci, mai shot, mai birra oltre la prima.",
+      "Un bicchiere d'acqua tra un drink e l'altro.",
+      "Ultimo drink = ultimo. Poi acqua. Se fame: 1 Milbona in frigo.",
+      "Giorno dopo: colazione normale del piano riposo, 40 g proteine a pasto, 13.000 passi, seduta se prevista. Vietati digiuno, cardio punitivo, salto seduta. Il peso dei 2-3 giorni dopo non si commenta."
+    ]
+  },
+  "integratori": [
+    {
+      "nome": "Creatina monoidrato",
+      "dose": "5 g/die",
+      "quando": "con il post-workout o con la colazione di riposo",
+      "note": "Carico completato il 13/09. Mai saltare piu di 2 giorni di fila."
+    },
+    {
+      "nome": "Whey (Prozis Real Whey)",
+      "dose": "40 g post-workout nei giorni di allenamento; 30 g negli spuntini secondo piano",
+      "note": "Conta nelle proteine, non e' un extra. Nessun whey pre-workout."
+    },
+    {
+      "nome": "Omega 3",
+      "dose": "2 g EPA+DHA/die",
+      "quando": "pranzo e cena con l'EVO; colazione nei giorni di riposo"
+    },
+    {
+      "nome": "Vitamina D3+K2",
+      "dose": "da etichetta, 1x/die",
+      "quando": "cena"
+    },
+    {
+      "nome": "Magnesio bisglicinato",
+      "dose": "300 mg",
+      "quando": "30-60 min prima di dormire"
+    },
+    {
+      "nome": "Caffeina",
+      "dose": "100-200 mg (1-2 espressi)",
+      "quando": "05:40, e' l'unico pre-workout",
+      "note": "Nessun caffe dopo le 14:00."
+    },
+    {
+      "nome": "Barrette proteiche",
+      "dose": "max 2/settimana",
+      "note": "Emergenza. Contano nei carboidrati del giorno."
+    }
+  ],
+  "lista_spesa_settimanale": [
+    {
+      "alimento": "Petto di pollo / tacchino",
+      "quantita": "1.2 kg",
+      "nota": "anche grigliato pronto sottovuoto"
+    },
+    {
+      "alimento": "Pesce bianco a filetti (merluzzo, orata, branzino)",
+      "quantita": "900 g",
+      "nota": "surgelato ok"
+    },
+    {
+      "alimento": "Salmone fresco",
+      "quantita": "300 g"
+    },
+    {
+      "alimento": "Gamberi surgelati",
+      "quantita": "400 g"
+    },
+    {
+      "alimento": "Tonno al naturale",
+      "quantita": "4 scatole da 160 g"
+    },
+    {
+      "alimento": "Salmone affumicato",
+      "quantita": "200 g"
+    },
+    {
+      "alimento": "Uova",
+      "quantita": "12"
+    },
+    {
+      "alimento": "Albume in brik",
+      "quantita": "500 ml"
+    },
+    {
+      "alimento": "Yogurt greco 0%",
+      "quantita": "2.5 kg"
+    },
+    {
+      "alimento": "Quark magro",
+      "quantita": "1 kg"
+    },
+    {
+      "alimento": "Fiocchi di latte magri",
+      "quantita": "400 g"
+    },
+    {
+      "alimento": "Milbona high protein 35 g",
+      "quantita": "5"
+    },
+    {
+      "alimento": "Whey",
+      "quantita": "400 g di consumo"
+    },
+    {
+      "alimento": "Farina di riso",
+      "quantita": "300 g"
+    },
+    {
+      "alimento": "Fiocchi d'avena",
+      "quantita": "300 g"
+    },
+    {
+      "alimento": "Riso basmati",
+      "quantita": "500 g"
+    },
+    {
+      "alimento": "Pasta",
+      "quantita": "300 g"
+    },
+    {
+      "alimento": "Cous cous",
+      "quantita": "200 g"
+    },
+    {
+      "alimento": "Patate",
+      "quantita": "800 g"
+    },
+    {
+      "alimento": "Pancarre 8 cereali",
+      "quantita": "1 confezione"
+    },
+    {
+      "alimento": "Banane",
+      "quantita": "5"
+    },
+    {
+      "alimento": "Frutta (mele, pere, kiwi, arance)",
+      "quantita": "10 pezzi"
+    },
+    {
+      "alimento": "Frutti di bosco surgelati",
+      "quantita": "500 g"
+    },
+    {
+      "alimento": "Verdura (zucchine, broccoli, spinaci, insalata, pomodori, peperoni)",
+      "quantita": "3.5 kg",
+      "nota": "surgelata e in busta pronta ok"
+    },
+    {
+      "alimento": "Olio EVO",
+      "quantita": "250 ml"
+    },
+    {
+      "alimento": "Mandorle / noci",
+      "quantita": "200 g"
+    },
+    {
+      "alimento": "Burro di arachidi 100%",
+      "quantita": "1 vasetto"
+    },
+    {
+      "alimento": "Miele",
+      "quantita": "1 vasetto"
+    }
+  ],
+  "export_per_check": {
+    "tabella_giornaliera": {
+      "una_riga_per": "giorno, tutti i giorni",
+      "campi": [
+        "data",
+        "tipo_giorno (allenamento/riposo, segue la seduta)",
+        "peso (kg, 1 decimale, mattina a digiuno; vuoto se non pesato)",
+        "kcal",
+        "proteine_g",
+        "carbo_g",
+        "grassi_g",
+        "giorno_completo (si/no)",
+        "passi",
+        "sonno_h (1 decimale)",
+        "drink (0 se nessuno)",
+        "pasti_fuori",
+        "note"
+      ]
+    },
+    "riepilogo_settimanale_calcolato": {
+      "campi": [
+        "peso_media_7gg e delta vs settimana precedente (vuoto se < 4 pesate)",
+        "vita_cm (domenica mattina)",
+        "aderenza_pct = giorni_completi/7",
+        "kcal_medie, P_medie, C_medie, G_medie",
+        "sonno_medio, notti_sotto_5h",
+        "passi_medi",
+        "drink_totali, serate_alcoliche"
+      ]
+    },
+    "formato": "CSV o JSON",
+    "cadenza": "Riepilogo settimanale ogni domenica (micro-check). Tabella giornaliera conservata, richiesta solo se un trend non torna."
+  }
+}

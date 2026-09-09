@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KOVA. – Export Dati</title>
+  <link href="https://cdn.jsdelivr.net/npm/remixicon@4.2.0/fonts/remixicon.css" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    /* Stili specifici per la pagina export */
+    .export-subtitle {
+      font-size: 14px;
+      color: var(--t2);
+      margin-top: -12px;
+      margin-bottom: 20px;
+    }
+    .date-range {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .date-range label {
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      color: var(--t2);
+    }
+    .date-range input[type="date"] {
+      background: rgba(255,255,255,.05);
+      border: 1px solid var(--border);
+      border-radius: var(--rs);
+      padding: 10px 12px;
+      color: var(--t1);
+      font-family: 'Outfit', sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      flex: 1;
+    }
+    .date-range input[type="date"]:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    /* Supporto colorScheme per date picker su dark mode */
+    .date-range input[type="date"]::-webkit-calendar-picker-indicator {
+      filter: invert(1);
+    }
+    .export-card {
+      position: relative;
+    }
+    .export-card .card-title {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .export-card .card-desc {
+      font-size: 12px;
+      color: var(--t2);
+      margin-bottom: 12px;
+    }
+    .preview-wrap {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow-x: auto;
+      max-height: 140px;
+      overflow-y: auto;
+      margin-bottom: 12px;
+      -webkit-overflow-scrolling: touch;
+    }
+    .preview-wrap pre {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 10px;
+      line-height: 1.6;
+      color: var(--t2);
+      padding: 10px 12px;
+      white-space: pre;
+      min-width: max-content;
+    }
+    .preview-wrap .header-row {
+      color: var(--accent);
+      font-weight: 700;
+    }
+    .row-count {
+      font-size: 11px;
+      color: var(--t3);
+      margin-bottom: 10px;
+    }
+    .btn-copy {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--rs);
+      background: rgba(255,255,255,.06);
+      color: var(--t1);
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all .2s;
+    }
+    .btn-copy:active {
+      transform: scale(.97);
+      opacity: .88;
+    }
+    .btn-copy.copied {
+      background: rgba(28,227,112,.12);
+      border-color: rgba(28,227,112,.4);
+      color: var(--green);
+    }
+    .btn-copy-all {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      padding: 16px;
+      border: none;
+      border-radius: var(--r);
+      background: var(--accent);
+      color: #fff;
+      font-size: 16px;
+      font-weight: 800;
+      cursor: pointer;
+      margin-top: 8px;
+      transition: all .2s;
+    }
+    .btn-copy-all:active {
+      transform: scale(.97);
+      opacity: .88;
+    }
+    .btn-copy-all.copied {
+      background: var(--green);
+      color: #000;
+    }
+    /* Toast notifica */
+    .toast {
+      position: fixed;
+      bottom: 100px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: var(--green);
+      color: #000;
+      padding: 10px 20px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 700;
+      opacity: 0;
+      pointer-events: none;
+      transition: all .3s ease;
+      z-index: 9999;
+      white-space: nowrap;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+    .loading-msg {
+      text-align: center;
+      color: var(--t3);
+      font-size: 13px;
+      padding: 20px;
+    }
+    .error-msg {
+      text-align: center;
+      color: var(--red);
+      font-size: 13px;
+      padding: 12px;
+    }
+    .separator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--t3);
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin: 4px 0;
+    }
+    .separator::before, .separator::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="ph"><h1>Export Dati</h1></div>
+  <p class="export-subtitle">Genera tabelle per il tuo analista AI</p>
+
+  <!-- Selettore intervallo date -->
+  <div class="card">
+    <div class="date-range">
+      <div style="flex:1">
+        <label>Da</label>
+        <input type="date" id="date-from" class="fi" style="margin-top:4px">
+      </div>
+      <div style="flex:1">
+        <label>A</label>
+        <input type="date" id="date-to" class="fi" style="margin-top:4px">
+      </div>
+    </div>
+    <button class="btn btn-flat btn-sm" onclick="window.loadData()" style="width:100%">
+      <i class="ri-refresh-line"></i> Aggiorna dati
+    </button>
+  </div>
+
+  <!-- Contenitore card export -->
+  <div id="export-container">
+    <div class="loading-msg">Caricamento dati...</div>
+  </div>
+
+  <!-- Bottone copia tutto -->
+  <button class="btn-copy-all" id="btn-copy-all" onclick="window.copyAll()" style="display:none">
+    Copia Tutto
+  </button>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script type="module">
+import {
+  db, getUserId, doc, getDoc, getDocs, collection, query, where, orderBy
+} from './js/firebase-config.js';
+import { requireAuth } from './js/app.js';
+
+// ═══════════════════════════════════════════════════════════════
+//  VARIABILI GLOBALI
+// ═══════════════════════════════════════════════════════════════
+
+// Dati caricati da Firestore
+let dailyLogs = [];     // array di oggetti daily_log
+let checks = [];        // array di check corporei
+let activeProgram = null; // programma attivo (scheda)
+let dietPlan = null;    // piano dieta attivo (per target kcal)
+
+// TSV generati (per il copia tutto)
+let tsvDaily = '';
+let tsvSession = '';
+let tsvWeekly = '';
+
+// ═══════════════════════════════════════════════════════════════
+//  UTILITA'
+// ═══════════════════════════════════════════════════════════════
+
+/** Mostra un toast di conferma */
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+/** Copia testo nella clipboard e mostra feedback */
+async function copyToClipboard(text, btnId) {
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast('Copiato negli appunti!');
+    if (btnId) {
+      const btn = document.getElementById(btnId);
+      if (btn) {
+        btn.classList.add('copied');
+        const orig = btn.innerHTML;
+        btn.innerHTML = '<i class="ri-check-line"></i> Copiato!';
+        setTimeout(() => {
+          btn.classList.remove('copied');
+          btn.innerHTML = orig;
+        }, 2000);
+      }
+    }
+  } catch (e) {
+    // Fallback per browser che non supportano clipboard API
+    showToast('Errore copia: ' + e.message);
+  }
+}
+
+/** Formatta data YYYY-MM-DD in DD/MM */
+function fmtDDMM(dateStr) {
+  const [, m, d] = dateStr.split('-');
+  return `${d}/${m}`;
+}
+
+/** Restituisce la data del lunedi' della settimana (ISO: lun=1) */
+function getMondayOfWeek(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  const day = dt.getDay(); // 0=dom, 1=lun...
+  const diff = day === 0 ? -6 : 1 - day;
+  dt.setDate(dt.getDate() + diff);
+  return dt.toISOString().slice(0, 10);
+}
+
+/** Restituisce la domenica della settimana */
+function getSundayOfWeek(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  const day = dt.getDay(); // 0=dom
+  const diff = day === 0 ? 0 : 7 - day;
+  dt.setDate(dt.getDate() + diff);
+  return dt.toISOString().slice(0, 10);
+}
+
+/** Calcola la settimana della fase rispetto a start_date del programma */
+function calcWeekInPhase(dateStr) {
+  if (!activeProgram || !activeProgram.start_date) return '';
+  const [sy, sm, sd] = activeProgram.start_date.split('-').map(Number);
+  const [dy, dm, dd] = dateStr.split('-').map(Number);
+  const start = new Date(sy, sm - 1, sd);
+  const current = new Date(dy, dm - 1, dd);
+  const diffDays = Math.floor((current - start) / (1000 * 60 * 60 * 24));
+  if (diffDays < 0) return '';
+  return Math.floor(diffDays / 7) + 1;
+}
+
+/** Calcola target kcal del giorno in base al piano dieta e tipo giorno */
+function getTargetKcal(isTrainingDay) {
+  if (!dietPlan) return null;
+  if (isTrainingDay && dietPlan.day_on) return dietPlan.day_on.kcal;
+  if (!isTrainingDay && dietPlan.day_off) return dietPlan.day_off.kcal;
+  // Se non c'e' distinzione, uso day_on come default
+  return dietPlan.day_on?.kcal || null;
+}
+
+/** Conta quanti pasti previsti dal piano sono stati consumati */
+function countPlannedMealsEaten(log, isTrainingDay) {
+  // Il piano ha N pasti. meals_state contiene lo stato di ogni pasto.
+  // Un pasto e' "mangiato" se meals_state[index] e' true (o equivalente)
+  if (!dietPlan) return { eaten: 0, total: 0 };
+  const meals = isTrainingDay
+    ? (dietPlan.day_on?.meals || [])
+    : (dietPlan.day_off?.meals || []);
+  const total = meals.length;
+  const state = log.meals_state;
+  if (!state) return { eaten: 0, total };
+  // meals_state e' un array o un oggetto con indici: true/false
+  let eaten = 0;
+  if (Array.isArray(state)) {
+    eaten = state.filter(Boolean).length;
+  } else if (typeof state === 'object') {
+    eaten = Object.values(state).filter(Boolean).length;
+  }
+  return { eaten, total };
+}
+
+/** Determina se il giorno e' "completo" (tutti i pasti mangiati + kcal entro +-100 del target) */
+function isGiornoCompleto(log) {
+  const isTraining = !!log.is_training_day;
+  const { eaten, total } = countPlannedMealsEaten(log, isTraining);
+  const allMealsEaten = total > 0 && eaten >= total;
+  const kcal = log.nutrition?.totals?.kcal || 0;
+  const target = getTargetKcal(isTraining);
+  const kcalOk = target != null ? Math.abs(kcal - target) <= 100 : true;
+  return allMealsEaten && kcalOk;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CARICAMENTO DATI DA FIRESTORE
+// ═══════════════════════════════════════════════════════════════
+
+async function fetchData(dateFrom, dateTo) {
+  const userId = getUserId();
+  if (!userId) throw new Error('Utente non autenticato');
+
+  // 1. Carica daily_logs nell'intervallo selezionato
+  const logsRef = collection(db, 'users', userId, 'daily_logs');
+  const logsQuery = query(logsRef, where('__name__', '>=', dateFrom), where('__name__', '<=', dateTo), orderBy('__name__'));
+  const logsSnap = await getDocs(logsQuery);
+  dailyLogs = logsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  // Ordina per data crescente
+  dailyLogs.sort((a, b) => (a.id || '').localeCompare(b.id || ''));
+
+  // 2. Carica checks (misurazioni corporee)
+  const checksRef = collection(db, 'users', userId, 'checks');
+  const checksSnap = await getDocs(checksRef);
+  checks = checksSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  checks.sort((a, b) => (a.date || a.id || '').localeCompare(b.date || b.id || ''));
+
+  // 3. Carica programma attivo
+  const progRef = collection(db, 'users', userId, 'programs');
+  const progQuery = query(progRef, where('active', '==', true));
+  const progSnap = await getDocs(progQuery);
+  if (!progSnap.empty) {
+    activeProgram = { id: progSnap.docs[0].id, ...progSnap.docs[0].data() };
+  }
+
+  // 4. Carica piano dieta attivo (per calcolo target kcal e giorno_completo)
+  const dietRef = collection(db, 'users', userId, 'diet_plans');
+  const dietQuery = query(dietRef, where('active', '==', true));
+  const dietSnap = await getDocs(dietQuery);
+  if (!dietSnap.empty) {
+    dietPlan = { id: dietSnap.docs[0].id, ...dietSnap.docs[0].data() };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  GENERAZIONE TABELLA 1: GIORNALIERA
+// ═══════════════════════════════════════════════════════════════
+
+function generateDailyTSV() {
+  const headers = [
+    'data', 'tipo_giorno', 'peso_kg', 'kcal', 'proteine_g', 'carbo_g', 'grassi_g',
+    'giorno_completo', 'passi', 'sonno_h', 'drink', 'pasti_fuori', 'note'
+  ];
+
+  const rows = dailyLogs.map(log => {
+    const date = log.id;
+    const tipoGiorno = log.is_training_day ? 'allenamento' : 'riposo';
+    const pesoKg = log.weight_kg != null ? Number(log.weight_kg).toFixed(1) : '';
+    const kcal = log.nutrition?.totals?.kcal ?? '';
+    const proteine = log.nutrition?.totals?.protein ?? '';
+    const carbo = log.nutrition?.totals?.carbs ?? '';
+    const grassi = log.nutrition?.totals?.fats ?? '';
+    const completo = isGiornoCompleto(log) ? 'si' : 'no';
+    const passi = log.steps ?? '';
+    const sonno = log.sleep_hours != null ? Number(log.sleep_hours).toFixed(1) : '';
+    const drink = log.drinks ?? 0;
+    const pastiFuori = log.meals_out ?? 0;
+    const note = (log.daily_note || '').replace(/[\t\n\r]/g, ' ').slice(0, 100);
+
+    return [date, tipoGiorno, pesoKg, kcal, proteine, carbo, grassi,
+            completo, passi, sonno, drink, pastiFuori, note].join('\t');
+  });
+
+  return [headers.join('\t'), ...rows].join('\n');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  GENERAZIONE TABELLA 2: PER-SEDUTA
+// ═══════════════════════════════════════════════════════════════
+
+function generateSessionTSV() {
+  const headers = [
+    'data', 'seduta', 'settimana_fase', 'esercizio', 'variante_usata',
+    'carico_ultima_serie', 'rip_ultima_serie', 'rpe_ultima_serie',
+    'intensificazione', 'cervicale_max', 'coccige_max', 'durata_min', 'liss_min'
+  ];
+
+  const rows = [];
+
+  for (const log of dailyLogs) {
+    const w = log.workout;
+    if (!w || !w.exercises || w.exercises.length === 0) continue;
+
+    const date = log.id;
+    // Seduta: usa session_id se presente, altrimenti session_day
+    const seduta = w.session_id || w.session_day || '';
+    const settimana = calcWeekInPhase(date);
+    const cervMax = w.cervicale_max ?? 0;
+    const coccigeMax = w.coccige_max ?? 0;
+    const durataMin = w.duration_seconds ? Math.round(w.duration_seconds / 60) : '';
+    const lissMin = (w.cardio && w.cardio.done) ? (w.cardio.duration_minutes || 0) : 0;
+
+    for (const ex of w.exercises) {
+      const nome = ex.name || '';
+      const variante = ex.variante_usata ? 'si' : 'no';
+      // Ultima serie completata (done=true) o l'ultima in assoluto
+      const sets = ex.sets || [];
+      const doneSets = sets.filter(s => s.done !== false);
+      const lastSet = doneSets.length > 0 ? doneSets[doneSets.length - 1] : (sets[sets.length - 1] || {});
+      const carico = lastSet.weight ?? '';
+      const rip = lastSet.reps ?? '';
+      const rpe = ex.rpe ?? '';
+      const intens = ex.notes || 'nessuna';
+
+      rows.push([
+        date, seduta, settimana, nome, variante,
+        carico, rip, rpe, intens,
+        cervMax, coccigeMax, durataMin, lissMin
+      ].join('\t'));
+    }
+  }
+
+  return [headers.join('\t'), ...rows].join('\n');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  GENERAZIONE TABELLA 3: RIEPILOGO SETTIMANALE
+// ═══════════════════════════════════════════════════════════════
+
+function generateWeeklyTSV() {
+  const headers = [
+    'settimana', 'peso_media_7gg', 'delta_peso', 'vita_cm',
+    'aderenza_pct', 'kcal_medie', 'P_medie', 'C_medie', 'G_medie',
+    'sonno_medio', 'notti_sotto_5h', 'passi_medi', 'drink_totali',
+    'serate_alcoliche', 'sedute_fatte/previste', 'cervicale_max_settimana',
+    'coccige_max_settimana', 'carichi_riferimento'
+  ];
+
+  // Raggruppa i log per settimana (lun-dom)
+  const weekMap = new Map();
+  for (const log of dailyLogs) {
+    const monday = getMondayOfWeek(log.id);
+    if (!weekMap.has(monday)) weekMap.set(monday, []);
+    weekMap.get(monday).push(log);
+  }
+
+  // Ordina settimane cronologicamente
+  const sortedWeeks = [...weekMap.keys()].sort();
+
+  // Conta sedute previste settimanali dal programma attivo
+  let sedutePreviste = 0;
+  if (activeProgram?.schedule) {
+    sedutePreviste = Object.values(activeProgram.schedule).filter(Boolean).length;
+  }
+
+  // Esercizi di riferimento forza dal programma
+  const rifForza = activeProgram?.esercizi_riferimento_forza || [];
+
+  let prevAvgWeight = null;
+  const rows = [];
+
+  for (const monday of sortedWeeks) {
+    const logs = weekMap.get(monday);
+    const sunday = getSundayOfWeek(monday);
+
+    // Range settimana in formato DD/MM
+    const label = `${fmtDDMM(monday)}-${fmtDDMM(sunday)}`;
+
+    // Peso medio (richiede almeno 4 valori)
+    const weights = logs.map(l => l.weight_kg).filter(v => v != null);
+    let avgWeight = '';
+    let deltaWeight = '';
+    if (weights.length >= 4) {
+      avgWeight = (weights.reduce((s, v) => s + v, 0) / weights.length).toFixed(1);
+      if (prevAvgWeight != null) {
+        deltaWeight = (parseFloat(avgWeight) - prevAvgWeight).toFixed(1);
+      }
+      prevAvgWeight = parseFloat(avgWeight);
+    } else {
+      // Non aggiorniamo prevAvgWeight se non ci sono abbastanza dati
+    }
+
+    // Vita (cm): check piu' vicino alla domenica della settimana
+    let vitaCm = '';
+    if (checks.length > 0) {
+      const sundayDate = new Date(sunday + 'T00:00:00');
+      let closest = null;
+      let minDist = Infinity;
+      for (const c of checks) {
+        const cDate = new Date((c.date || c.id) + 'T00:00:00');
+        const dist = Math.abs(cDate - sundayDate);
+        // Consideriamo solo check entro 7 giorni dalla domenica
+        if (dist < minDist && dist <= 7 * 24 * 60 * 60 * 1000) {
+          minDist = dist;
+          closest = c;
+        }
+      }
+      if (closest?.measures?.waist != null) {
+        vitaCm = closest.measures.waist;
+      }
+    }
+
+    // Aderenza: giorni completi / 7
+    const giorniCompleti = logs.filter(l => isGiornoCompleto(l)).length;
+    const aderenza = Math.round((giorniCompleti / 7) * 100) + '%';
+
+    // Kcal medie
+    const kcalVals = logs.map(l => l.nutrition?.totals?.kcal).filter(v => v != null);
+    const kcalMedie = kcalVals.length > 0
+      ? Math.round(kcalVals.reduce((s, v) => s + v, 0) / kcalVals.length)
+      : '';
+
+    // Macro medie
+    const proVals = logs.map(l => l.nutrition?.totals?.protein).filter(v => v != null);
+    const carbVals = logs.map(l => l.nutrition?.totals?.carbs).filter(v => v != null);
+    const fatVals = logs.map(l => l.nutrition?.totals?.fats).filter(v => v != null);
+    const pMedie = proVals.length > 0 ? Math.round(proVals.reduce((s, v) => s + v, 0) / proVals.length) : '';
+    const cMedie = carbVals.length > 0 ? Math.round(carbVals.reduce((s, v) => s + v, 0) / carbVals.length) : '';
+    const gMedie = fatVals.length > 0 ? Math.round(fatVals.reduce((s, v) => s + v, 0) / fatVals.length) : '';
+
+    // Sonno medio
+    const sleepVals = logs.map(l => l.sleep_hours).filter(v => v != null);
+    const sonnoMedio = sleepVals.length > 0
+      ? (sleepVals.reduce((s, v) => s + v, 0) / sleepVals.length).toFixed(1)
+      : '';
+
+    // Notti sotto 5h
+    const nottiSotto5 = logs.filter(l => l.sleep_hours != null && l.sleep_hours < 5).length;
+
+    // Passi medi
+    const stepsVals = logs.map(l => l.steps).filter(v => v != null);
+    const passiMedi = stepsVals.length > 0
+      ? Math.round(stepsVals.reduce((s, v) => s + v, 0) / stepsVals.length)
+      : '';
+
+    // Drink totali e serate alcoliche
+    const drinkTotali = logs.reduce((s, l) => s + (l.drinks || 0), 0);
+    const serateAlcoliche = logs.filter(l => (l.drinks || 0) > 0).length;
+
+    // Sedute fatte (giorni con workout valido)
+    const seduteFatte = logs.filter(l => l.workout && l.workout.exercises && l.workout.exercises.length > 0).length;
+    const seduteFP = `${seduteFatte}/${sedutePreviste}`;
+
+    // Cervicale e coccige max della settimana
+    const cervicaleVals = logs.map(l => l.workout?.cervicale_max).filter(v => v != null);
+    const coccigeVals = logs.map(l => l.workout?.coccige_max).filter(v => v != null);
+    const cervMax = cervicaleVals.length > 0 ? Math.max(...cervicaleVals) : 0;
+    const coccigeMax = coccigeVals.length > 0 ? Math.max(...coccigeVals) : 0;
+
+    // Carichi di riferimento forza: per ogni esercizio di riferimento,
+    // trova l'ultima seduta della settimana che lo contiene
+    let carichiRif = '';
+    if (rifForza.length > 0) {
+      const parts = [];
+      for (const nomeRif of rifForza) {
+        // Cerca l'ultima seduta della settimana con questo esercizio
+        let found = null;
+        // Iteriamo al contrario per trovare l'ultima occorrenza
+        for (let i = logs.length - 1; i >= 0; i--) {
+          const exs = logs[i].workout?.exercises || [];
+          const match = exs.find(e => e.name && e.name.toLowerCase().includes(nomeRif.toLowerCase()));
+          if (match) {
+            const sets = match.sets || [];
+            const doneSets = sets.filter(s => s.done !== false);
+            const lastSet = doneSets.length > 0 ? doneSets[doneSets.length - 1] : (sets[sets.length - 1] || {});
+            found = { weight: lastSet.weight || 0, reps: lastSet.reps || 0 };
+            break;
+          }
+        }
+        if (found) {
+          parts.push(`${nomeRif}: ${found.weight}kg x ${found.reps}`);
+        }
+      }
+      carichiRif = parts.join(' | ');
+    }
+
+    rows.push([
+      label, avgWeight, deltaWeight, vitaCm,
+      aderenza, kcalMedie, pMedie, cMedie, gMedie,
+      sonnoMedio, nottiSotto5, passiMedi, drinkTotali,
+      serateAlcoliche, seduteFP, cervMax,
+      coccigeMax, carichiRif
+    ].join('\t'));
+  }
+
+  return [headers.join('\t'), ...rows].join('\n');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  RENDERING UI
+// ═══════════════════════════════════════════════════════════════
+
+/** Genera l'anteprima delle prime N righe del TSV */
+function renderPreview(tsv, maxRows = 3) {
+  const lines = tsv.split('\n');
+  const header = lines[0] || '';
+  const dataLines = lines.slice(1, 1 + maxRows);
+  const totalDataRows = lines.length - 1;
+
+  let html = `<span class="header-row">${escHtml(header)}</span>\n`;
+  html += dataLines.map(l => escHtml(l)).join('\n');
+
+  return { html, totalDataRows };
+}
+
+/** Escaping HTML per prevenire XSS */
+function escHtml(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** Render completo delle 3 card */
+function renderExportCards() {
+  const container = document.getElementById('export-container');
+
+  if (dailyLogs.length === 0) {
+    container.innerHTML = '<div class="loading-msg">Nessun dato trovato per il periodo selezionato.</div>';
+    document.getElementById('btn-copy-all').style.display = 'none';
+    return;
+  }
+
+  // Genera i 3 TSV
+  tsvDaily = generateDailyTSV();
+  tsvSession = generateSessionTSV();
+  tsvWeekly = generateWeeklyTSV();
+
+  const previewDaily = renderPreview(tsvDaily);
+  const previewSession = renderPreview(tsvSession);
+  const previewWeekly = renderPreview(tsvWeekly);
+
+  // Conta righe effettive per la tabella sessioni
+  const sessionDataRows = tsvSession.split('\n').length - 1;
+
+  container.innerHTML = `
+    <!-- Card 1: Tabella Giornaliera -->
+    <div class="card export-card">
+      <div class="card-title">Tabella Giornaliera</div>
+      <div class="card-desc">
+        Un record per giorno: peso, macro, aderenza, sonno, note.
+      </div>
+      <div class="row-count">${previewDaily.totalDataRows} righe</div>
+      <div class="preview-wrap">
+        <pre>${previewDaily.html}</pre>
+      </div>
+      <button class="btn-copy" id="btn-copy-daily" onclick="window.copyDaily()">
+        <i class="ri-clipboard-line"></i> Copia tabella
+      </button>
+    </div>
+
+    <!-- Card 2: Tabella Per-Seduta -->
+    <div class="card export-card">
+      <div class="card-title">Tabella Per-Seduta</div>
+      <div class="card-desc">
+        Un record per esercizio per seduta: carichi, RPE, varianti, durata.
+      </div>
+      <div class="row-count">${previewSession.totalDataRows} righe</div>
+      <div class="preview-wrap">
+        <pre>${previewSession.html}</pre>
+      </div>
+      <button class="btn-copy" id="btn-copy-session" onclick="window.copySession()">
+        <i class="ri-clipboard-line"></i> Copia tabella
+      </button>
+    </div>
+
+    <!-- Card 3: Riepilogo Settimanale -->
+    <div class="card export-card">
+      <div class="card-title">Riepilogo Settimanale</div>
+      <div class="card-desc">
+        Aggregazioni per settimana: peso medio, delta, aderenza, macro, sonno, carichi.
+      </div>
+      <div class="row-count">${previewWeekly.totalDataRows} righe</div>
+      <div class="preview-wrap">
+        <pre>${previewWeekly.html}</pre>
+      </div>
+      <button class="btn-copy" id="btn-copy-weekly" onclick="window.copyWeekly()">
+        <i class="ri-clipboard-line"></i> Copia tabella
+      </button>
+    </div>
+  `;
+
+  // Mostra il bottone "Copia Tutto"
+  document.getElementById('btn-copy-all').style.display = 'flex';
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  FUNZIONI COPIA ESPOSTE SUL WINDOW
+// ═══════════════════════════════════════════════════════════════
+
+window.copyDaily = () => copyToClipboard(tsvDaily, 'btn-copy-daily');
+window.copySession = () => copyToClipboard(tsvSession, 'btn-copy-session');
+window.copyWeekly = () => copyToClipboard(tsvWeekly, 'btn-copy-weekly');
+
+window.copyAll = () => {
+  const allTsv = [
+    '=== TABELLA GIORNALIERA ===',
+    tsvDaily,
+    '',
+    '=== TABELLA PER-SEDUTA ===',
+    tsvSession,
+    '',
+    '=== RIEPILOGO SETTIMANALE ===',
+    tsvWeekly
+  ].join('\n');
+  copyToClipboard(allTsv, 'btn-copy-all');
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  CARICAMENTO DATI E INIT
+// ═══════════════════════════════════════════════════════════════
+
+window.loadData = async function() {
+  const dateFrom = document.getElementById('date-from').value;
+  const dateTo = document.getElementById('date-to').value;
+
+  if (!dateFrom || !dateTo) {
+    showToast('Seleziona entrambe le date');
+    return;
+  }
+  if (dateFrom > dateTo) {
+    showToast('La data "Da" deve essere prima di "A"');
+    return;
+  }
+
+  const container = document.getElementById('export-container');
+  container.innerHTML = '<div class="loading-msg">Caricamento dati...</div>';
+  document.getElementById('btn-copy-all').style.display = 'none';
+
+  try {
+    await fetchData(dateFrom, dateTo);
+    renderExportCards();
+  } catch (e) {
+    console.error('Errore caricamento dati:', e);
+    container.innerHTML = `<div class="error-msg">Errore: ${e.message}</div>`;
+  }
+};
+
+// Inizializzazione: imposta date default (ultime 2 settimane) e carica
+(async function init() {
+  await requireAuth();
+  const userId = getUserId();
+  if (!userId) return;
+
+  // Date default: ultime 2 settimane
+  const now = new Date();
+  const twoWeeksAgo = new Date(now);
+  twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+
+  // Formatta in YYYY-MM-DD per gli input date
+  const fmtDate = (d) => d.toISOString().slice(0, 10);
+  document.getElementById('date-from').value = fmtDate(twoWeeksAgo);
+  document.getElementById('date-to').value = fmtDate(now);
+
+  // Carica dati automaticamente
+  await window.loadData();
+})();
+</script>
+</body>
+</html>

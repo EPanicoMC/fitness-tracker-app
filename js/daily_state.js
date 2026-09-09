@@ -80,7 +80,12 @@ function saveToLocal() {
       is_training_day: isTrainingDay,
       day_override:    logData.day_override,
       smart_advice:    logData.smart_advice    || {},
-      last_updated:    logData.last_updated
+      last_updated:    logData.last_updated,
+      // Campi giornalieri Fase 3
+      weight_kg:       logData.weight_kg       ?? null,
+      sleep_hours:     logData.sleep_hours     ?? null,
+      drinks:          logData.drinks          ?? null,
+      meals_out:       logData.meals_out       ?? null
     };
     safeLocalStorage.setItem(key, JSON.stringify(payload));
     safeLocalStorage.keys()
@@ -202,6 +207,10 @@ async function init() {
             if (local.day_override != null) logData.day_override = local.day_override;
             if (local.is_training_day != null) logData.is_training_day = local.is_training_day;
             if (local.smart_advice)         logData.smart_advice = local.smart_advice;
+            if (local.weight_kg != null)    logData.weight_kg    = local.weight_kg;
+            if (local.sleep_hours != null)  logData.sleep_hours  = local.sleep_hours;
+            if (local.drinks != null)       logData.drinks       = local.drinks;
+            if (local.meals_out != null)    logData.meals_out    = local.meals_out;
             logData.last_updated = localTime;
           } else {
             // Local is outdated — update local storage to match fresh Firestore data
@@ -320,7 +329,8 @@ function renderDailyStateUI(local) {
   const params = new URLSearchParams(window.location.search);
   const stepsParam = params.get('steps');
   const burnedParam = params.get('burned') || params.get('burned_kcal');
-  if (stepsParam || burnedParam) {
+  const sleepParam = params.get('sleep');
+  if (stepsParam || burnedParam || sleepParam) {
     let updated = false;
     if (stepsParam) {
       const sVal = parseInt(stepsParam);
@@ -337,6 +347,15 @@ function renderDailyStateUI(local) {
         logData.burned_kcal = bVal;
         const kf = document.getElementById('burned-in');
         if (kf) kf.value = bVal;
+        updated = true;
+      }
+    }
+    if (sleepParam) {
+      const slVal = parseFloat(sleepParam);
+      if (!isNaN(slVal)) {
+        logData.sleep_hours = slVal;
+        const slEl = document.getElementById('daily-sleep');
+        if (slEl) slEl.value = slVal;
         updated = true;
       }
     }
@@ -1264,10 +1283,43 @@ function buildStats() {
   const nf = document.getElementById('note-in');
   if(nf) {
     nf.value = logData.daily_note || '';
-    // input aggiorna logData in real-time senza aspettare blur (fix iOS nav)
     nf.addEventListener('input', () => { logData.daily_note = nf.value; });
     nf.addEventListener('blur', () => {
       logData.daily_note = nf.value;
+      saveToLocal();
+    });
+  }
+
+  // Campi giornalieri Fase 3
+  const wf = document.getElementById('daily-weight');
+  if(wf) {
+    wf.value = logData.weight_kg ?? '';
+    wf.addEventListener('change', () => {
+      logData.weight_kg = parseFloat(wf.value) || null;
+      saveToLocal();
+    });
+  }
+  const slpf = document.getElementById('daily-sleep');
+  if(slpf) {
+    slpf.value = logData.sleep_hours ?? '';
+    slpf.addEventListener('change', () => {
+      logData.sleep_hours = parseFloat(slpf.value) || null;
+      saveToLocal();
+    });
+  }
+  const drf = document.getElementById('daily-drinks');
+  if(drf) {
+    drf.value = logData.drinks ?? '';
+    drf.addEventListener('change', () => {
+      logData.drinks = parseInt(drf.value) || 0;
+      saveToLocal();
+    });
+  }
+  const mof = document.getElementById('daily-meals-out');
+  if(mof) {
+    mof.value = logData.meals_out ?? '';
+    mof.addEventListener('change', () => {
+      logData.meals_out = parseInt(mof.value) || 0;
       saveToLocal();
     });
   }
@@ -1420,6 +1472,16 @@ async function syncToFirebase() {
   const nf = document.getElementById('note-in');
   if(nf) logData.daily_note = nf.value;
 
+  // Leggi valori giornalieri Fase 3 dagli input
+  const wf = document.getElementById('daily-weight');
+  if(wf && wf.value) logData.weight_kg = parseFloat(wf.value) || null;
+  const slpf = document.getElementById('daily-sleep');
+  if(slpf && slpf.value) logData.sleep_hours = parseFloat(slpf.value) || null;
+  const drf = document.getElementById('daily-drinks');
+  if(drf && drf.value !== '') logData.drinks = parseInt(drf.value) || 0;
+  const mof = document.getElementById('daily-meals-out');
+  if(mof && mof.value !== '') logData.meals_out = parseInt(mof.value) || 0;
+
   const tots = calcTotals();
 
   const data = {
@@ -1436,6 +1498,11 @@ async function syncToFirebase() {
     smart_advice:    logData.smart_advice    || {},
     last_updated:    logData.last_updated    || Date.now()
   };
+  // Campi giornalieri Fase 3 — solo se valorizzati
+  if (logData.weight_kg != null) data.weight_kg = logData.weight_kg;
+  if (logData.sleep_hours != null) data.sleep_hours = logData.sleep_hours;
+  if (logData.drinks != null) data.drinks = logData.drinks;
+  if (logData.meals_out != null) data.meals_out = logData.meals_out;
   
   if (logData.day_override != null) data.day_override = logData.day_override;
   if (logData.selected_session_day) data.selected_session_day = logData.selected_session_day;
@@ -2929,7 +2996,87 @@ window.deleteFridgeItemUI = async function(idx) {
   }
 };
 
+// ── Fase + Prossimi Appuntamenti (Fase 3) ─────────────────
+async function buildPhaseAppointments() {
+  const box = document.getElementById('phase-appointments-box');
+  if (!box) return;
+  const userId = getUserId();
+  if (!userId) return;
+
+  try {
+    const snap = await getDocs(query(
+      collection(db, 'users', userId, 'calendar_events'),
+      orderBy('data'),
+      limit(100)
+    ));
+    const events = snap.docs.map(d => d.data());
+    if (!events.length) { box.innerHTML = ''; return; }
+
+    // Fase corrente: ultimo evento tipo "fase" con data <= oggi
+    const faseEvents = events.filter(e => e.tipo === 'fase' && e.data <= TODAY);
+    const currentFase = faseEvents[faseEvents.length - 1] || null;
+
+    // Blocco scheda corrente
+    const bloccoEvents = events.filter(e => e.tipo === 'blocco_scheda' && e.data <= TODAY);
+    const currentBlocco = bloccoEvents[bloccoEvents.length - 1] || null;
+
+    // Prossimi 3 appuntamenti futuri
+    const upcoming = events
+      .filter(e => e.data >= TODAY && e.tipo !== 'ricorrente')
+      .slice(0, 3);
+
+    // Icone per tipo evento
+    const icons = {
+      micro_check: '📋', check_completo: '📸', decisione: '⚖️',
+      cancello: '🚪', taratura_rpe: '🎯', fase: '🏁',
+      blocco_scheda: '📊', salute: '🏥', seduta: '💪',
+      integrazione: '💊', protocollo: '✨', traguardo: '🏆',
+      misurazione: '⚖️', regola: '📐'
+    };
+
+    const formatDate = d => {
+      const parts = d.split('-');
+      return `${parts[2]}/${parts[1]}`;
+    };
+
+    const daysUntil = d => {
+      const diff = Math.ceil((new Date(d) - new Date(TODAY)) / 86400000);
+      if (diff === 0) return 'OGGI';
+      if (diff === 1) return 'domani';
+      return `tra ${diff}gg`;
+    };
+
+    box.innerHTML = `
+      <div style="background:linear-gradient(135deg,var(--bg2),#141416);border:1px solid var(--border);border-radius:16px;padding:16px;overflow:hidden">
+        ${currentFase ? `
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:${currentBlocco || upcoming.length ? '14px' : '0'}">
+          <div style="width:36px;height:36px;border-radius:10px;background:rgba(124,111,255,0.12);display:flex;align-items:center;justify-content:center;font-size:16px">🎯</div>
+          <div style="flex:1">
+            <div style="font-size:10px;font-weight:800;color:var(--accent);letter-spacing:1px">FASE ATTUALE</div>
+            <div style="font-size:14px;font-weight:700;color:var(--t1);margin-top:2px">${currentFase.titolo}</div>
+            ${currentBlocco ? `<div style="font-size:11px;color:var(--t2);margin-top:2px">📊 ${currentBlocco.titolo}</div>` : ''}
+          </div>
+        </div>` : ''}
+        ${upcoming.length ? `
+        <div style="${currentFase ? 'border-top:1px solid rgba(255,255,255,0.05);padding-top:12px;' : ''}">
+          <div style="font-size:10px;font-weight:800;color:var(--t3);letter-spacing:1px;margin-bottom:10px">PROSSIMI APPUNTAMENTI</div>
+          ${upcoming.map(ev => `
+            <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;padding:8px 10px;background:rgba(255,255,255,0.02);border-radius:8px">
+              <span style="font-size:16px;flex-shrink:0">${icons[ev.tipo] || '📌'}</span>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:12px;font-weight:700;color:var(--t1)">${ev.titolo}</div>
+                <div style="font-size:11px;color:var(--t3);margin-top:1px">${formatDate(ev.data)} · ${daysUntil(ev.data)}</div>
+              </div>
+            </div>`).join('')}
+        </div>` : ''}
+      </div>`;
+  } catch(e) {
+    console.warn('buildPhaseAppointments error:', e);
+  }
+}
+
 (async function() {
   await requireAuth();
   init();
+  buildPhaseAppointments();
 })();

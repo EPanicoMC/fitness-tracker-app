@@ -166,7 +166,7 @@ window.startWithSession = async function(dayKey) {
   }
 
   buildExState(session, dayKey, prevLog, exerciseTips);
-  sessionData = { dayKey, name: session.name, cardio: session.cardio || null, lastCoachSummary };
+  sessionData = { dayKey, name: session.name, session_id: session.session_id || null, cardio: session.cardio || null, lastCoachSummary };
   launchActive(session.name, `${DAYS_IT[dayKey]} · ${session.exercises?.length||0} esercizi`);
 };
 
@@ -175,21 +175,46 @@ function buildExState(session, dayKey, prevLog, tips) {
     const prevEx   = prevLog?.workout?.exercises?.find(e => e.name === ex.name);
     const tip      = (tips || []).find(t => t.exercise_name?.toLowerCase() === ex.name?.toLowerCase()) || null;
     const setCount = typeof ex.sets === 'number' ? ex.sets : (ex.sets?.length || 3);
+
+    // Range ripetizioni (Fase 3: rip_min/rip_max; Fase 1: reps stringa)
+    const ripMin = ex.rip_min || null;
+    const ripMax = ex.rip_max || null;
+    const repsLabel = ripMin && ripMax
+      ? (ripMin === ripMax ? `${ripMin}` : `${ripMin}-${ripMax}`)
+      : (ex.reps || '8');
+
+    // Blocchi componenti (APT, Core) — niente serie, solo checklist
+    const isBlock = Array.isArray(ex.componenti) && ex.componenti.length > 0;
+
     return {
       name: ex.name,
       rest_seconds: ex.rest_seconds || 90,
       notes: ex.notes || '',
       tip,
-      sets: Array.from({ length: setCount }, (_, i) => {
+      // Campi Fase 3 (ignorati se assenti → backward compat)
+      rpe_target:       ex.rpe_target ?? ex.rpe ?? null,
+      rip_min:          ripMin,
+      rip_max:          ripMax,
+      variante_sicura:  ex.variante_sicura || null,
+      intensificazione: ex.intensificazione || null,
+      incremento_kg:    ex.incremento_kg || null,
+      per_lato:         ex.per_lato || false,
+      superset:         ex.superset || false,
+      componenti:       isBlock ? ex.componenti : null,
+      durata_min:       ex.durata_min || null,
+      rip_min_b:        ex.rip_min_b || null,
+      rip_max_b:        ex.rip_max_b || null,
+      variante_usata:   false,
+      sets: isBlock ? [] : Array.from({ length: setCount }, (_, i) => {
         const prevSet = prevEx?.sets?.[i];
         const w = prevSet?.weight ?? (ex.weight_per_set?.[i] || 0);
         return {
-          reps_target:   ex.reps || '8',
+          reps_target:   repsLabel,
           ref_weight:    w,
           actual_weight: w,
           actual_reps:   '',
           last_weight:   prevSet?.weight || 0,
-          last_reps:     prevSet?.reps   || ex.reps || '8',
+          last_reps:     prevSet?.reps   || repsLabel,
           done:          false
         };
       })
@@ -305,26 +330,66 @@ function renderExercises() {
 }
 
 function renderExCard(ex, ei) {
-  const allDone = ex.sets.every(s => s.done);
+  const isBlock = Array.isArray(ex.componenti) && ex.componenti.length > 0;
+  const allDone = isBlock
+    ? (ex._compDone || []).length >= ex.componenti.length
+    : ex.sets.every(s => s.done);
   const rpeVal = ex.rpe || '';
+
+  // Barra info: serie × reps · RPE target · incremento
+  const setCount = ex.sets?.length || 0;
+  const repsLabel = ex.rip_min && ex.rip_max
+    ? (ex.rip_min === ex.rip_max ? `${ex.rip_min}` : `${ex.rip_min}-${ex.rip_max}`)
+    : (ex.sets?.[0]?.reps_target || '');
+  const metaParts = [];
+  if (!isBlock && setCount > 0 && repsLabel) {
+    let repStr = `${setCount}×${repsLabel}`;
+    if (ex.per_lato) repStr += '/lato';
+    metaParts.push(repStr);
+  }
+  if (ex.rpe_target) metaParts.push(`RPE ${ex.rpe_target}`);
+  if (ex.incremento_kg) metaParts.push(`+${ex.incremento_kg}kg`);
+  if (ex.durata_min && isBlock) metaParts.push(`${ex.durata_min} min`);
+
+  // Superset: range reps parte B
+  let supersetInfo = '';
+  if (ex.superset && ex.rip_min_b && ex.rip_max_b) {
+    supersetInfo = `<span style="font-size:11px;color:var(--orange);font-weight:600;margin-left:4px">(B: ${ex.rip_min_b}-${ex.rip_max_b} rip)</span>`;
+  }
+
   return `
     <div class="ex-live ${allDone ? 'completed' : ''}" id="exlive-${ei}">
       <div class="ex-head">
         <span class="ex-name">${ex.name}</span>
         <div style="display:flex;gap:8px;align-items:center">
           ${ex.notes ? `<button class="btn-icon" style="width:34px;height:34px;font-size:14px" onclick="toggleNote(${ei})">ℹ️</button>` : ''}
+          ${ex.variante_sicura ? `<button class="btn-icon" style="width:34px;height:34px;font-size:13px" onclick="window.toggleVariant(${ei})">🔄</button>` : ''}
           ${allDone ? '<span class="badge badge-g">✓</span>' : `<span style="font-size:12px;color:var(--t2)">⏱ ${ex.rest_seconds}s</span>`}
         </div>
       </div>
-      
-      <!-- RPE fatigue selector -->
+
+      ${metaParts.length ? `
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:4px 0 8px;font-size:12px;color:var(--t2)">
+        <span style="font-weight:700;color:var(--t1)">${metaParts.join(' · ')}</span>
+        ${ex.superset ? '<span style="font-size:10px;padding:1px 6px;background:rgba(255,165,0,0.12);border:1px solid rgba(255,165,0,0.25);border-radius:4px;color:var(--orange);font-weight:700">SUPERSET</span>' : ''}
+        ${ex.per_lato ? '<span style="font-size:10px;padding:1px 6px;background:rgba(20,184,166,0.1);border:1px solid rgba(20,184,166,0.2);border-radius:4px;color:rgb(20,184,166);font-weight:700">/LATO</span>' : ''}
+        ${supersetInfo}
+      </div>` : ''}
+
+      ${ex.intensificazione ? `
+      <div style="margin:4px 0 8px;padding:6px 10px;background:rgba(255,107,53,0.08);border:1px solid rgba(255,107,53,0.2);border-radius:8px;font-size:12px;color:var(--orange);font-weight:600;display:flex;align-items:center;gap:6px">
+        <span>⚡</span><span>${ex.intensificazione}</span>
+      </div>` : ''}
+
+      ${!isBlock ? `
+      <!-- RPE fatica (con target) -->
       <div style="display:flex;align-items:center;justify-content:space-between;margin:8px 0 12px;padding:6px 12px;background:rgba(255,255,255,0.02);border-radius:8px;border:1px solid rgba(255,255,255,0.05)">
-        <span style="font-size:12px;color:var(--t2);font-weight:700">😮 RPE Fatica (1-10)</span>
+        <span style="font-size:12px;color:var(--t2);font-weight:700">😮 RPE Fatica${ex.rpe_target ? ` <span style="color:var(--t3);font-weight:500">(target: ${ex.rpe_target})</span>` : ''}</span>
         <select class="fi" id="ex-rpe-${ei}" onchange="window.onRpeChange(${ei}, this.value)" style="width:65px;height:28px;font-size:12px;padding:2px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;color:var(--t1);outline:none">
           <option value="">--</option>
           ${[1,2,3,4,5,6,7,8,9,10].map(v => `<option value="${v}" ${rpeVal == v ? 'selected' : ''}>${v}</option>`).join('')}
         </select>
-      </div>
+      </div>` : ''}
 
       ${ex.tip ? `
       <div style="margin:6px 0 10px;padding:8px 12px;background:rgba(124,111,255,0.08);border:1px solid rgba(124,111,255,0.15);border-radius:8px;font-size:12px;color:var(--t2);display:flex;align-items:flex-start;gap:8px">
@@ -334,11 +399,22 @@ function renderExCard(ex, ei) {
           <div style="font-size:11px;color:var(--t3)">${ex.tip.detail}</div>
         </div>
       </div>` : ''}
+
+      ${ex.variante_sicura ? `<div class="ex-note" id="evar-${ei}" style="display:none;border-left:2px solid var(--orange);padding-left:10px"><b style="color:var(--orange)">Variante sicura:</b> ${ex.variante_sicura}</div>` : ''}
       ${ex.notes ? `<div class="ex-note" id="enote-${ei}">${ex.notes}</div>` : ''}
+
+      ${isBlock ? `
+      <div style="margin:8px 0">
+        ${ex.componenti.map((comp, ci) => `
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;margin-bottom:4px;background:rgba(255,255,255,0.02);border-radius:8px;border:1px solid rgba(255,255,255,0.05)">
+            <div class="set-done ${(ex._compDone||[]).includes(ci) ? 'done' : ''}" onclick="window.markCompDone(${ei},${ci})" style="${!sessionStarted ? 'opacity:0.4;pointer-events:none' : ''}">${(ex._compDone||[]).includes(ci) ? '✓' : ''}</div>
+            <span style="font-size:13px;color:var(--t1)">${comp}</span>
+          </div>`).join('')}
+      </div>` : `
       <div id="sets-wrap-${ei}">
         ${ex.sets.map((s, si) => renderSetRow(ex, ei, si, s)).join('')}
       </div>
-      <button class="btn btn-ghost btn-xs" style="margin-top:6px;width:100%" onclick="addSetToExercise(${ei})">＋ Serie</button>
+      <button class="btn btn-ghost btn-xs" style="margin-top:6px;width:100%" onclick="addSetToExercise(${ei})">＋ Serie</button>`}
     </div>`;
 }
 
@@ -379,6 +455,25 @@ function renderSetRow(ex, ei, si, s) {
 window.toggleNote = function(ei) {
   const el = document.getElementById(`enote-${ei}`);
   if (el) el.classList.toggle('open');
+};
+
+window.toggleVariant = function(ei) {
+  const el = document.getElementById(`evar-${ei}`);
+  if (el) {
+    const visible = el.style.display !== 'none';
+    el.style.display = visible ? 'none' : 'block';
+    if (exState[ei]) exState[ei].variante_usata = !visible;
+  }
+};
+
+window.markCompDone = function(ei, ci) {
+  const ex = exState[ei];
+  if (!ex || !ex.componenti) return;
+  if (!ex._compDone) ex._compDone = [];
+  const idx = ex._compDone.indexOf(ci);
+  if (idx >= 0) ex._compDone.splice(idx, 1);
+  else ex._compDone.push(ci);
+  renderExercises();
 };
 
 window.onRpeChange = function(ei, val) {
@@ -581,18 +676,24 @@ window.finishSession = async function() {
   const workoutLog = {
     session_day:      sessionData.dayKey,
     session_name:     sessionData.name,
+    session_id:       sessionData.session_id || null,
     duration_seconds: sessionSec,
     notes:            document.getElementById('s-notes')?.value || '',
     completed:        true,
-    exercises: exState.map(ex => ({
-      name: ex.name,
-      rpe:  ex.rpe || null,
-      sets: ex.sets.map(s => ({
-        weight: parseFloat(s.actual_weight) || 0,
-        reps:   s.actual_reps || s.reps_target,
-        done:   s.done
-      }))
-    })),
+    exercises: exState.map(ex => {
+      const base = {
+        name: ex.name,
+        rpe:  ex.rpe || null,
+        sets: (ex.sets || []).map(s => ({
+          weight: parseFloat(s.actual_weight) || 0,
+          reps:   s.actual_reps || s.reps_target,
+          done:   s.done
+        }))
+      };
+      if (ex.variante_usata) base.variante_usata = true;
+      if (ex.componenti) base.componenti_done = ex._compDone || [];
+      return base;
+    }),
     cardio: sessionData.cardio ? { ...sessionData.cardio, done: cardioDone } : null
   };
 
@@ -731,11 +832,42 @@ window.finishSession = async function() {
       console.warn('Coach AI non disponibile:', aiErr.message);
     }
 
+    // Modale sintomi (cervicale/coccige) — salvataggio separato merge:true
+    const symptomsHtml = `
+      <div style="margin-top:16px;border-top:1px solid rgba(255,255,255,0.08);padding-top:14px">
+        <div style="font-size:12px;font-weight:700;color:var(--t2);margin-bottom:10px">Fastidio durante la seduta? (0 = nessuno, 10 = massimo)</div>
+        <div style="display:flex;gap:12px">
+          <div style="flex:1">
+            <label style="font-size:11px;color:var(--t3);font-weight:600">Cervicale</label>
+            <select class="fi" id="symptom-cervicale" style="width:100%;height:32px;font-size:13px;margin-top:4px">
+              ${[0,1,2,3,4,5,6,7,8,9,10].map(v => `<option value="${v}">${v}</option>`).join('')}
+            </select>
+          </div>
+          <div style="flex:1">
+            <label style="font-size:11px;color:var(--t3);font-weight:600">Coccige</label>
+            <select class="fi" id="symptom-coccige" style="width:100%;height:32px;font-size:13px;margin-top:4px">
+              ${[0,1,2,3,4,5,6,7,8,9,10].map(v => `<option value="${v}">${v}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+      </div>`;
+
     showModal({
       title: adviceTitle,
-      text: adviceText + coachHtml,
+      text: adviceText + coachHtml + symptomsHtml,
       confirmLabel: 'Ok, andiamo! ⚡',
-      onConfirm: () => { window.location.href = 'index.html'; }
+      onConfirm: async () => {
+        const cervicale = parseInt(document.getElementById('symptom-cervicale')?.value) || 0;
+        const coccige = parseInt(document.getElementById('symptom-coccige')?.value) || 0;
+        if (cervicale > 0 || coccige > 0) {
+          try {
+            await setDoc(doc(db, 'users', getUserId(), 'daily_logs', TODAY), {
+              workout: { cervicale_max: cervicale, coccige_max: coccige }
+            }, { merge: true });
+          } catch(e) { console.warn('Errore salvataggio sintomi:', e); }
+        }
+        window.location.href = 'index.html';
+      }
     });
 
   } catch(e) {

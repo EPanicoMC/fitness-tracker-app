@@ -1,0 +1,360 @@
+{
+  "meta": {
+    "atleta": "Enrico",
+    "versione": "2026-09-09",
+    "descrizione": "Calendario completo del piano: Fase 3 (cut) nel dettaglio, fasi successive fino al traguardo del 13/06/2027. Tutte le soglie numeriche sono provvisorie fino alla taratura del 21/09.",
+    "fuso": "Europe/Rome"
+  },
+  "ricorrenze_settimanali_fase3": [
+    {
+      "giorno": "lunedi",
+      "evento": "Riposo (slot di recupero 6:00 se una seduta e' saltata)"
+    },
+    {
+      "giorno": "martedi",
+      "ora": "06:00",
+      "evento": "L1 - Lower quadricipiti + delt laterale (~68')"
+    },
+    {
+      "giorno": "mercoledi",
+      "ora": "06:00",
+      "evento": "U1 - Upper trazioni + delt laterale + centro schiena (~70') + LISS 20'"
+    },
+    {
+      "giorno": "giovedi",
+      "evento": "Riposo"
+    },
+    {
+      "giorno": "venerdi",
+      "ora": "06:00",
+      "evento": "L2 - Lower femorali + delt laterale (~68')"
+    },
+    {
+      "giorno": "sabato",
+      "ora": "09:00",
+      "evento": "U2 - Upper lat machine + rematore + delt laterale (~65') + LISS 25'"
+    },
+    {
+      "giorno": "domenica",
+      "ora": "09:00",
+      "evento": "LISS 30' (15' se Seduta 5 attiva) / Seduta 5 opzionale dal 18/10 / slot di recupero. Sera: micro-check + misura vita"
+    },
+    {
+      "giorno": "ogni giorno",
+      "evento": "Pesata mattina a digiuno; 11.000 passi; correttivo APT serale 5'; caffe' mai dopo le 14:00"
+    }
+  ],
+  "tipi_evento": {
+    "fase": "inizio/fine fase",
+    "blocco_scheda": "cambio di modalita' della scheda (RPE, pesi, serie)",
+    "micro_check": "ogni domenica",
+    "check_completo": "ogni 2 settimane con foto",
+    "decisione": "decisione per condizione",
+    "cancello": "verifica passaggio di fase",
+    "taratura_rpe": "un isolamento a cedimento reale",
+    "seduta": "seduta specifica da segnalare",
+    "misurazione": "regola di misura",
+    "integrazione": "integratori",
+    "salute": "fisioterapista",
+    "regola": "regola attiva in un intervallo",
+    "ricorrente": "attivita' quotidiana",
+    "protocollo": "protocollo speciale",
+    "traguardo": "obiettivo finale"
+  },
+  "eventi": [
+    {
+      "data": "2026-09-10",
+      "tipo": "misurazione",
+      "titolo": "Ripresa pesate quotidiane",
+      "descrizione": "Ogni mattina a digiuno, dopo il bagno, prima di bere. Si usa solo la media 7 giorni."
+    },
+    {
+      "data": "2026-09-12",
+      "tipo": "salute",
+      "titolo": "Fissare valutazione fisioterapica",
+      "descrizione": "Cervicale e coccige 5/10 a riposo: la valutazione e' condizione della Fase 3. Prenotare entro questa data, anche se l'appuntamento cade dopo.",
+      "azione": "Prenotare e annotare la data in 00_Profilo"
+    },
+    {
+      "data": "2026-09-13",
+      "tipo": "integrazione",
+      "titolo": "Fine carico creatina",
+      "descrizione": "Da domani 5 g/die, con il post-workout o con la colazione di riposo."
+    },
+    {
+      "data": "2026-09-14",
+      "tipo": "fase",
+      "titolo": "INIZIO FASE 3 - CUT (12 settimane)",
+      "descrizione": "Sedute Mar L1 6:00 / Mer U1 6:00 / Ven L2 6:00 / Sab U2 9:00. Domenica LISS 30'. Calorie 2.140 allenamento / 1.800 riposo (provvisorie).",
+      "data_fine": "2026-12-06"
+    },
+    {
+      "data": "2026-09-14",
+      "tipo": "blocco_scheda",
+      "titolo": "Blocco RIENTRO - settimane 1-2",
+      "descrizione": "RPE 7 fondamentali, 8 isolamento. Pesi fermi all'85-90% dei riferimenti. Nessun myo-reps/drop set. Sett. 2: +1 ripetizione.",
+      "data_fine": "2026-09-27"
+    },
+    {
+      "data": "2026-09-14",
+      "tipo": "ricorrente",
+      "titolo": "Correttivo APT serale (ogni giorno, 5')",
+      "descrizione": "Respirazione 90/90 2', couch stretch 45\"/lato, glute bridge 2x12. Per tutta la fase e oltre.",
+      "data_fine": "2027-06-13"
+    },
+    {
+      "data": "2026-09-15",
+      "tipo": "seduta",
+      "titolo": "Prima seduta L1",
+      "descrizione": "Hack squat, leg curl seduto, bulgaro, alzate ai cavi, calf, blocco APT. RPE 7. Registrare ultima serie di ogni esercizio."
+    },
+    {
+      "data": "2026-09-20",
+      "tipo": "micro_check",
+      "titolo": "Micro-check settimana 1",
+      "descrizione": "Blocco MICRO: peso media 7gg e delta, vita, aderenza %, sedute fatte, sonno medio, passi, cervicale/coccige max, drink. Esportare riepilogo settimanale (tabella 3).",
+      "azione": "Incollare il blocco MICRO in chat"
+    },
+    {
+      "data": "2026-09-21",
+      "tipo": "check_completo",
+      "titolo": "BASELINE PESO - taratura #1",
+      "descrizione": "Prima media 7 giorni pulita (15-21/09). Si fissano le soglie dei cancelli in 01_Roadmap e si confermano/tarano le calorie. Scenari: media < 75,5 conferma / 75,5-77,5 conferma / > 77,5 attendere 7 giorni. Senza foto.",
+      "azione": "Portare: media 7gg, vita, carichi ultima serie sedute 1-4, sintomi, sonno, aderenza, data fisioterapista"
+    },
+    {
+      "data": "2026-09-27",
+      "tipo": "micro_check",
+      "titolo": "Micro-check settimana 2",
+      "descrizione": "Blocco MICRO: peso media 7gg e delta, vita, aderenza %, sedute fatte, sonno medio, passi, cervicale/coccige max, drink. Esportare riepilogo settimanale (tabella 3).",
+      "azione": "Incollare il blocco MICRO in chat"
+    },
+    {
+      "data": "2026-09-28",
+      "tipo": "blocco_scheda",
+      "titolo": "Blocco PIENO + BASELINE FORZA - settimana 3",
+      "descrizione": "RPE sale a 8 fondamentali / 9 isolamento, stessi pesi della sett. 2. L'ultima serie di trazioni, row machine, hack squat, pressa 45 e lat machine di questa settimana e' il baseline forza. Da qui partono myo-reps e drop set.",
+      "data_fine": "2026-10-04",
+      "azione": "Annotare i 5 carichi baseline"
+    },
+    {
+      "data": "2026-10-04",
+      "tipo": "micro_check",
+      "titolo": "Micro-check settimana 3",
+      "descrizione": "Blocco MICRO: peso media 7gg e delta, vita, aderenza %, sedute fatte, sonno medio, passi, cervicale/coccige max, drink. Esportare riepilogo settimanale (tabella 3).",
+      "azione": "Incollare il blocco MICRO in chat"
+    },
+    {
+      "data": "2026-10-05",
+      "tipo": "blocco_scheda",
+      "titolo": "Blocco PIENO - settimane 4-6",
+      "descrizione": "Regola di avanzamento attiva ogni seduta: tetto del range -> +incremento; sotto il fondo per 2 sedute -> -5%.",
+      "data_fine": "2026-10-25"
+    },
+    {
+      "data": "2026-10-05",
+      "tipo": "check_completo",
+      "titolo": "Check completo #1 + FOTO a protocollo",
+      "descrizione": "Prime foto a protocollo (luce artificiale dall'alto, tende chiuse, 120 cm, 5 scatti). Taratura calorie #2 su due settimane di trend. Baseline forza chiuso.",
+      "azione": "Portare: 2 righe tabella 3, tabella 2 completa, 5 foto, vita, braccio dx"
+    },
+    {
+      "data": "2026-10-11",
+      "tipo": "micro_check",
+      "titolo": "Micro-check settimana 4",
+      "descrizione": "Blocco MICRO: peso media 7gg e delta, vita, aderenza %, sedute fatte, sonno medio, passi, cervicale/coccige max, drink. Esportare riepilogo settimanale (tabella 3).",
+      "azione": "Incollare il blocco MICRO in chat"
+    },
+    {
+      "data": "2026-10-11",
+      "tipo": "decisione",
+      "titolo": "DECISIONE SEDUTA 5",
+      "descrizione": "Al micro-check: aderenza sett. 3-4 >= 90%, sonno medio >= 6,0 h, cervicale/coccige <= 3 in ogni seduta, nessun calo sui 5 esercizi di riferimento tra sett. 3 e 4. Tutte vere -> Seduta 5 dal 18/10. Una falsa -> si riverifica la domenica dopo."
+    },
+    {
+      "data": "2026-10-13",
+      "tipo": "taratura_rpe",
+      "titolo": "Taratura RPE #1 - leg extension a cedimento",
+      "descrizione": "Venerdi L2 (16/10) o la prima L2 della settimana 5: ultima serie di leg extension a cedimento reale. Contare le ripetizioni oltre quelle che si pensava di avere in riserva.",
+      "data_fine": "2026-10-18"
+    },
+    {
+      "data": "2026-10-18",
+      "tipo": "micro_check",
+      "titolo": "Micro-check settimana 5",
+      "descrizione": "Blocco MICRO: peso media 7gg e delta, vita, aderenza %, sedute fatte, sonno medio, passi, cervicale/coccige max, drink. Esportare riepilogo settimanale (tabella 3).",
+      "azione": "Incollare il blocco MICRO in chat"
+    },
+    {
+      "data": "2026-10-18",
+      "tipo": "seduta",
+      "titolo": "Prima Seduta 5 possibile (domenica 9:00, 35')",
+      "descrizione": "Solo se attivata l'11/10: incline side-lying 4x15, reverse pec deck 3x20, face pull 3x20, alzate ai cavi 3x20 myo, hanging knee raise 3x12. LISS 15' invece di 30'."
+    },
+    {
+      "data": "2026-10-19",
+      "tipo": "check_completo",
+      "titolo": "Check completo #2 + FOTO",
+      "descrizione": "Verifica ritmo (atteso -0,5 kg/sett.). Conferma dello scarico per la settimana dopo.",
+      "azione": "Portare: tabella 3 x2, tabella 2, 5 foto"
+    },
+    {
+      "data": "2026-10-25",
+      "tipo": "micro_check",
+      "titolo": "Micro-check settimana 6",
+      "descrizione": "Blocco MICRO: peso media 7gg e delta, vita, aderenza %, sedute fatte, sonno medio, passi, cervicale/coccige max, drink. Esportare riepilogo settimanale (tabella 3).",
+      "azione": "Incollare il blocco MICRO in chat"
+    },
+    {
+      "data": "2026-10-26",
+      "tipo": "blocco_scheda",
+      "titolo": "SCARICO - settimana 7",
+      "descrizione": "Stessi pesi della sett. 6, 2 serie per esercizio, 4 ripetizioni in riserva (RPE 6). Niente myo-reps/drop set. APT, core, LISS e passi invariati. Sedute da 45-50'.",
+      "data_fine": "2026-11-01"
+    },
+    {
+      "data": "2026-11-01",
+      "tipo": "micro_check",
+      "titolo": "Micro-check settimana 7",
+      "descrizione": "Blocco MICRO: peso media 7gg e delta, vita, aderenza %, sedute fatte, sonno medio, passi, cervicale/coccige max, drink. Esportare riepilogo settimanale (tabella 3).",
+      "azione": "Incollare il blocco MICRO in chat"
+    },
+    {
+      "data": "2026-11-02",
+      "tipo": "blocco_scheda",
+      "titolo": "Blocco PIENO - settimane 8-12",
+      "descrizione": "Riprendere dai pesi della sett. 6 (non dello scarico). Stessa regola di avanzamento. Sett. 12 intera, senza alleggerire.",
+      "data_fine": "2026-12-06"
+    },
+    {
+      "data": "2026-11-02",
+      "tipo": "check_completo",
+      "titolo": "Check completo #3 + FOTO (post-scarico)",
+      "descrizione": "Verifica carichi contro baseline sett. 3. Conferma ripresa dai pesi della sett. 6.",
+      "azione": "Portare: tabella 3 x2, tabella 2, 5 foto"
+    },
+    {
+      "data": "2026-11-08",
+      "tipo": "micro_check",
+      "titolo": "Micro-check settimana 8",
+      "descrizione": "Blocco MICRO: peso media 7gg e delta, vita, aderenza %, sedute fatte, sonno medio, passi, cervicale/coccige max, drink. Esportare riepilogo settimanale (tabella 3).",
+      "azione": "Incollare il blocco MICRO in chat"
+    },
+    {
+      "data": "2026-11-15",
+      "tipo": "micro_check",
+      "titolo": "Micro-check settimana 9",
+      "descrizione": "Blocco MICRO: peso media 7gg e delta, vita, aderenza %, sedute fatte, sonno medio, passi, cervicale/coccige max, drink. Esportare riepilogo settimanale (tabella 3).",
+      "azione": "Incollare il blocco MICRO in chat"
+    },
+    {
+      "data": "2026-11-16",
+      "tipo": "taratura_rpe",
+      "titolo": "Taratura RPE #2 - alzate laterali ai cavi a cedimento",
+      "descrizione": "Prima L1 o L2 della settimana 10: ultima serie di alzate ai cavi a cedimento reale.",
+      "data_fine": "2026-11-22"
+    },
+    {
+      "data": "2026-11-16",
+      "tipo": "check_completo",
+      "titolo": "Check completo #4 + FOTO",
+      "descrizione": "Proiezione al 06/12: se la vita e' > 87 cm si valuta l'estensione (max 2 settimane, fino al 20/12).",
+      "azione": "Portare: tabella 3 x2, tabella 2, 5 foto"
+    },
+    {
+      "data": "2026-11-22",
+      "tipo": "micro_check",
+      "titolo": "Micro-check settimana 10",
+      "descrizione": "Blocco MICRO: peso media 7gg e delta, vita, aderenza %, sedute fatte, sonno medio, passi, cervicale/coccige max, drink. Esportare riepilogo settimanale (tabella 3).",
+      "azione": "Incollare il blocco MICRO in chat"
+    },
+    {
+      "data": "2026-11-29",
+      "tipo": "micro_check",
+      "titolo": "Micro-check settimana 11",
+      "descrizione": "Blocco MICRO: peso media 7gg e delta, vita, aderenza %, sedute fatte, sonno medio, passi, cervicale/coccige max, drink. Esportare riepilogo settimanale (tabella 3).",
+      "azione": "Incollare il blocco MICRO in chat"
+    },
+    {
+      "data": "2026-11-30",
+      "tipo": "check_completo",
+      "titolo": "Check completo #5 + FOTO",
+      "descrizione": "Preparazione transizione: calcolo del mantenimento sul peso di fine cut.",
+      "azione": "Portare: tabella 3 x2, tabella 2, 5 foto"
+    },
+    {
+      "data": "2026-12-06",
+      "tipo": "micro_check",
+      "titolo": "Micro-check settimana 12",
+      "descrizione": "Blocco MICRO: peso media 7gg e delta, vita, aderenza %, sedute fatte, sonno medio, passi, cervicale/coccige max, drink. Esportare riepilogo settimanale (tabella 3).",
+      "azione": "Incollare il blocco MICRO in chat"
+    },
+    {
+      "data": "2026-12-06",
+      "tipo": "fase",
+      "titolo": "FINE FASE 3 (settimana 12)",
+      "descrizione": "Ultima settimana di cut. Misurare vita e peso media 7gg."
+    },
+    {
+      "data": "2026-12-07",
+      "tipo": "cancello",
+      "titolo": "CANCELLO FASE 3 -> FASE 4",
+      "descrizione": "Condizioni: vita <= 85 cm (soglia provvisoria) E forza >= -5% sui 5 esercizi di riferimento vs baseline sett. 3. Se non si apre: estensione max 2 settimane (fino al 20/12), poi transizione comunque. Si fissa il minimo vita per il cancello di sicurezza della Fase 5.",
+      "azione": "Check completo con foto"
+    },
+    {
+      "data": "2026-12-07",
+      "tipo": "fase",
+      "titolo": "FASE 4 - TRANSIZIONE (4 settimane, sulle feste)",
+      "descrizione": "+150 kcal a settimana fino al mantenimento ricalcolato (indicativo 2.350-2.450). Volume invariato, RPE 8-9, LISS 2x/sett. Protocollo weekend attivo anche a Natale e Capodanno. Nuova scheda e nuova dieta al 07/12.",
+      "data_fine": "2027-01-03"
+    },
+    {
+      "data": "2026-12-28",
+      "tipo": "cancello",
+      "titolo": "Verifica cancello Fase 4 -> 5 (da qui in poi)",
+      "descrizione": "Peso stabile +/-0,5 kg per 7 giorni a mantenimento, misurato dopo il 27/12 (la settimana di Natale non conta)."
+    },
+    {
+      "data": "2027-01-04",
+      "tipo": "fase",
+      "titolo": "FASE 5 - LEAN BULK (12 settimane)",
+      "descrizione": "Surplus +250/300 kcal, +0,25 kg/sett. Delt laterale 18-22 serie, dorso 18-20 (50/50), centro schiena 8-10. 5 sedute se il recupero regge. PR come obiettivo. Rientro di panca inclinata/military/squat solo con via libera scritto del fisioterapista. Nuova scheda e dieta.",
+      "data_fine": "2027-03-28"
+    },
+    {
+      "data": "2027-01-04",
+      "tipo": "regola",
+      "titolo": "Cancello di sicurezza Fase 5 (attivo per tutta la fase)",
+      "descrizione": "Se la vita supera di +3 cm il minimo di fine cut, surplus tagliato a mantenimento, indipendentemente da data e peso. Se scatta 2 volte -> Fase 5b anticipata.",
+      "data_fine": "2027-03-28"
+    },
+    {
+      "data": "2027-03-29",
+      "tipo": "fase",
+      "titolo": "FASE 5b - TRANSIZIONE (2 settimane)",
+      "descrizione": "Discesa graduale a mantenimento. Cancello: peso stabile 7 giorni.",
+      "data_fine": "2027-04-11"
+    },
+    {
+      "data": "2027-04-12",
+      "tipo": "fase",
+      "titolo": "FASE 6 - DEFINIZIONE (9 settimane)",
+      "descrizione": "Deficit -500 rivalutato ogni 2 settimane. Volume mantenuto fino alla sett. 6, poi -20%. LISS in salita graduale. Ultimi 7 giorni solo protocollo estetico. Nuova scheda e dieta.",
+      "data_fine": "2027-06-13"
+    },
+    {
+      "data": "2027-06-06",
+      "tipo": "protocollo",
+      "titolo": "Ultima settimana: protocollo estetico",
+      "descrizione": "Acqua, sodio, fibra. Nessun taglio calorico ulteriore.",
+      "data_fine": "2027-06-13"
+    },
+    {
+      "data": "2027-06-13",
+      "tipo": "traguardo",
+      "titolo": "TRAGUARDO 13/06/2027",
+      "descrizione": "Vita ~80-81 cm (provvisoria) + foto: addome separato a riposo, V lineare, centro schiena leggibile in contrazione, deltoidi laterali separati. Proporzione, non volume."
+    }
+  ]
+}

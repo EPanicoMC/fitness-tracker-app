@@ -57,8 +57,31 @@
     </div>
   </div>
 
-  <!-- SMART ADVISOR / RECOVERY WIDGET -->
-  <div id="smart-advisor-box" style="margin-top:20px; margin-bottom:24px;"></div>
+  <!-- FASE + PROSSIMI APPUNTAMENTI -->
+  <div id="phase-appointments-box" style="margin-top:20px; margin-bottom:24px;"></div>
+
+  <!-- DATI GIORNALIERI -->
+  <div style="margin-bottom:24px">
+    <div style="font-size:10px;font-weight:800;color:var(--t3);letter-spacing:2px;margin-bottom:12px">DATI GIORNALIERI</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:12px">
+        <label style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:1px">PESO (kg)</label>
+        <input type="number" class="fi" id="daily-weight" step="0.1" min="40" max="200" placeholder="--" style="margin-top:6px;font-size:16px;font-weight:700;text-align:center;height:38px">
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:12px">
+        <label style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:1px">SONNO (ore)</label>
+        <input type="number" class="fi" id="daily-sleep" step="0.5" min="0" max="14" placeholder="--" style="margin-top:6px;font-size:16px;font-weight:700;text-align:center;height:38px">
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:12px">
+        <label style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:1px">DRINK ALCOLICI</label>
+        <input type="number" class="fi" id="daily-drinks" min="0" max="20" placeholder="0" style="margin-top:6px;font-size:16px;font-weight:700;text-align:center;height:38px">
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:12px">
+        <label style="font-size:10px;font-weight:700;color:var(--t3);letter-spacing:1px">PASTI FUORI</label>
+        <input type="number" class="fi" id="daily-meals-out" min="0" max="5" placeholder="0" style="margin-top:6px;font-size:16px;font-weight:700;text-align:center;height:38px">
+      </div>
+    </div>
+  </div>
 
   <!-- PANORAMICA -->
   <div style="font-size:10px;font-weight:800;color:var(--t3);letter-spacing:2px;margin-bottom:16px">PANORAMICA</div>

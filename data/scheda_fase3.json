@@ -1,0 +1,724 @@
+{
+  "meta": {
+    "atleta": "Enrico",
+    "fase": "Fase 3 - Cut",
+    "versione": "2026-09-09-r2",
+    "valido_dal": "2026-09-14",
+    "valido_al": "2026-12-06",
+    "settimane": 12,
+    "rotazione": [
+      "L1",
+      "U1",
+      "L2",
+      "U2"
+    ],
+    "regola_rotazione": "Rotazione scorrevole. Una seduta saltata slitta al primo slot utile (domenica 9:00 o lunedi 6:00); la sequenza non si rompe. Mai gambe in giorni consecutivi. Distanza minima 72h tra sedute dello stesso tipo.",
+    "calendario_default": {
+      "lunedi": "riposo (slot di recupero 6:00)",
+      "martedi": "L1 @ 6:00",
+      "mercoledi": "U1 @ 6:00 + LISS 20'",
+      "giovedi": "riposo",
+      "venerdi": "L2 @ 6:00",
+      "sabato": "U2 @ 9:00 + LISS 25'",
+      "domenica": "riposo attivo, LISS 30' (15' se S5 attiva) / S5 opzionale @ 9:00"
+    },
+    "durata_max_minuti": 75,
+    "unita_carico": "kg",
+    "rpe_definizione": "Ripetizioni rimaste nel serbatoio a fine serie: RPE 8 = 2 rip, RPE 9 = 1 rip, RPE 10 = cedimento."
+  },
+  "regole_globali": {
+    "straight_sets": "Tutte le serie di un esercizio allo stesso carico. L'app salva solo l'ultima serie: quella e' la serie di riferimento.",
+    "avanzamento": [
+      "Se l'ultima serie salvata raggiunge il tetto del range all'RPE target -> seduta successiva: carico +incremento, ripetizioni al fondo del range.",
+      "Se l'ultima serie e' dentro il range -> stesso carico, obiettivo +1 ripetizione.",
+      "Se l'ultima serie e' sotto il fondo del range per 2 sedute consecutive -> carico -5% e segnalazione al check.",
+      "Nessun aumento di carico nelle settimane 1-2 e 7."
+    ],
+    "incrementi": {
+      "hack_squat_pressa_calf_pressa": 5,
+      "macchine_a_piastre": "1 piastra (2.5-5 kg)",
+      "manubri": "manubrio successivo (+2 kg)",
+      "cavi": "1 piastra (2.5 kg)",
+      "trazioni": "prima le ripetizioni fino a 10, poi +2.5 kg alla cintura",
+      "calf_in_piedi": 5
+    },
+    "cervicale": "Collo neutro sempre. Nessuna flesso-estensione sotto carico. Testa non spinta contro lo schienale. Niente mento sopra la sbarra.",
+    "coccige": "Asciugamano sullo schienale di pressa e hack; asciugamano sotto il sacro a terra. Nessuna seduta su superficie dura oltre 90 secondi.",
+    "stop": "Cervicale o coccige > 3/10 durante un esercizio: stop, variante sicura, annotazione.",
+    "intensificazione": "Myo-reps e drop set solo su isolamento a cavi/macchina, solo nelle settimane 3-6 e 8-12, max 2 esercizi per seduta.",
+    "myo_reps": "Serie di attivazione 12-15 a RPE 9, poi 3 mini-serie da 4 rip con 10-15 s di pausa, stesso carico.",
+    "drop_set": "A fine serie, carico -30% immediato, fino a RPE 9."
+  },
+  "blocchi_settimanali": [
+    {
+      "settimane": "1-2",
+      "date": "14/09-27/09",
+      "modalita": "Rientro",
+      "rpe_fondamentali": 7,
+      "rpe_isolamento": 8,
+      "carichi": "85-90% dei riferimenti",
+      "intensificazione": false
+    },
+    {
+      "settimane": "3-6",
+      "date": "28/09-25/10",
+      "modalita": "Pieno",
+      "rpe_fondamentali": 8,
+      "rpe_isolamento": 9,
+      "intensificazione": true,
+      "nota": "Sett. 3 = baseline forza. Sett. 5: leg extension a cedimento reale (taratura RPE)."
+    },
+    {
+      "settimane": "7",
+      "date": "26/10-01/11",
+      "modalita": "Scarico",
+      "rpe_fondamentali": 6,
+      "rpe_isolamento": 7,
+      "serie": "2 per esercizio, carichi invariati",
+      "intensificazione": false
+    },
+    {
+      "settimane": "8-12",
+      "date": "02/11-06/12",
+      "modalita": "Pieno",
+      "rpe_fondamentali": 8,
+      "rpe_isolamento": 9,
+      "intensificazione": true,
+      "nota": "Sett. 10: alzate laterali ai cavi a cedimento reale (taratura RPE)."
+    }
+  ],
+  "riscaldamento": {
+    "6_00": {
+      "durata_min": 12,
+      "step": [
+        "Tapis roulant in salita 5-6%, camminata sostenuta, 5 min",
+        "Mobilita 4 min: cat-camel x8, rotazioni toraciche in quadrupedia x6/lato, 90/90 anca x6/lato, band pull-apart 2x15, chin tuck x10, (Lower) cerchi caviglia x10/lato, (Upper) dislocazioni elastico x10",
+        "Avvicinamento sul primo esercizio 3 min: 50% x8, 75% x4"
+      ]
+    },
+    "9_00": {
+      "durata_min": 8,
+      "step": [
+        "Tapis 3 min",
+        "Mobilita 3 min (stesse voci, una serie)",
+        "Avvicinamento 2 min"
+      ]
+    },
+    "vietato": [
+      "cyclette",
+      "stretching statico pre-seduta"
+    ]
+  },
+  "sedute": [
+    {
+      "id": "L1",
+      "nome": "Lower quadricipiti + delt laterale",
+      "giorno_default": "martedi",
+      "ora": "6:00",
+      "durata_stimata_min": 68,
+      "cardio_post": null,
+      "se_sfori": "Taglia calf, poi 1 serie di bulgaro. Mai alzate laterali, mai blocco APT.",
+      "esercizi": [
+        {
+          "ordine": 1,
+          "nome": "Hack squat",
+          "serie": 4,
+          "rip_min": 8,
+          "rip_max": 10,
+          "recupero_sec": 150,
+          "rpe": 8,
+          "incremento_kg": 5,
+          "note": "Asciugamano sullo schienale. Piedi a meta pedana. Discesa a parallelo o poco sotto senza retroversione lombare. Collo neutro.",
+          "variante_sicura": "Pressa 45 gradi 4x10 (se sfregamento coccige)"
+        },
+        {
+          "ordine": 2,
+          "nome": "Leg curl seduto",
+          "serie": 3,
+          "rip_min": 10,
+          "rip_max": 12,
+          "recupero_sec": 90,
+          "rpe": 8,
+          "incremento_kg": 2.5,
+          "note": "Cuscino sulle cosce serrato, busto fermo, 2 s eccentrica.",
+          "variante_sicura": "Leg curl sdraiato"
+        },
+        {
+          "ordine": 3,
+          "nome": "Bulgarian split squat manubri",
+          "serie": 3,
+          "rip_min": 10,
+          "rip_max": 10,
+          "per_lato": true,
+          "recupero_sec": 90,
+          "rpe": 7.5,
+          "incremento_kg": 2,
+          "note": "Piede posteriore su panca bassa, busto leggermente avanti, ginocchio in linea col piede. Gamba debole per prima. Recupero 90 s tra una coppia di lati e l'altra.",
+          "variante_sicura": "Step-up su box 3x10/gamba"
+        },
+        {
+          "ordine": 4,
+          "nome": "Alzate laterali ai cavi",
+          "serie": 4,
+          "rip_min": 12,
+          "rip_max": 15,
+          "recupero_sec": 60,
+          "rpe": 9,
+          "incremento_kg": 2.5,
+          "intensificazione": "myo-reps sull'ultima serie (dalla sett. 3)",
+          "note": "Cavo basso, corpo inclinato via dalla colonna, braccio quasi teso, gomito guida, nessuno shrug.",
+          "variante_sicura": "Alzate laterali manubri seduto schienale 80 gradi"
+        },
+        {
+          "ordine": 5,
+          "nome": "Calf in piedi",
+          "serie": 3,
+          "rip_min": 12,
+          "rip_max": 15,
+          "recupero_sec": 60,
+          "rpe": 9,
+          "incremento_kg": 5,
+          "note": "Pausa 1 s in basso, estensione completa.",
+          "variante_sicura": "Calf alla pressa"
+        },
+        {
+          "ordine": 6,
+          "nome": "Blocco APT",
+          "durata_min": 8,
+          "serie": null,
+          "componenti": [
+            "Dead bug 3x8/lato (asciugamano sotto il sacro, lombare schiacciata)",
+            "Plank RKC 3x20 s (glutei serrati, bacino retroverso)",
+            "Couch stretch 2x45 s/lato"
+          ],
+          "recupero_sec": 30,
+          "note": "Non si taglia mai."
+        }
+      ]
+    },
+    {
+      "id": "U1",
+      "nome": "Upper trazioni + delt laterale + centro schiena",
+      "giorno_default": "mercoledi",
+      "ora": "6:00",
+      "durata_stimata_min": 70,
+      "cardio_post": "LISS 20 min tapis in salita 8-10%, 6-6.5 km/h, FC 55-65% max",
+      "se_sfori": "Taglia superset braccia, poi 1 serie di chest press. Mai esercizi 1, 2, 4.",
+      "esercizi": [
+        {
+          "ordine": 1,
+          "nome": "Trazioni alla sbarra",
+          "serie": 4,
+          "rip_min": 6,
+          "rip_max": 10,
+          "recupero_sec": 150,
+          "rpe": 8,
+          "incremento_kg": 2.5,
+          "note": "Presa prona poco piu larga delle spalle. Collo neutro, sguardo avanti, niente mento sopra la sbarra. Scapole depresse in partenza. A 10 rip: zavorra +2.5 kg.",
+          "variante_sicura": "Lat machine presa neutra 4x8-12 (cervicale >3) / trazioni assistite se <6 rip"
+        },
+        {
+          "ordine": 2,
+          "nome": "Row machine appoggio pettorale",
+          "serie": 4,
+          "rip_min": 8,
+          "rip_max": 12,
+          "recupero_sec": 120,
+          "rpe": 8,
+          "incremento_kg": 2.5,
+          "note": "Gomiti vicini al busto, spalla in allungamento completo in partenza, tirata al fianco, 1 s di contrazione a scapole addotte. Petto sempre appoggiato.",
+          "variante_sicura": "Pulley basso presa neutra"
+        },
+        {
+          "ordine": 3,
+          "nome": "Chest press machine",
+          "serie": 3,
+          "rip_min": 8,
+          "rip_max": 12,
+          "recupero_sec": 120,
+          "rpe": 8,
+          "incremento_kg": 2.5,
+          "note": "Maniglie a meta petto. Testa appoggiata senza spinta.",
+          "variante_sicura": "Panca piana manubri (se macchina occupata)"
+        },
+        {
+          "ordine": 4,
+          "nome": "Incline side-lying lateral raise",
+          "serie": 4,
+          "rip_min": 12,
+          "rip_max": 15,
+          "recupero_sec": 60,
+          "rpe": 9,
+          "incremento_kg": 2,
+          "note": "Panca 30-45 gradi, sdraiato di lato, braccio parte davanti alla coscia e sale all'orizzontale. Collo appoggiato sul braccio sotto.",
+          "variante_sicura": "Alzate laterali ai cavi"
+        },
+        {
+          "ordine": 5,
+          "nome": "Face pull ai cavi",
+          "serie": 3,
+          "rip_min": 15,
+          "rip_max": 20,
+          "recupero_sec": 60,
+          "rpe": 9,
+          "incremento_kg": 2.5,
+          "note": "Corda all'altezza degli occhi, gomiti alti, rotazione esterna. Collo neutro.",
+          "variante_sicura": "Reverse pec deck"
+        },
+        {
+          "ordine": 6,
+          "nome": "Superset: Spider curl + Pushdown corda",
+          "superset": true,
+          "serie": 2,
+          "rip_min": 10,
+          "rip_max": 12,
+          "rip_min_b": 12,
+          "rip_max_b": 15,
+          "recupero_sec": 60,
+          "rpe": 9,
+          "incremento_kg": 2,
+          "note": "Spider curl: petto sulla panca a 45 gradi, collo in linea. Pushdown: gomiti fermi, estensione completa. Recupero 60 s tra un superset e l'altro.",
+          "variante_sicura": "Curl EZ in piedi + French press ai cavi"
+        },
+        {
+          "ordine": 7,
+          "nome": "Core",
+          "durata_min": 5,
+          "componenti": [
+            "Cable crunch in ginocchio 3x12-15 (flessione toracica, non del collo)",
+            "Pallof press 2x10/lato"
+          ],
+          "recupero_sec": 45,
+          "rpe": 8
+        }
+      ]
+    },
+    {
+      "id": "L2",
+      "nome": "Lower femorali + delt laterale",
+      "giorno_default": "venerdi",
+      "ora": "6:00",
+      "durata_stimata_min": 68,
+      "cardio_post": null,
+      "se_sfori": "Taglia calf, poi 1 serie di leg extension. Mai alzate laterali, mai stacco rumeno.",
+      "esercizi": [
+        {
+          "ordine": 1,
+          "nome": "Pressa 45 gradi",
+          "serie": 3,
+          "rip_min": 10,
+          "rip_max": 12,
+          "recupero_sec": 150,
+          "rpe": 8,
+          "incremento_kg": 5,
+          "note": "Asciugamano sullo schienale, piedi a meta pedana larghezza spalle, stop a 90-100 gradi se il coccige sfrega. Bacino sempre appoggiato.",
+          "variante_sicura": "Hack squat 3x10"
+        },
+        {
+          "ordine": 2,
+          "nome": "Stacco rumeno manubri",
+          "serie": 3,
+          "rip_min": 10,
+          "rip_max": 12,
+          "recupero_sec": 120,
+          "rpe": 7.5,
+          "incremento_kg": 2,
+          "note": "Manubri lungo le cosce, anche indietro, schiena neutra, sguardo a 2 m davanti sul pavimento (mai in alto). Scendere finche i femorali tirano, non oltre meta tibia. Carico moderato: esercizio tecnico.",
+          "variante_sicura": "Iperestensioni 45 gradi 3x12 / leg curl sdraiato"
+        },
+        {
+          "ordine": 3,
+          "nome": "Leg extension",
+          "serie": 3,
+          "rip_min": 12,
+          "rip_max": 15,
+          "recupero_sec": 75,
+          "rpe": 9,
+          "incremento_kg": 2.5,
+          "intensificazione": "drop set -30% sull'ultima serie (dalla sett. 3)",
+          "note": "Pausa 1 s in alto, 2 s eccentrica.",
+          "variante_sicura": null
+        },
+        {
+          "ordine": 4,
+          "nome": "Leg curl sdraiato",
+          "serie": 3,
+          "rip_min": 12,
+          "rip_max": 15,
+          "recupero_sec": 75,
+          "rpe": 9,
+          "incremento_kg": 2.5,
+          "note": "Anche schiacciate sulla panca, nessun inarcamento lombare.",
+          "variante_sicura": "Leg curl seduto"
+        },
+        {
+          "ordine": 5,
+          "nome": "Alzate laterali ai cavi",
+          "serie": 4,
+          "rip_min": 12,
+          "rip_max": 15,
+          "recupero_sec": 60,
+          "rpe": 9,
+          "incremento_kg": 2.5,
+          "intensificazione": "myo-reps sull'ultima serie (dalla sett. 3)",
+          "note": "Come L1.",
+          "variante_sicura": "Alzate laterali manubri seduto"
+        },
+        {
+          "ordine": 6,
+          "nome": "Calf alla pressa",
+          "serie": 3,
+          "rip_min": 12,
+          "rip_max": 15,
+          "recupero_sec": 60,
+          "rpe": 9,
+          "incremento_kg": 5,
+          "note": "Pausa in basso, estensione completa.",
+          "variante_sicura": "Calf in piedi"
+        },
+        {
+          "ordine": 7,
+          "nome": "Blocco APT",
+          "durata_min": 8,
+          "componenti": [
+            "Dead bug 3x8/lato",
+            "Plank RKC 3x20 s",
+            "Couch stretch 2x45 s/lato"
+          ],
+          "recupero_sec": 30,
+          "note": "Non si taglia mai."
+        }
+      ]
+    },
+    {
+      "id": "U2",
+      "nome": "Upper lat machine + rematore + delt laterale",
+      "giorno_default": "sabato",
+      "ora": "9:00",
+      "durata_stimata_min": 65,
+      "cardio_post": "LISS 25 min tapis in salita 8-10%, 6-6.5 km/h, FC 55-65% max",
+      "se_sfori": "Taglia superset braccia. Mai esercizi 1, 2, 4, 5.",
+      "esercizi": [
+        {
+          "ordine": 1,
+          "nome": "Lat machine presa neutra media",
+          "serie": 4,
+          "rip_min": 8,
+          "rip_max": 12,
+          "recupero_sec": 150,
+          "rpe": 8,
+          "incremento_kg": 2.5,
+          "note": "Maniglie parallele larghezza spalle. Busto quasi verticale. Tirata al petto alto, gomiti verso i fianchi. Collo neutro.",
+          "variante_sicura": "Lat machine presa larga prona"
+        },
+        {
+          "ordine": 2,
+          "nome": "Rematore singolo manubrio",
+          "serie": 4,
+          "rip_min": 10,
+          "rip_max": 12,
+          "per_lato": true,
+          "recupero_sec": 90,
+          "rpe": 8,
+          "incremento_kg": 2,
+          "note": "Mano e ginocchio sulla panca, schiena piatta, collo in linea. Partenza in allungamento completo con spalla che scende, tirata verso l'anca, gomito vicino al busto. Lato debole per primo. 60 s tra i lati, 90 s tra le serie.",
+          "variante_sicura": "Row machine"
+        },
+        {
+          "ordine": 3,
+          "nome": "Panca piana manubri",
+          "serie": 3,
+          "rip_min": 8,
+          "rip_max": 12,
+          "recupero_sec": 120,
+          "rpe": 8,
+          "incremento_kg": 2,
+          "note": "Panca piatta o 15 gradi max. Testa appoggiata, non spinta. Scapole addotte.",
+          "variante_sicura": "Chest press machine (cervicale >3)"
+        },
+        {
+          "ordine": 4,
+          "nome": "Alzate laterali manubri seduto schienale 80 gradi",
+          "serie": 4,
+          "rip_min": 10,
+          "rip_max": 15,
+          "recupero_sec": 60,
+          "rpe": 9,
+          "incremento_kg": 2,
+          "intensificazione": "drop set -30% sull'ultima serie (dalla sett. 3)",
+          "note": "Gomiti leggermente flessi, fino all'orizzontale, nessuno shrug.",
+          "variante_sicura": "Alzate laterali ai cavi"
+        },
+        {
+          "ordine": 5,
+          "nome": "Reverse pec deck",
+          "serie": 3,
+          "rip_min": 15,
+          "rip_max": 20,
+          "recupero_sec": 60,
+          "rpe": 9,
+          "incremento_kg": 2.5,
+          "note": "Petto appoggiato, braccia quasi tese, 1 s contrazione.",
+          "variante_sicura": "Face pull"
+        },
+        {
+          "ordine": 6,
+          "nome": "Superset: Curl EZ + French press ai cavi",
+          "superset": true,
+          "serie": 2,
+          "rip_min": 10,
+          "rip_max": 12,
+          "rip_min_b": 12,
+          "rip_max_b": 15,
+          "recupero_sec": 60,
+          "rpe": 9,
+          "incremento_kg": 2.5,
+          "note": "Curl: gomiti fermi ai fianchi. French press: corda dietro la testa, collo neutro, non flesso.",
+          "variante_sicura": "Spider curl + pushdown"
+        },
+        {
+          "ordine": 7,
+          "nome": "Core",
+          "durata_min": 5,
+          "componenti": [
+            "Hanging knee raise 3x10-15 (bacino retroverso a fine salita, senza dondolio)",
+            "Pallof press 2x10/lato"
+          ],
+          "recupero_sec": 45,
+          "rpe": 8
+        }
+      ]
+    },
+    {
+      "id": "S5",
+      "nome": "Delt & centro schiena (OPZIONALE)",
+      "giorno_default": "domenica",
+      "ora": "9:00",
+      "durata_stimata_min": 35,
+      "attivazione": "Dalla settimana 5 (12/10) solo se al check dell'11/10: aderenza pasti >= 90%, sonno medio >= 6.0 h, cervicale e coccige <= 3/10, nessun calo di carico sui fondamentali. Si disattiva alla prima settimana in cui una condizione cade.",
+      "cardio_post": "LISS 15 min",
+      "esercizi": [
+        {
+          "ordine": 1,
+          "nome": "Incline side-lying lateral raise",
+          "serie": 4,
+          "rip_min": 15,
+          "rip_max": 15,
+          "recupero_sec": 60,
+          "rpe": 9
+        },
+        {
+          "ordine": 2,
+          "nome": "Reverse pec deck",
+          "serie": 3,
+          "rip_min": 20,
+          "rip_max": 20,
+          "recupero_sec": 60,
+          "rpe": 9
+        },
+        {
+          "ordine": 3,
+          "nome": "Face pull ai cavi",
+          "serie": 3,
+          "rip_min": 20,
+          "rip_max": 20,
+          "recupero_sec": 60,
+          "rpe": 9
+        },
+        {
+          "ordine": 4,
+          "nome": "Alzate laterali ai cavi",
+          "serie": 3,
+          "rip_min": 20,
+          "rip_max": 20,
+          "recupero_sec": 60,
+          "rpe": 9,
+          "intensificazione": "myo-reps sull'ultima serie"
+        },
+        {
+          "ordine": 5,
+          "nome": "Hanging knee raise",
+          "serie": 3,
+          "rip_min": 12,
+          "rip_max": 12,
+          "recupero_sec": 60,
+          "rpe": 8
+        }
+      ]
+    }
+  ],
+  "cardio_e_passi": {
+    "passi_giornalieri": 11000,
+    "passi_leva_stallo": [
+      12000,
+      13000
+    ],
+    "liss": [
+      {
+        "giorno": "mercoledi",
+        "dopo": "U1",
+        "minuti": 20
+      },
+      {
+        "giorno": "sabato",
+        "dopo": "U2",
+        "minuti": 25
+      },
+      {
+        "giorno": "domenica",
+        "dopo": null,
+        "minuti": 30,
+        "nota": "15 se S5 attiva"
+      }
+    ],
+    "modalita": "Camminata in salita al tapis 8-10%, 6-6.5 km/h, FC 55-65% max (circa 105-125 bpm). Mai cyclette. Mai post-gambe.",
+    "vietato": [
+      "HIIT",
+      "corsa",
+      "cardio compensativo dopo una serata"
+    ]
+  },
+  "correttivo_apt_casa": {
+    "quando": "ogni sera, 5 min",
+    "componenti": [
+      "Respirazione 90/90 (gambe su sedia, lombare a terra, espirazioni lunghe) 2 min",
+      "Couch stretch 45 s/lato",
+      "Glute bridge 2x12 con pausa 2 s in alto (su materasso o tappetino con asciugamano)"
+    ]
+  },
+  "esercizi_riferimento_forza": [
+    "Trazioni alla sbarra",
+    "Row machine appoggio pettorale",
+    "Hack squat",
+    "Pressa 45 gradi",
+    "Lat machine presa neutra media"
+  ],
+  "baseline_forza": "Ultima serie salvata di ciascun esercizio di riferimento nella settimana 3 (28/09-04/10). Il cancello di fine fase richiede >= -5% su questi valori.",
+  "guida_progressione": {
+    "concetto": [
+      "Ogni esercizio ha un range di ripetizioni e un RPE target (RPE 8 = 2 ripetizioni in riserva a fine serie, RPE 9 = 1).",
+      "Il carico si sceglie perche' l'ultima serie cada dentro il range a quell'RPE. Tutte le serie dell'esercizio allo stesso carico.",
+      "Quando l'ultima serie tocca il tetto del range, la seduta successiva si aumenta il carico dell'incremento indicato e si riparte dal fondo del range. Prima le ripetizioni, poi il peso."
+    ],
+    "prima_scelta_carico": "Settimana 1: carico con cui sai di fare il tetto del range con 3 ripetizioni in riserva (RPE 7). Esercizi gia' fatti a luglio: 85-90% del carico di allora. Esercizi nuovi: la prima serie e' un test, si aggiusta dalla seconda serie. Dalla seconda seduta il carico e' fissato e si segue la regola.",
+    "blocchi": [
+      {
+        "settimane": "1-2",
+        "date": "14/09-27/09",
+        "cosa_fare": "Fondamentali RPE 7 (3 in riserva), isolamento RPE 8. Carichi fermi per due settimane anche se sembrano facili. In settimana 2 provare +1 ripetizione con lo stesso carico. Nessun myo-reps, nessun drop set."
+      },
+      {
+        "settimane": "3",
+        "date": "28/09-04/10",
+        "cosa_fare": "Sale l'RPE: fondamentali 8, isolamento 9, stesso carico della settimana 2. L'ultima serie di trazioni, row machine, hack squat, pressa 45 e lat machine di questa settimana e' il BASELINE FORZA: va annotata. Da qui partono myo-reps e drop set."
+      },
+      {
+        "settimane": "4-6",
+        "date": "05/10-25/10",
+        "cosa_fare": "Regola di avanzamento attiva ogni seduta. Settimana 5: leg extension, solo ultima serie, a cedimento reale (taratura RPE): contare quante ripetizioni oltre quelle che si pensava di avere in riserva."
+      },
+      {
+        "settimane": "7",
+        "date": "26/10-01/11",
+        "cosa_fare": "SCARICO: stessi carichi della settimana 6, 2 serie per ogni esercizio (4x8-10 diventa 2x8-10, 3x12-15 diventa 2x12-15), fermarsi con 4 ripetizioni in riserva (RPE 6). Niente myo-reps ne' drop set. Blocco APT, core, LISS e passi invariati. Seduta di 45-50 minuti."
+      },
+      {
+        "settimane": "8-12",
+        "date": "02/11-06/12",
+        "cosa_fare": "Ripartire dai carichi della settimana 6 (non da quelli dello scarico), stessa regola di avanzamento. Settimana 10: alzate laterali ai cavi, ultima serie a cedimento reale. Settimana 12 intera, senza alleggerire."
+      }
+    ],
+    "esempio_hack_squat": [
+      {
+        "settimana": 1,
+        "ultima_serie": "80 kg x 9 (RPE 7)",
+        "seduta_dopo": "stesso carico"
+      },
+      {
+        "settimana": 2,
+        "ultima_serie": "80 kg x 10 (RPE 7)",
+        "seduta_dopo": "stesso carico (blocco rientro)"
+      },
+      {
+        "settimana": 3,
+        "ultima_serie": "80 kg x 10 (RPE 8) = baseline",
+        "seduta_dopo": "+5 kg"
+      },
+      {
+        "settimana": 4,
+        "ultima_serie": "85 kg x 8",
+        "seduta_dopo": "stesso carico, cercare 9"
+      },
+      {
+        "settimana": 5,
+        "ultima_serie": "85 kg x 9",
+        "seduta_dopo": "stesso carico, cercare 10"
+      },
+      {
+        "settimana": 6,
+        "ultima_serie": "85 kg x 10",
+        "seduta_dopo": "+5 kg"
+      },
+      {
+        "settimana": 7,
+        "ultima_serie": "85 kg x 8 (2 serie, RPE 6)",
+        "seduta_dopo": "scarico, nessuna regola"
+      },
+      {
+        "settimana": 8,
+        "ultima_serie": "90 kg x 8",
+        "seduta_dopo": "nel range"
+      }
+    ],
+    "myo_reps_pratica": "Serie normale fino a 1 in riserva (12-15 rip). Poi senza cambiare carico: pausa 10-15 s -> 4 rip -> pausa 10-15 s -> 4 rip -> pausa 10-15 s -> 4 rip. Registrare la serie di attivazione (es. 12 kg x 14) e nelle note 'myo 3x4'.",
+    "drop_set_pratica": "Serie normale fino a 1 in riserva. Poi togliere subito il 30% del carico e continuare fino a 1 in riserva. Registrare la serie principale; nelle note 'drop -30% x N rip'.",
+    "registrazione": "Registrare sempre carico, ripetizioni e RPE dell'ultima serie. Se usata una variante sicura, indicarlo nelle note: quel dato non entra nella progressione dell'esercizio principale. Le serie di riscaldamento non si registrano."
+  },
+  "seduta_5_spiegazione": {
+    "cos_e": "Quinta seduta corta (35 min) di solo isolamento su deltoide laterale, deltoide posteriore e centro schiena, piu' core. Nessuna gamba, nessuna trazione pesante, nessuna spinta.",
+    "perche_opzionale": "Con 5-7 h di sonno e deficit appena iniziato non e' noto se le 4 sedute piene sono recuperate. Le settimane 1-4 lo dicono con i dati.",
+    "decisione": {
+      "quando": "Micro-check di domenica 11/10 (fine settimana 4)",
+      "condizioni_tutte_vere": [
+        "Aderenza pasti settimane 3-4 >= 90%",
+        "Sonno medio settimane 3-4 >= 6.0 h/notte",
+        "Cervicale e coccige <= 3/10 in ogni seduta delle settimane 3-4",
+        "Nessun calo di carico sui 5 esercizi di riferimento tra settimana 3 e 4"
+      ],
+      "se_tutte_vere": "Dalla domenica 18/10 la Seduta 5 si fa.",
+      "se_una_falsa": "Non si fa; si riverifica al micro-check successivo."
+    },
+    "quando_attiva": "Domenica 9:00, riscaldamento 8 min, i 5 esercizi, LISS 15 min invece di 30. Nessuna progressione di carico: RPE 9, carichi stabili, obiettivo pump e frequenza.",
+    "quando_si_spegne": "La prima settimana in cui una delle quattro condizioni cade la domenica torna LISS 30 min. Si riaccende alla prima settimana in cui tornano tutte vere."
+  },
+  "export_per_check": {
+    "tabella_per_seduta": {
+      "una_riga_per": "esercizio, per ogni seduta fatta",
+      "campi": [
+        "data (AAAA-MM-GG)",
+        "seduta (L1/U1/L2/U2/S5)",
+        "settimana_fase (1-12)",
+        "esercizio (nome come in scheda)",
+        "variante_usata (si/no + quale)",
+        "carico_ultima_serie (kg)",
+        "rip_ultima_serie",
+        "rpe_ultima_serie (6-10)",
+        "intensificazione (myo 3x4 / drop -30% x N / nessuna)",
+        "cervicale_max (0-10)",
+        "coccige_max (0-10)",
+        "durata_min (riscaldamento incluso)",
+        "liss_min"
+      ]
+    },
+    "riepilogo_settimanale": {
+      "campi": [
+        "sedute_fatte/sedute_previste",
+        "cervicale_max_settimana",
+        "coccige_max_settimana",
+        "carichi_riferimento: ultima serie di Trazioni, Row machine, Hack squat, Pressa 45, Lat machine come 'kg x rip' con delta vs settimana precedente"
+      ]
+    },
+    "formato": "CSV o JSON",
+    "cadenza": "Riepilogo ogni domenica (micro-check); tabella completa delle 2 settimane a ogni check completo."
+  }
+}
