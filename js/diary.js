@@ -328,7 +328,10 @@ window.showDay = async function(dateStr) {
         ${X}
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
           <p style="font-size:15px;font-weight:700">${formatDateIT(dateStr)}</p>
-          <span class="badge" style="background:rgba(124,111,255,.2);color:var(--accent)">📅 Pianificato</span>
+          <div style="display:flex;gap:6px;align-items:center">
+            <span class="badge" style="background:rgba(124,111,255,.2);color:var(--accent)">📅 Pianificato</span>
+            <button class="btn btn-ghost btn-xs" onclick="openEditDay('${dateStr}')">✏️</button>
+          </div>
         </div>
         <div style="font-size:14px;font-weight:700;color:var(--accent)">${session.name}</div>
         ${session.time ? `<div style="font-size:12px;color:var(--t2);margin-top:4px">🕐 ${session.time}</div>` : ''}
@@ -350,7 +353,10 @@ window.showDay = async function(dateStr) {
         ${X}
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
           <p style="font-size:15px;font-weight:700">${formatDateIT(dateStr)}</p>
-          <span class="badge badge-r">❌ Saltata</span>
+          <div style="display:flex;gap:6px;align-items:center">
+            <span class="badge badge-r">❌ Saltata</span>
+            <button class="btn btn-ghost btn-xs" onclick="openEditDay('${dateStr}')">✏️</button>
+          </div>
         </div>
         <div style="font-size:14px;font-weight:700;color:var(--red)">Sessione saltata: ${session?.name || 'Allenamento'}</div>
         ${session ? `
@@ -370,7 +376,10 @@ window.showDay = async function(dateStr) {
     det.innerHTML = `
       <div class="diary-card">
         ${X}
-        <p style="font-size:15px;font-weight:700;margin-bottom:4px">${formatDateIT(dateStr)}</p>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <p style="font-size:15px;font-weight:700">${formatDateIT(dateStr)}</p>
+          <button class="btn btn-ghost btn-xs" onclick="openEditDay('${dateStr}')">✏️</button>
+        </div>
         <p style="color:var(--t2);font-size:14px">Nessun dato registrato</p>
         <div style="display:flex;gap:8px;margin-top:12px">
           <button class="btn btn-ghost btn-sm" onclick="window.openAddMealForDate('${dateStr}')" style="flex:1">＋ Pasto</button>
@@ -1030,8 +1039,12 @@ window.showEventsPanel = function() {
   panel.style.display = 'block';
 
   const today = getTodayString();
-  const future = calendarEvents.filter(e => e.data >= today).sort((a, b) => a.data.localeCompare(b.data));
-  const past = calendarEvents.filter(e => e.data < today).sort((a, b) => b.data.localeCompare(a.data));
+
+  // Separa fasi dagli altri eventi
+  const fasi = calendarEvents.filter(e => e.tipo === 'fase').sort((a, b) => a.data.localeCompare(b.data));
+  const nonFasi = calendarEvents.filter(e => e.tipo !== 'fase');
+  const future = nonFasi.filter(e => e.data >= today).sort((a, b) => a.data.localeCompare(b.data));
+  const past = nonFasi.filter(e => e.data < today).sort((a, b) => b.data.localeCompare(a.data));
 
   const renderEvt = (ev) => {
     const col = EVENTO_COLORI[ev.tipo] || '#6e6e73';
@@ -1050,10 +1063,43 @@ window.showEventsPanel = function() {
       </div>`;
   };
 
+  // Render fase card con colore e editing
+  const renderFase = (f) => {
+    const titleLow = (f.titolo || '').toLowerCase();
+    let color = '#b5179e';
+    for (const [key, c] of Object.entries(FASE_COLORI)) { if (titleLow.includes(key)) { color = c; break; } }
+    const dStart = new Date(f.data + 'T12:00:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'short' });
+    const dEnd = f.data_fine ? new Date(f.data_fine + 'T12:00:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'short' }) : '—';
+    return `
+      <div style="padding:12px;background:var(--bg2);border-radius:12px;border-left:4px solid ${color};margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div style="flex:1">
+            <div style="font-size:10px;color:var(--t3);font-weight:700">${dStart} → ${dEnd}</div>
+            <div style="font-size:14px;font-weight:800;color:${color};margin-top:2px">🏁 ${f.titolo}</div>
+            ${f.descrizione ? `<div style="font-size:11px;color:var(--t2);margin-top:4px;line-height:1.4">${f.descrizione}</div>` : ''}
+            ${f.esito ? `<div style="font-size:11px;color:var(--t1);margin-top:4px">📊 Esito: ${f.esito}</div>` : ''}
+          </div>
+          <div style="display:flex;gap:4px;flex-shrink:0">
+            <button onclick="window.editFase('${f._id}')" style="background:none;border:none;color:var(--accent);font-size:14px;cursor:pointer;padding:4px">✏️</button>
+            <button onclick="window.deleteEvent('${f._id}')" style="background:none;border:none;color:var(--red);font-size:14px;cursor:pointer;padding:4px">✕</button>
+          </div>
+        </div>
+      </div>`;
+  };
+
   panel.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
       <h2 style="font-size:18px;font-weight:800">📋 Eventi calendario</h2>
       <button class="btn btn-ghost btn-sm" onclick="window.showEventsPanel()">← Calendario</button>
+    </div>
+
+    <div style="font-size:10px;font-weight:800;color:var(--t3);letter-spacing:1.5px;margin-bottom:8px">🏁 PIANO GENERALE</div>
+    ${fasi.length ? fasi.map(renderFase).join('') : '<p style="color:var(--t3);font-size:13px;margin-bottom:8px">Nessuna fase definita</p>'}
+    <button class="btn btn-ghost btn-sm" style="width:100%;margin-bottom:20px" onclick="window.showAddFaseForm()">＋ Aggiungi fase</button>
+    <div id="add-fase-form" style="display:none"></div>
+
+    <div style="border-top:1px solid var(--border);padding-top:16px;margin-bottom:8px">
+      <div style="font-size:10px;font-weight:800;color:var(--t3);letter-spacing:1.5px;margin-bottom:8px">📌 APPUNTAMENTI</div>
     </div>
     <button class="btn btn-v btn-sm" style="width:100%;margin-bottom:16px" onclick="window.showAddEventForm()">➕ Nuovo evento</button>
     <div id="add-event-form" style="display:none"></div>
@@ -1141,6 +1187,102 @@ window.deleteEvent = async function(eventId) {
     window.showEventsPanel();
   } catch(e) {
     showToast('Errore eliminazione: ' + e.message, 'err');
+  }
+};
+
+// ── Form aggiungi/modifica fase ───────────────────────────
+window.showAddFaseForm = function(editData) {
+  const form = document.getElementById('add-fase-form');
+  if (!editData && form.style.display !== 'none') { form.style.display = 'none'; return; }
+
+  const isEdit = !!editData;
+  const today = getTodayString();
+
+  form.style.display = 'block';
+  form.innerHTML = `
+    <div style="padding:14px;background:var(--bg2);border-radius:12px;border:1px solid var(--border);margin-bottom:16px">
+      <div style="font-size:12px;font-weight:700;margin-bottom:10px">${isEdit ? '✏️ Modifica fase' : '🏁 Nuova fase'}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+        <div>
+          <label style="font-size:10px;color:var(--t3)">Data inizio</label>
+          <input type="date" id="fase-data" class="fi" value="${editData?.data || today}" style="font-size:13px">
+        </div>
+        <div>
+          <label style="font-size:10px;color:var(--t3)">Data fine</label>
+          <input type="date" id="fase-data-fine" class="fi" value="${editData?.data_fine || ''}" style="font-size:13px">
+        </div>
+      </div>
+      <div style="margin-bottom:8px">
+        <label style="font-size:10px;color:var(--t3)">Titolo (es. Cut, Lean Bulk, Transizione...)</label>
+        <input type="text" id="fase-titolo" class="fi" placeholder="Es: Mini Cut 8 settimane" value="${editData?.titolo || ''}" style="font-size:13px">
+      </div>
+      <div style="margin-bottom:8px">
+        <label style="font-size:10px;color:var(--t3)">Descrizione (opzionale)</label>
+        <textarea id="fase-desc" class="fi" rows="2" placeholder="Obiettivo, strategia..." style="font-size:13px;resize:vertical">${editData?.descrizione || ''}</textarea>
+      </div>
+      <div style="margin-bottom:10px">
+        <label style="font-size:10px;color:var(--t3)">Esito / Target (opzionale)</label>
+        <input type="text" id="fase-esito" class="fi" placeholder="Es: -3kg, 78kg target" value="${editData?.esito || ''}" style="font-size:13px">
+      </div>
+      <input type="hidden" id="fase-edit-id" value="${editData?._id || ''}">
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-v btn-sm" style="flex:1" onclick="window.saveFase()">💾 Salva</button>
+        <button class="btn btn-ghost btn-sm" style="flex:1" onclick="document.getElementById('add-fase-form').style.display='none'">Annulla</button>
+      </div>
+    </div>
+  `;
+};
+
+window.editFase = function(faseId) {
+  const fase = calendarEvents.find(e => e._id === faseId);
+  if (!fase) return;
+  window.showAddFaseForm(fase);
+};
+
+window.saveFase = async function() {
+  const data = document.getElementById('fase-data').value;
+  const dataFine = document.getElementById('fase-data-fine').value;
+  const titolo = document.getElementById('fase-titolo').value.trim();
+  const desc = document.getElementById('fase-desc').value.trim();
+  const esito = document.getElementById('fase-esito').value.trim();
+  const editId = document.getElementById('fase-edit-id').value;
+
+  if (!data || !titolo) { showToast('Data e titolo obbligatori', 'err'); return; }
+
+  const userId = getUserId();
+  const docId = editId || `${data}_fase`;
+  const eventDoc = {
+    data,
+    data_fine: dataFine || null,
+    tipo: 'fase',
+    titolo,
+    descrizione: desc || null,
+    esito: esito || null,
+    azione: null
+  };
+
+  try {
+    // Se stiamo modificando e la data è cambiata, rimuovi il vecchio doc
+    if (editId && editId !== docId) {
+      await deleteDoc(doc(db, 'users', userId, 'calendar_events', editId));
+      calendarEvents = calendarEvents.filter(e => e._id !== editId);
+    }
+
+    await setDoc(doc(db, 'users', userId, 'calendar_events', docId), eventDoc);
+
+    // Aggiorna array locale
+    const existIdx = calendarEvents.findIndex(e => e._id === docId);
+    if (existIdx >= 0) {
+      calendarEvents[existIdx] = { ...eventDoc, _id: docId };
+    } else {
+      calendarEvents.push({ ...eventDoc, _id: docId });
+    }
+    calendarEvents.sort((a, b) => a.data.localeCompare(b.data));
+
+    showToast('Fase salvata');
+    window.showEventsPanel();
+  } catch(e) {
+    showToast('Errore salvataggio: ' + e.message, 'err');
   }
 };
 
@@ -1242,8 +1384,7 @@ window.saveRecoveredDay = async function(dateStr) {
 
 // ── Edit day modal ─────────────────────────────────────────
 window.openEditDay = function(dateStr) {
-  const log = monthLogs[dateStr];
-  if (!log) return;
+  const log = monthLogs[dateStr] || {};
   const tots = log.nutrition?.totals || {};
 
   const bg = document.createElement('div');
@@ -1260,6 +1401,15 @@ window.openEditDay = function(dateStr) {
         <div class="fg"><label class="fl">Kcal bruciate</label>
           <input type="number" class="fi" id="ed-burned" value="${log.burned_kcal || ''}" placeholder="0"></div>
       </div>
+      <span class="clabel" style="margin-top:12px">😴 Stile di vita</span>
+      <div class="grid2" style="margin-bottom:4px">
+        <div class="fg"><label class="fl">Ore di sonno</label>
+          <input type="number" class="fi" id="ed-sleep" value="${log.sleep_hours || ''}" placeholder="0" step="0.5" min="0" max="14"></div>
+        <div class="fg"><label class="fl">Drink alcolici</label>
+          <input type="number" class="fi" id="ed-drinks" value="${log.drinks || ''}" placeholder="0" min="0"></div>
+      </div>
+      <div class="fg"><label class="fl">Pasti fuori</label>
+        <input type="number" class="fi" id="ed-meals-out" value="${log.meals_out || ''}" placeholder="0" min="0"></div>
       <div class="fg"><label class="fl">Note</label>
         <textarea class="fi" id="ed-note" rows="2">${log.daily_note || ''}</textarea>
       </div>
@@ -1291,26 +1441,29 @@ window.saveEditDay = async function(dateStr) {
   const protein    = parseFloat(document.getElementById('ed-pro')?.value)   || 0;
   const carbs      = parseFloat(document.getElementById('ed-carb')?.value)  || 0;
   const fats       = parseFloat(document.getElementById('ed-fat')?.value)   || 0;
+  const sleep      = parseFloat(document.getElementById('ed-sleep')?.value) || null;
+  const drinks     = parseInt(document.getElementById('ed-drinks')?.value)  || null;
+  const mealsOut   = parseInt(document.getElementById('ed-meals-out')?.value) || null;
 
   try {
-    await setDoc(doc(db, 'users', getUserId(), 'daily_logs', dateStr), {
+    const payload = {
       steps,
       burned_kcal: burned,
       daily_note: note,
+      sleep_hours: sleep,
+      drinks: drinks,
+      meals_out: mealsOut,
       nutrition: { totals: { kcal, protein, carbs, fats } }
-    }, { merge: true });
+    };
+    await setDoc(doc(db, 'users', getUserId(), 'daily_logs', dateStr), payload, { merge: true });
 
-    // Update local cache
-    if (monthLogs[dateStr]) {
-      monthLogs[dateStr].steps       = steps;
-      monthLogs[dateStr].burned_kcal = burned;
-      monthLogs[dateStr].daily_note  = note;
-      monthLogs[dateStr].nutrition   = { totals: { kcal, protein, carbs, fats } };
-    }
+    // Aggiorna cache locale (crea se non esiste)
+    if (!monthLogs[dateStr]) monthLogs[dateStr] = {};
+    Object.assign(monthLogs[dateStr], payload);
 
     document.getElementById('edit-day-modal')?.remove();
     showToast('✅ Giornata aggiornata!');
-    showDay(dateStr); // Refresh the day detail
+    showDay(dateStr);
   } catch(e) {
     showToast('Errore salvataggio', 'err');
   }

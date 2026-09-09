@@ -1,6 +1,7 @@
 import { requireAuth, loadSmart } from './app.js';
 import {
-  db, getUserId, collection, doc, getDocs, addDoc, setDoc, deleteDoc
+  db, getUserId, collection, doc, getDocs, addDoc, setDoc, deleteDoc,
+  query, where
 } from './firebase-config.js';
 import { showToast, showModal } from './app.js';
 import { AutoComplete, saveToLibrary } from './autocomplete.js';
@@ -441,7 +442,71 @@ window.saveDiet = async function() {
   }
 };
 
+// ── Widget statistiche dieta ──────────────────────────────
+async function buildDietWidgets() {
+  const box = document.getElementById('diet-widgets');
+  if (!box) return;
+  const uid = getUserId();
+  if (!uid) return;
+
+  try {
+    const today = new Date();
+    const weekAgo = new Date(today);
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    const pad = n => String(n).padStart(2, '0');
+    const weekAgoStr = `${weekAgo.getFullYear()}-${pad(weekAgo.getMonth()+1)}-${pad(weekAgo.getDate())}`;
+
+    const logsSnap = await getDocs(
+      query(collection(db, 'users', uid, 'daily_logs'), where('__name__', '>=', weekAgoStr))
+    );
+
+    // Target proteine dal piano dieta attivo
+    let protTarget = 0;
+    const activeDiet = diets.find(d => d.active);
+    if (activeDiet) {
+      protTarget = Math.max(activeDiet.day_on?.protein || 0, activeDiet.day_off?.protein || 0);
+    }
+
+    let totalKcal = 0, totalProt = 0, daysWithData = 0, daysProtOk = 0;
+    logsSnap.forEach(d => {
+      const data = d.data();
+      const kcal = Number(data.kcal) || 0;
+      const prot = Number(data.protein) || 0;
+      if (kcal > 0) {
+        totalKcal += kcal;
+        totalProt += prot;
+        daysWithData++;
+        if (protTarget > 0 && prot >= protTarget * 0.9) daysProtOk++;
+      }
+    });
+
+    const avgKcal = daysWithData > 0 ? Math.round(totalKcal / daysWithData) : 0;
+    const avgProt = daysWithData > 0 ? Math.round(totalProt / daysWithData) : 0;
+    const protAdh = daysWithData > 0 ? Math.round((daysProtOk / daysWithData) * 100) : 0;
+    const protAdhColor = protAdh >= 80 ? '#30d158' : protAdh >= 50 ? '#fbbf24' : '#ff453a';
+
+    box.innerHTML = `
+      <div style="font-size:10px;font-weight:800;color:var(--t3);letter-spacing:2px;margin-bottom:12px">STATISTICHE 7 GIORNI</div>
+      <div class="grid2" style="gap:10px">
+        <div class="card card-dark" style="margin:0;padding:14px">
+          <div style="font-size:10px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">🔥 Media giornaliera</div>
+          <div style="font-size:22px;font-weight:900;color:#fff">${avgKcal > 0 ? avgKcal.toLocaleString() : '—'} <span style="font-size:12px;color:var(--t2)">kcal</span></div>
+          <div style="font-size:13px;color:var(--t2);margin-top:4px">${avgProt > 0 ? avgProt + 'g proteine' : '—'}</div>
+        </div>
+        <div class="card card-dark" style="margin:0;padding:14px">
+          <div style="font-size:10px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">🥩 Aderenza proteine</div>
+          <div style="font-size:22px;font-weight:900;color:${protAdhColor}">${protTarget > 0 ? protAdh + '%' : '—'}</div>
+          <div style="font-size:12px;color:var(--t2);margin-top:4px">${daysProtOk}/${daysWithData} giorni ≥ 90% target</div>
+        </div>
+      </div>`;
+  } catch (e) {
+    console.warn('buildDietWidgets error:', e);
+  }
+}
+
 (async function() {
   await requireAuth();
   loadDiets();
+  // Aspetta che le diete si carichino prima dei widget (per target proteine)
+  setTimeout(() => buildDietWidgets(), 1500);
 })();

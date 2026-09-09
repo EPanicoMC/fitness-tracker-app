@@ -433,32 +433,31 @@ function renderDailyStateUI(local) {
 async function buildStreak() {
   const box = document.getElementById('streak-box');
   if (!box) return;
-  
-  const q = query(
-    collection(db, 'users', getUserId(), 'daily_logs'),
-    orderBy('date', 'desc'),
-    limit(14)
-  );
 
-  const render = (snap) => {
+  // Mostra settimana scheda se disponibile
+  if (activeProgram?.start_date && activeProgram?.weeks) {
+    const start = new Date(activeProgram.start_date + 'T00:00:00');
+    const today = new Date(TODAY + 'T00:00:00');
+    const diff = Math.floor((today - start) / 86400000);
+    if (diff >= 0) {
+      const week = Math.min(Math.floor(diff / 7) + 1, activeProgram.weeks);
+      box.innerHTML = `<div class="streak"><span style="font-size:9px;color:var(--t3);font-weight:600;">Sett.</span> <span class="num">${week}</span><span style="font-size:9px;color:var(--t3);font-weight:600;">/${activeProgram.weeks}</span></div>`;
+      return;
+    }
+  }
+
+  // Fallback: allenamenti settimanali
+  try {
+    const q = query(collection(db, 'users', getUserId(), 'daily_logs'), orderBy('date', 'desc'), limit(14));
+    const snap = await getDocs(q);
     const logs = snap.docs.map(d => d.data());
     const weekAgo = new Date(TODAY + 'T12:00:00');
     weekAgo.setDate(weekAgo.getDate() - 6);
     const weekAgoStr = weekAgo.toISOString().split('T')[0];
     const weeklyDone = logs.filter(l => l.date >= weekAgoStr && l.workout?.completed).length;
-    const totalDone  = logs.filter(l => l.workout?.completed).length;
-    if (weeklyDone > 0) {
-      box.innerHTML = `<div class="streak"><span class="num">${weeklyDone}</span> <span style="font-size:9px;color:var(--t3);text-transform:lowercase;font-weight:600;">/ sett.</span></div>`;
-    } else if (totalDone > 0) {
-      box.innerHTML = `<div class="streak"><span class="num">0</span> <span style="font-size:9px;color:var(--t3);text-transform:lowercase;font-weight:600;">/ sett.</span></div>`;
-    } else {
-      box.innerHTML = '';
+    if (weeklyDone > 0 || logs.some(l => l.workout?.completed)) {
+      box.innerHTML = `<div class="streak"><span class="num">${weeklyDone}</span> <span style="font-size:9px;color:var(--t3);font-weight:600;">/ sett.</span></div>`;
     }
-  };
-
-  try {
-    const snap = await getDocs(q);
-    render(snap);
   } catch (e) {
     console.warn('buildStreak error:', e.message);
   }
@@ -1290,31 +1289,7 @@ function buildStats() {
     });
   }
 
-  // Campi giornalieri Fase 3
-  const slpf = document.getElementById('daily-sleep');
-  if(slpf) {
-    slpf.value = logData.sleep_hours ?? '';
-    slpf.addEventListener('change', () => {
-      logData.sleep_hours = parseFloat(slpf.value) || null;
-      saveToLocal();
-    });
-  }
-  const drf = document.getElementById('daily-drinks');
-  if(drf) {
-    drf.value = logData.drinks ?? '';
-    drf.addEventListener('change', () => {
-      logData.drinks = parseInt(drf.value) || 0;
-      saveToLocal();
-    });
-  }
-  const mof = document.getElementById('daily-meals-out');
-  if(mof) {
-    mof.value = logData.meals_out ?? '';
-    mof.addEventListener('change', () => {
-      logData.meals_out = parseInt(mof.value) || 0;
-      saveToLocal();
-    });
-  }
+  // Campi giornalieri rimossi dalla home — si inseriscono dal diario
 }
 
 // ── Steps Card (nuova pano-card clickabile) ─────────────────
@@ -3011,20 +2986,8 @@ async function buildPhaseAppointments() {
       .filter(e => e.data >= TODAY && e.tipo !== 'fase')
       .slice(0, 3);
 
-    // Icone per tipo evento
-    const icons = {
-      micro_check: '📋', check_completo: '📸', decisione: '⚖️',
-      cancello: '🚪', taratura_rpe: '🎯', fase: '🏁',
-      blocco_scheda: '📊', salute: '🏥', seduta: '💪',
-      integrazione: '💊', protocollo: '✨', traguardo: '🏆',
-      misurazione: '⚖️', regola: '📐'
-    };
-
-    const formatDate = d => {
-      const parts = d.split('-');
-      return `${parts[2]}/${parts[1]}`;
-    };
-
+    const icons = { micro_check: '📋', check_completo: '📸', cancello: '🚪', fase: '🏁', traguardo: '🏆' };
+    const formatDate = d => { const p = d.split('-'); return `${p[2]}/${p[1]}`; };
     const daysUntil = d => {
       const diff = Math.ceil((new Date(d) - new Date(TODAY)) / 86400000);
       if (diff === 0) return 'OGGI';
@@ -3032,64 +2995,74 @@ async function buildPhaseAppointments() {
       return `tra ${diff}gg`;
     };
 
-    // Settimana corrente dal programma attivo
-    let weekLabel = '';
+    // ── Settimana corrente ──
+    let weekNum = null;
     if (activeProgram?.start_date && activeProgram?.weeks) {
-      const start = new Date(activeProgram.start_date + 'T00:00:00');
-      const today = new Date(TODAY + 'T00:00:00');
-      const diffDays = Math.floor((today - start) / 86400000);
-      if (diffDays >= 0) {
-        const week = Math.min(Math.floor(diffDays / 7) + 1, activeProgram.weeks);
-        weekLabel = ` · Settimana ${week} di ${activeProgram.weeks}`;
-      }
+      const diffDays = Math.floor((new Date(TODAY + 'T00:00:00') - new Date(activeProgram.start_date + 'T00:00:00')) / 86400000);
+      if (diffDays >= 0) weekNum = Math.min(Math.floor(diffDays / 7) + 1, activeProgram.weeks);
     }
 
-    // Timeline fasi
+    // ── WIDGET PIANO (timeline standalone) ──
+    const tlBox = document.getElementById('plan-timeline-box');
     const allFasi = events.filter(e => e.tipo === 'fase' && e.data_fine);
     const FASE_COLORI = { 'cut': '#ff453a', 'transizione': '#ffc300', 'lean bulk': '#30d158', 'definizione': '#3a86ff' };
-    let timelineHtml = '';
-    if (allFasi.length >= 2) {
+
+    if (tlBox && allFasi.length >= 2) {
       const globalStart = new Date(allFasi[0].data + 'T00:00:00');
       const globalEnd = new Date(allFasi[allFasi.length - 1].data_fine + 'T00:00:00');
       const totalDays = (globalEnd - globalStart) / 86400000;
       const todayPos = Math.max(0, Math.min(100, ((new Date(TODAY + 'T00:00:00') - globalStart) / 86400000 / totalDays) * 100));
 
+      // Determina colore fase corrente
+      let currentColor = 'var(--accent)';
+      if (currentFase) {
+        const tl = currentFase.titolo.toLowerCase();
+        for (const [key, c] of Object.entries(FASE_COLORI)) { if (tl.includes(key)) { currentColor = c; break; } }
+      }
+
       const bars = allFasi.map(f => {
-        const fStart = new Date(f.data + 'T00:00:00');
-        const fEnd = new Date(f.data_fine + 'T00:00:00');
-        const dur = (fEnd - fStart) / 86400000;
+        const dur = (new Date(f.data_fine + 'T00:00:00') - new Date(f.data + 'T00:00:00')) / 86400000;
         const titleLow = f.titolo.toLowerCase();
         let color = '#6e6e73';
         for (const [key, c] of Object.entries(FASE_COLORI)) { if (titleLow.includes(key)) { color = c; break; } }
         const isCurrent = currentFase && f.data === currentFase.data;
-        return `<div style="flex:${Math.round(dur)};background:${color};opacity:${isCurrent ? '1' : '0.35'};border-radius:2px" title="${f.titolo}"></div>`;
+        return `<div style="flex:${Math.round(dur)};background:${color};opacity:${isCurrent ? '1' : '0.3'};border-radius:3px" title="${f.titolo}"></div>`;
       }).join('');
 
-      timelineHtml = `
-        <div style="margin-top:12px;border-top:1px solid rgba(255,255,255,0.05);padding-top:12px">
-          <div style="font-size:10px;font-weight:800;color:var(--t3);letter-spacing:1px;margin-bottom:6px">PIANO</div>
-          <div style="position:relative">
-            <div style="display:flex;gap:2px;height:6px;border-radius:3px;overflow:hidden">${bars}</div>
-            <div style="position:absolute;top:-2px;left:${todayPos}%;width:2px;height:10px;background:var(--t1);border-radius:1px;transform:translateX(-1px)"></div>
+      const labels = allFasi.map(f => {
+        const dur = (new Date(f.data_fine + 'T00:00:00') - new Date(f.data + 'T00:00:00')) / 86400000;
+        const shortName = f.titolo.replace(/^FASE \d+[b]?\s*—\s*/, '');
+        const isCurrent = currentFase && f.data === currentFase.data;
+        return `<div style="flex:${Math.round(dur)};font-size:8px;color:${isCurrent ? 'var(--t1)' : 'var(--t3)'};font-weight:${isCurrent ? '800' : '500'};text-align:center;overflow:hidden;white-space:nowrap">${shortName}</div>`;
+      }).join('');
+
+      tlBox.innerHTML = `
+        <div style="background:linear-gradient(135deg,var(--bg2),#141416);border:1px solid var(--border);border-radius:16px;padding:18px;overflow:hidden">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+            <div>
+              <div style="font-size:10px;font-weight:800;color:var(--t3);letter-spacing:1.5px">PIANO GENERALE</div>
+              ${currentFase ? `<div style="font-size:15px;font-weight:800;color:var(--t1);margin-top:4px">${currentFase.titolo}</div>` : ''}
+              ${weekNum ? `<div style="font-size:12px;color:${currentColor};font-weight:700;margin-top:2px">Settimana ${weekNum} di ${activeProgram.weeks}</div>` : ''}
+            </div>
+            ${currentFase?.esito ? `<div style="text-align:right;max-width:45%"><div style="font-size:9px;font-weight:700;color:var(--t3);letter-spacing:1px">TARGET</div><div style="font-size:11px;color:var(--t2);margin-top:2px">${currentFase.esito}</div></div>` : ''}
           </div>
-          <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:9px;color:var(--t3)">
+          <div style="position:relative;margin-bottom:4px">
+            <div style="display:flex;gap:2px;height:8px;border-radius:4px;overflow:hidden">${bars}</div>
+            <div style="position:absolute;top:-3px;left:${todayPos}%;width:3px;height:14px;background:var(--t1);border-radius:2px;transform:translateX(-1px);box-shadow:0 0 4px rgba(255,255,255,0.3)"></div>
+          </div>
+          <div style="display:flex;gap:2px;margin-top:4px">${labels}</div>
+          <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:9px;color:var(--t3)">
             <span>Set '26</span><span>Giu '27</span>
           </div>
         </div>`;
     }
 
-    box.innerHTML = `
-      <div style="background:linear-gradient(135deg,var(--bg2),#141416);border:1px solid var(--border);border-radius:16px;padding:16px;overflow:hidden">
-        ${currentFase ? `
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:${upcoming.length ? '14px' : '0'}">
-          <div style="width:36px;height:36px;border-radius:10px;background:rgba(124,111,255,0.12);display:flex;align-items:center;justify-content:center;font-size:16px">🎯</div>
-          <div style="flex:1">
-            <div style="font-size:10px;font-weight:800;color:var(--accent);letter-spacing:1px">FASE ATTUALE</div>
-            <div style="font-size:14px;font-weight:700;color:var(--t1);margin-top:2px">${currentFase.titolo}${weekLabel}</div>
-          </div>
-        </div>` : ''}
-        ${upcoming.length ? `
-        <div style="${currentFase ? 'border-top:1px solid rgba(255,255,255,0.05);padding-top:12px;' : ''}">
+    // ── WIDGET APPUNTAMENTI ──
+    const upcoming = events.filter(e => e.data >= TODAY && e.tipo !== 'fase').slice(0, 3);
+
+    if (upcoming.length) {
+      box.innerHTML = `
+        <div style="background:linear-gradient(135deg,var(--bg2),#141416);border:1px solid var(--border);border-radius:16px;padding:16px;overflow:hidden">
           <div style="font-size:10px;font-weight:800;color:var(--t3);letter-spacing:1px;margin-bottom:10px">PROSSIMI APPUNTAMENTI</div>
           ${upcoming.map(ev => `
             <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;padding:8px 10px;background:rgba(255,255,255,0.02);border-radius:8px">
@@ -3099,9 +3072,34 @@ async function buildPhaseAppointments() {
                 <div style="font-size:11px;color:var(--t3);margin-top:1px">${formatDate(ev.data)} · ${daysUntil(ev.data)}</div>
               </div>
             </div>`).join('')}
-        </div>` : ''}
-        ${timelineHtml}
-      </div>`;
+        </div>`;
+    } else {
+      box.innerHTML = '';
+    }
+
+    // ── NOTIFICHE IN-APP ──
+    const notifBox = document.getElementById('notifications-box');
+    if (notifBox) {
+      const tomorrow = new Date(TODAY + 'T00:00:00');
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const tomorrowStr = tomorrow.toISOString().split('T')[0];
+      const todayEvents = events.filter(e => e.tipo !== 'fase' && (e.data === TODAY || e.data === tomorrowStr));
+      if (todayEvents.length) {
+        notifBox.innerHTML = todayEvents.map(ev => {
+          const isToday = ev.data === TODAY;
+          const color = icons[ev.tipo] ? (ev.tipo.includes('check') ? '#3a86ff' : '#ffc300') : '#6e6e73';
+          return `
+            <div style="padding:10px 14px;background:${color}10;border:1px solid ${color}25;border-radius:10px;margin-bottom:8px;display:flex;align-items:center;gap:10px">
+              <span style="font-size:16px">${icons[ev.tipo] || '📌'}</span>
+              <div style="flex:1">
+                <div style="font-size:12px;font-weight:700;color:var(--t1)">${ev.titolo}</div>
+                <div style="font-size:11px;color:var(--t2)">${isToday ? 'Oggi' : 'Domani'}${ev.azione ? ' · ' + ev.azione : ''}</div>
+              </div>
+              <button onclick="this.parentNode.remove()" style="background:none;border:none;color:var(--t3);font-size:16px;cursor:pointer;padding:4px">✕</button>
+            </div>`;
+        }).join('');
+      }
+    }
   } catch(e) {
     console.warn('buildPhaseAppointments error:', e);
   }

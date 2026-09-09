@@ -210,6 +210,7 @@ function buildExState(session, dayKey, prevLog, tips, progTips) {
       durata_min:       ex.durata_min || null,
       rip_min_b:        ex.rip_min_b || null,
       rip_max_b:        ex.rip_max_b || null,
+      user_note:        prevEx?.user_note || '',
       variante_usata:   false,
       sets: isBlock ? [] : Array.from({ length: setCount }, (_, i) => {
         const prevSet = prevEx?.sets?.[i];
@@ -238,7 +239,7 @@ window.showMethodGuide = function() {
   const blocchi = programData?.blocchi_settimanali;
 
   if (!regole) {
-    showModal({ title: 'ℹ️ Guida', body: '<p style="color:var(--t2)">Nessuna guida disponibile per questa scheda.</p>', confirmText: 'OK' });
+    showModal({ title: 'ℹ️ Guida', text: '<p style="color:var(--t2)">Nessuna guida disponibile per questa scheda.</p>', confirmLabel: 'OK' });
     return;
   }
 
@@ -300,8 +301,8 @@ window.showMethodGuide = function() {
 
   showModal({
     title: 'ℹ️ Guida Fase 3',
-    body: `${bloccoHtml}${setsHtml}${avanzHtml}${intHtml}${sicurHtml}`,
-    confirmText: 'OK, capito!'
+    text: `${bloccoHtml}${setsHtml}${avanzHtml}${intHtml}${sicurHtml}`,
+    confirmLabel: 'OK, capito!'
   });
 };
 
@@ -447,23 +448,28 @@ function renderExercises() {
       <div style="font-size:11px;color:var(--t3)">${done} ✓</div>
     </div>`;
 
-  // Banner blocco corrente
+  // Banner blocco corrente con descrizione contestuale
   let blockHtml = '';
   const weekNum = getCurrentWeek();
   const block = getCurrentBlock(weekNum);
   if (block && weekNum) {
     const totalW = programData?.weeks || 12;
     const modLabel = block.modalita || '';
-    const rpeLabel = block.rpe_fondamentali ? `RPE ${block.rpe_fondamentali} fond.` : '';
-    const rpeIso = block.rpe_isolamento ? ` / ${block.rpe_isolamento} iso.` : '';
-    const intLabel = block.intensificazione ? ' · Myo-reps e drop set ATTIVI' : ' · No intensificazione';
-    let nota = '';
-    if (block.nota) nota = `<div style="font-size:11px;color:var(--t2);margin-top:2px">${block.nota}</div>`;
+
+    // Frase contestuale per settimana
+    const BLOCK_HINTS = {
+      '1-2': 'Carichi fissi 85-90%. Focus tecnica, nessun aumento.',
+      '3': 'Baseline forza. RPE sale a 8/9. Myo-reps e drop set partono.',
+      '4-6': 'Regola avanzamento attiva: tetto range raggiunto → +incremento.',
+      '7': 'SCARICO — 2 serie, RPE 6, niente intensificazione.',
+      '8-12': 'Ripresa dai pesi sett. 6. Stessa regola avanzamento.'
+    };
+    const hint = BLOCK_HINTS[block.settimane] || block.nota || '';
+
     blockHtml = `
       <div style="padding:10px 12px;background:rgba(124,111,255,0.06);border-radius:8px;border:1px solid rgba(124,111,255,0.1);margin-bottom:12px">
         <div style="font-size:10px;font-weight:800;color:var(--accent);letter-spacing:1px">SETT. ${weekNum}/${totalW} · ${modLabel.toUpperCase()}</div>
-        <div style="font-size:11px;color:var(--t2);margin-top:2px">${rpeLabel}${rpeIso}${intLabel}</div>
-        ${nota}
+        ${hint ? `<div style="font-size:11px;color:var(--t2);margin-top:4px;line-height:1.4">${hint}</div>` : ''}
       </div>`;
   }
 
@@ -490,7 +496,6 @@ function renderExCard(ex, ei) {
     metaParts.push(repStr);
   }
   if (ex.rpe_target) metaParts.push(`RPE ${ex.rpe_target}`);
-  if (ex.incremento_kg) metaParts.push(`+${ex.incremento_kg}kg`);
   if (ex.durata_min && isBlock) metaParts.push(`${ex.durata_min} min`);
 
   // Superset: range reps parte B
@@ -566,6 +571,13 @@ function renderExCard(ex, ei) {
         ${ex.sets.map((s, si) => renderSetRow(ex, ei, si, s)).join('')}
       </div>
       <button class="btn btn-ghost btn-xs" style="margin-top:6px;width:100%" onclick="addSetToExercise(${ei})">＋ Serie</button>`}
+
+      <div style="margin-top:8px">
+        <button class="btn btn-ghost btn-xs" style="width:100%;font-size:11px" onclick="window.toggleExNote(${ei})">📝 ${ex.user_note ? 'Nota' : 'Aggiungi nota'}</button>
+        <div id="exnote-wrap-${ei}" style="display:${ex.user_note ? 'block' : 'none'};margin-top:6px">
+          <textarea class="fi" id="exnote-${ei}" rows="2" placeholder="Note per questo esercizio..." style="font-size:12px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px;width:100%;box-sizing:border-box" onblur="window.saveExNote(${ei},this.value)">${ex.user_note || ''}</textarea>
+        </div>
+      </div>
     </div>`;
 }
 
@@ -631,6 +643,15 @@ window.onRpeChange = function(ei, val) {
   if (exState[ei]) {
     exState[ei].rpe = parseInt(val) || null;
   }
+};
+
+window.toggleExNote = function(ei) {
+  const wrap = document.getElementById(`exnote-wrap-${ei}`);
+  if (wrap) wrap.style.display = wrap.style.display === 'none' ? 'block' : 'none';
+};
+
+window.saveExNote = function(ei, val) {
+  if (exState[ei]) exState[ei].user_note = val || '';
 };
 
 window.addSetToExercise = function(ei) {
@@ -865,12 +886,13 @@ window.finishSession = async function() {
   restEndTime = 0;
 
   const cardioDone = document.getElementById('cardio-done')?.checked || false;
+  const sessionNotes = exState.map(ex => ex.user_note).filter(Boolean).join(' | ');
   const workoutLog = {
     session_day:      sessionData.dayKey,
     session_name:     sessionData.name,
     session_id:       sessionData.session_id || null,
     duration_seconds: sessionSec,
-    notes:            document.getElementById('s-notes')?.value || '',
+    notes:            sessionNotes,
     completed:        true,
     exercises: exState.map(ex => {
       const base = {
@@ -886,6 +908,7 @@ window.finishSession = async function() {
           done:   s.done
         }))
       };
+      if (ex.user_note) base.user_note = ex.user_note;
       if (ex.variante_usata) base.variante_usata = true;
       if (ex.componenti) base.componenti_done = ex._compDone || [];
       return base;
@@ -904,7 +927,7 @@ window.finishSession = async function() {
       completed_date:   TODAY,
       duration_seconds: sessionSec,
       total_volume:     Math.round(calcTotalVolume()),
-      session_notes:    document.getElementById('s-notes')?.value || '',
+      session_notes:    exState.map(ex => ex.user_note).filter(Boolean).join(' | '),
       exercises: exState.map(ex => ({
         name: ex.name,
         rpe:  ex.rpe || null,
@@ -912,6 +935,7 @@ window.finishSession = async function() {
         rip_min: ex.rip_min || null,
         rip_max: ex.rip_max || null,
         incremento_kg: ex.incremento_kg || null,
+        user_note: ex.user_note || '',
         sets: ex.sets.map((s, i) => ({
           set_num: i + 1,
           weight:  parseFloat(s.actual_weight) || 0,

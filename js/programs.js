@@ -1,6 +1,7 @@
 import { requireAuth, loadSmart } from './app.js';
 import {
-  db, getUserId, collection, doc, getDocs, addDoc, setDoc, deleteDoc
+  db, getUserId, collection, doc, getDocs, addDoc, setDoc, deleteDoc,
+  query, where, orderBy, limit
 } from './firebase-config.js';
 import { showToast, showModal, DAYS_IT, DAY_ORDER } from './app.js';
 import { AutoComplete, saveToLibrary } from './autocomplete.js';
@@ -368,7 +369,70 @@ window.saveProgram = async function() {
   }
 };
 
+// ── Widget statistiche allenamento ────────────────────────
+async function buildProgWidgets() {
+  const box = document.getElementById('prog-widgets');
+  if (!box) return;
+  const uid = getUserId();
+  if (!uid) return;
+
+  try {
+    // Ultimo allenamento da last_sessions
+    const lsSnap = await getDocs(collection(db, 'users', uid, 'last_sessions'));
+    let lastSession = null;
+    lsSnap.forEach(d => {
+      const data = d.data();
+      if (!lastSession || (data.completed_date || '') > (lastSession.completed_date || '')) {
+        lastSession = data;
+      }
+    });
+
+    // Volume settimanale dagli ultimi 7 giorni di daily_logs
+    const today = new Date();
+    const weekAgo = new Date(today);
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    const pad = n => String(n).padStart(2, '0');
+    const weekAgoStr = `${weekAgo.getFullYear()}-${pad(weekAgo.getMonth()+1)}-${pad(weekAgo.getDate())}`;
+
+    const logsSnap = await getDocs(
+      query(collection(db, 'users', uid, 'daily_logs'), where('__name__', '>=', weekAgoStr))
+    );
+    let weekVolume = 0;
+    let sessionsCount = 0;
+    logsSnap.forEach(d => {
+      const data = d.data();
+      if (data.session_volume) {
+        weekVolume += Number(data.session_volume) || 0;
+        sessionsCount++;
+      }
+    });
+
+    // Render
+    const lastInfo = lastSession
+      ? `<div style="font-size:15px;font-weight:700;color:#fff">${lastSession.session_name || 'Sessione'}</div>
+         <div style="font-size:12px;color:var(--t2);margin-top:2px">${lastSession.completed_date || '—'} · ${lastSession.total_volume ? lastSession.total_volume + ' kg' : '—'} · ${lastSession.duration_seconds ? Math.round(lastSession.duration_seconds/60) + ' min' : '—'}</div>`
+      : `<div style="font-size:13px;color:var(--t3)">Nessun allenamento recente</div>`;
+
+    box.innerHTML = `
+      <div style="font-size:10px;font-weight:800;color:var(--t3);letter-spacing:2px;margin-bottom:12px">STATISTICHE</div>
+      <div class="grid2" style="gap:10px">
+        <div class="card card-dark" style="margin:0;padding:14px">
+          <div style="font-size:10px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">🏋️ Ultimo allenamento</div>
+          ${lastInfo}
+        </div>
+        <div class="card card-dark" style="margin:0;padding:14px">
+          <div style="font-size:10px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">📊 Volume 7gg</div>
+          <div style="font-size:22px;font-weight:900;color:#fff">${weekVolume > 0 ? Math.round(weekVolume).toLocaleString() + ' kg' : '—'}</div>
+          <div style="font-size:12px;color:var(--t2);margin-top:2px">${sessionsCount} session${sessionsCount !== 1 ? 'i' : 'e'} questa settimana</div>
+        </div>
+      </div>`;
+  } catch (e) {
+    console.warn('buildProgWidgets error:', e);
+  }
+}
+
 (async function() {
   await requireAuth();
   loadPrograms();
+  buildProgWidgets();
 })();
