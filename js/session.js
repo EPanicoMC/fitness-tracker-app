@@ -144,6 +144,7 @@ window.startWithSession = async function(dayKey) {
   const dailyLogsQuery = query(collection(db, 'users', getUserId(), 'daily_logs'), orderBy('date', 'desc'), limit(20));
 
   let exerciseTips = [];
+  let progressionTips = [];
   let lastCoachSummary = null;
   try {
     const lastSnap = await getDoc(lastDocRef);
@@ -151,6 +152,7 @@ window.startWithSession = async function(dayKey) {
       const lastData = lastSnap.data();
       prevLog = { workout: { exercises: lastData.exercises } };
       exerciseTips = lastData.exercise_tips || [];
+      progressionTips = lastData.progression_tips || [];
       lastCoachSummary = lastData.last_coach_summary || null;
     } else {
       const snap = await getDocs(dailyLogsQuery);
@@ -165,15 +167,19 @@ window.startWithSession = async function(dayKey) {
     console.warn('Pre-fill load error:', e.message);
   }
 
-  buildExState(session, dayKey, prevLog, exerciseTips);
+  buildExState(session, dayKey, prevLog, exerciseTips, progressionTips);
   sessionData = { dayKey, name: session.name, session_id: session.session_id || null, cardio: session.cardio || null, lastCoachSummary };
-  launchActive(session.name, `${DAYS_IT[dayKey]} · ${session.exercises?.length||0} esercizi`);
+  const weekNum = getCurrentWeek();
+  const totalWeeks = programData?.weeks || 12;
+  const weekLabel = weekNum ? ` · Sett. ${weekNum}/${totalWeeks}` : '';
+  launchActive(session.name, `${DAYS_IT[dayKey]} · ${session.exercises?.length||0} esercizi${weekLabel}`);
 };
 
-function buildExState(session, dayKey, prevLog, tips) {
+function buildExState(session, dayKey, prevLog, tips, progTips) {
   exState = (session.exercises || []).map(ex => {
     const prevEx   = prevLog?.workout?.exercises?.find(e => e.name === ex.name);
     const tip      = (tips || []).find(t => t.exercise_name?.toLowerCase() === ex.name?.toLowerCase()) || null;
+    const progTip  = (progTips || []).find(t => t.exercise_name?.toLowerCase() === ex.name?.toLowerCase()) || null;
     const setCount = typeof ex.sets === 'number' ? ex.sets : (ex.sets?.length || 3);
 
     // Range ripetizioni (Fase 3: rip_min/rip_max; Fase 1: reps stringa)
@@ -191,7 +197,7 @@ function buildExState(session, dayKey, prevLog, tips) {
       rest_seconds: ex.rest_seconds || 90,
       notes: ex.notes || '',
       tip,
-      // Campi Fase 3 (ignorati se assenti → backward compat)
+      progression_tip: progTip,
       rpe_target:       ex.rpe_target ?? ex.rpe ?? null,
       rip_min:          ripMin,
       rip_max:          ripMax,
@@ -207,7 +213,11 @@ function buildExState(session, dayKey, prevLog, tips) {
       variante_usata:   false,
       sets: isBlock ? [] : Array.from({ length: setCount }, (_, i) => {
         const prevSet = prevEx?.sets?.[i];
-        const w = prevSet?.weight ?? (ex.weight_per_set?.[i] || 0);
+        let w = prevSet?.weight ?? (ex.weight_per_set?.[i] || 0);
+        // Se il tip dice di aumentare, pre-compila il nuovo peso
+        if (progTip?.action === 'increase' && progTip.new_weight && w > 0) {
+          w = progTip.new_weight;
+        }
         return {
           reps_target:   repsLabel,
           ref_weight:    w,
@@ -294,6 +304,30 @@ window.showMethodGuide = function() {
     confirmText: 'OK, capito!'
   });
 };
+
+// Calcola settimana corrente dalla start_date del programma
+function getCurrentWeek() {
+  if (!programData?.start_date) return null;
+  const start = new Date(programData.start_date + 'T00:00:00');
+  const today = new Date(TODAY + 'T00:00:00');
+  const diffDays = Math.floor((today - start) / 86400000);
+  if (diffDays < 0) return null;
+  const week = Math.floor(diffDays / 7) + 1;
+  const totalWeeks = programData.weeks || 12;
+  return Math.min(week, totalWeeks);
+}
+
+// Determina blocco corrente dalla settimana
+function getCurrentBlock(weekNum) {
+  if (!programData?.blocchi_settimanali || !weekNum) return null;
+  for (const b of programData.blocchi_settimanali) {
+    const [startW, endW] = b.settimane.includes('-')
+      ? b.settimane.split('-').map(Number)
+      : [Number(b.settimane), Number(b.settimane)];
+    if (weekNum >= startW && weekNum <= endW) return b;
+  }
+  return null;
+}
 
 function launchActive(title, sub) {
   document.getElementById('st-sel').style.display = 'none';
@@ -413,8 +447,28 @@ function renderExercises() {
       <div style="font-size:11px;color:var(--t3)">${done} ✓</div>
     </div>`;
 
+  // Banner blocco corrente
+  let blockHtml = '';
+  const weekNum = getCurrentWeek();
+  const block = getCurrentBlock(weekNum);
+  if (block && weekNum) {
+    const totalW = programData?.weeks || 12;
+    const modLabel = block.modalita || '';
+    const rpeLabel = block.rpe_fondamentali ? `RPE ${block.rpe_fondamentali} fond.` : '';
+    const rpeIso = block.rpe_isolamento ? ` / ${block.rpe_isolamento} iso.` : '';
+    const intLabel = block.intensificazione ? ' · Myo-reps e drop set ATTIVI' : ' · No intensificazione';
+    let nota = '';
+    if (block.nota) nota = `<div style="font-size:11px;color:var(--t2);margin-top:2px">${block.nota}</div>`;
+    blockHtml = `
+      <div style="padding:10px 12px;background:rgba(124,111,255,0.06);border-radius:8px;border:1px solid rgba(124,111,255,0.1);margin-bottom:12px">
+        <div style="font-size:10px;font-weight:800;color:var(--accent);letter-spacing:1px">SETT. ${weekNum}/${totalW} · ${modLabel.toUpperCase()}</div>
+        <div style="font-size:11px;color:var(--t2);margin-top:2px">${rpeLabel}${rpeIso}${intLabel}</div>
+        ${nota}
+      </div>`;
+  }
+
   document.getElementById('s-exercises').innerHTML =
-    progressHtml + exState.map((ex, ei) => renderExCard(ex, ei)).join('');
+    progressHtml + blockHtml + exState.map((ex, ei) => renderExCard(ex, ei)).join('');
 }
 
 function renderExCard(ex, ei) {
@@ -486,6 +540,15 @@ function renderExCard(ex, ei) {
           <div style="font-weight:700;color:var(--accent);font-size:11px;margin-bottom:2px">${ex.tip.suggestion_text}</div>
           <div style="font-size:11px;color:var(--t3)">${ex.tip.detail}</div>
         </div>
+      </div>` : ''}
+
+      ${ex.progression_tip?.action === 'increase' ? `
+      <div style="padding:6px 10px;background:rgba(48,209,88,0.08);border-radius:6px;border:1px solid rgba(48,209,88,0.15);margin:4px 0 8px">
+        <span style="font-size:11px;color:var(--green);font-weight:600">📈 +${ex.incremento_kg || 2.5} kg — riparti da ${ex.rip_min || 8} rip</span>
+      </div>` : ''}
+      ${ex.progression_tip?.action === 'warning' ? `
+      <div style="padding:6px 10px;background:rgba(255,138,51,0.08);border-radius:6px;border:1px solid rgba(255,138,51,0.15);margin:4px 0 8px">
+        <span style="font-size:11px;color:var(--orange);font-weight:600">⚠️ ${ex.progression_tip.message}</span>
       </div>` : ''}
 
       ${ex.variante_sicura ? `<div class="ex-note" id="evar-${ei}" style="display:none;border-left:2px solid var(--orange);padding-left:10px"><b style="color:var(--orange)">Variante sicura:</b> ${ex.variante_sicura}</div>` : ''}
@@ -753,6 +816,47 @@ window.launchCustom = function() {
   launchActive('Sessione Custom', `${exState.length} esercizi`);
 };
 
+// ── Progressione smart ────────────────────────────────────
+function calcProgressionTips() {
+  const weekNum = getCurrentWeek();
+  const noIncrease = (weekNum && (weekNum <= 2 || weekNum === 7));
+  const tips = [];
+
+  for (const ex of exState) {
+    if (!ex.sets?.length || !ex.rip_max || ex.componenti) continue;
+
+    const lastSet = ex.sets[ex.sets.length - 1];
+    if (!lastSet.done) continue;
+
+    const reps = parseInt(lastSet.actual_reps) || 0;
+    const rpe = ex.rpe || null;
+    const atTarget = rpe && ex.rpe_target && rpe <= ex.rpe_target;
+    const inc = ex.incremento_kg || 2.5;
+
+    if (reps >= ex.rip_max && atTarget && !noIncrease) {
+      tips.push({
+        exercise_name: ex.name,
+        action: 'increase',
+        new_weight: (parseFloat(lastSet.actual_weight) || 0) + inc,
+        message: `Raggiunto ${reps} rip a RPE ${rpe}. Prossima: +${inc} kg, riparti da ${ex.rip_min} rip.`
+      });
+    } else if (reps < (ex.rip_min || 0) && rpe && rpe >= (ex.rpe_target || 8)) {
+      tips.push({
+        exercise_name: ex.name,
+        action: 'warning',
+        message: `Solo ${reps} rip a RPE ${rpe} (sotto ${ex.rip_min}-${ex.rip_max}). Se succede ancora: -5%.`
+      });
+    } else if (!noIncrease) {
+      tips.push({
+        exercise_name: ex.name,
+        action: 'maintain',
+        message: `${reps} rip a RPE ${rpe || '?'}. Stesso carico, obiettivo +1 rip.`
+      });
+    }
+  }
+  return tips;
+}
+
 // ── Finish session ─────────────────────────────────────────
 window.finishSession = async function() {
   document.removeEventListener('visibilitychange', onVisibilityChange);
@@ -772,6 +876,10 @@ window.finishSession = async function() {
       const base = {
         name: ex.name,
         rpe:  ex.rpe || null,
+        rpe_target: ex.rpe_target || null,
+        rip_min: ex.rip_min || null,
+        rip_max: ex.rip_max || null,
+        incremento_kg: ex.incremento_kg || null,
         sets: (ex.sets || []).map(s => ({
           weight: parseFloat(s.actual_weight) || 0,
           reps:   s.actual_reps || s.reps_target,
@@ -800,6 +908,10 @@ window.finishSession = async function() {
       exercises: exState.map(ex => ({
         name: ex.name,
         rpe:  ex.rpe || null,
+        rpe_target: ex.rpe_target || null,
+        rip_min: ex.rip_min || null,
+        rip_max: ex.rip_max || null,
+        incremento_kg: ex.incremento_kg || null,
         sets: ex.sets.map((s, i) => ({
           set_num: i + 1,
           weight:  parseFloat(s.actual_weight) || 0,
@@ -815,23 +927,32 @@ window.finishSession = async function() {
 
     showToast('🏁 Sessione completata! 💪');
 
-    // Autoperiodizzazione base
-    const rpes = exState.map(ex => ex.rpe).filter(r => r != null);
-    let adviceTitle = "Allenamento Completato!";
-    let adviceText = "Ottimo lavoro! Continua così per massimizzare la costanza e superare i tuoi limiti.";
+    // Calcola suggerimenti progressione per esercizio
+    const progressionTips = calcProgressionTips();
 
-    if (rpes.length > 0) {
-      const avgRpe = rpes.reduce((a, b) => a + b) / rpes.length;
-      if (avgRpe < 7) {
-        adviceTitle = "📈 Autoperiodizzazione KOVA. · Incremento peso!";
-        adviceText = `Il tuo RPE medio è di <b>${avgRpe.toFixed(1)}</b> (intensità leggera). Per la prossima sessione ti suggeriamo di incrementare i carichi di <b>+2.5 kg</b> (o +2.5%) per mantenere uno stimolo allenante efficace! 💪`;
-      } else if (avgRpe >= 9.5) {
-        adviceTitle = "😮‍💨 Autoperiodizzazione KOVA. · Scarico consigliato!";
-        adviceText = `Il tuo RPE medio è di <b>${avgRpe.toFixed(1)}</b> (intensità estrema/cedimento). Consigliamo di scaricare i carichi del 10% (Deload) o mantenere i pesi stabili per favorire il recupero muscolare e articolare.`;
-      } else {
-        adviceTitle = "⚖️ Autoperiodizzazione KOVA. · Intensità ottimale";
-        adviceText = `Il tuo RPE medio è di <b>${avgRpe.toFixed(1)}</b> (intensità ottimale). Mantieni stabili i pesi per la prossima sessione e concentrati sulla progressione delle ripetizioni o sul perfezionamento della tecnica!`;
-      }
+    // Salva tips in last_sessions
+    if (progressionTips.length) {
+      await setDoc(doc(db, 'users', getUserId(), 'last_sessions', sessionData.dayKey),
+        { progression_tips: progressionTips }, { merge: true });
+    }
+
+    // Riepilogo progressione nel modale
+    let adviceTitle = "Allenamento Completato!";
+    let adviceText = '';
+
+    if (progressionTips.length) {
+      const increases = progressionTips.filter(t => t.action === 'increase');
+      const warnings = progressionTips.filter(t => t.action === 'warning');
+      adviceTitle = increases.length ? "📈 Progressione carichi!" : "✅ Allenamento Completato!";
+
+      adviceText = `<div style="font-size:10px;font-weight:800;color:var(--t3);letter-spacing:1px;margin-bottom:8px">PROSSIMA SESSIONE</div>`;
+      adviceText += progressionTips.map(t => {
+        if (t.action === 'increase') return `<div style="padding:4px 0;font-size:12px;color:var(--green)">📈 <b>${t.exercise_name}</b>: ${t.message}</div>`;
+        if (t.action === 'warning') return `<div style="padding:4px 0;font-size:12px;color:var(--orange)">⚠️ <b>${t.exercise_name}</b>: ${t.message}</div>`;
+        return `<div style="padding:4px 0;font-size:12px;color:var(--t2)">→ <b>${t.exercise_name}</b>: ${t.message}</div>`;
+      }).join('');
+    } else {
+      adviceText = "Ottimo lavoro! Continua così per massimizzare la costanza.";
     }
 
     // ── Coach AI Feedback (best-effort, non blocca il salvataggio) ──

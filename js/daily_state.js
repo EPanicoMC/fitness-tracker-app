@@ -3006,13 +3006,9 @@ async function buildPhaseAppointments() {
     const faseEvents = events.filter(e => e.tipo === 'fase' && e.data <= TODAY);
     const currentFase = faseEvents[faseEvents.length - 1] || null;
 
-    // Blocco scheda corrente
-    const bloccoEvents = events.filter(e => e.tipo === 'blocco_scheda' && e.data <= TODAY);
-    const currentBlocco = bloccoEvents[bloccoEvents.length - 1] || null;
-
-    // Prossimi 3 appuntamenti futuri
+    // Prossimi 3 appuntamenti futuri (escludi fasi — mostrate nella timeline)
     const upcoming = events
-      .filter(e => e.data >= TODAY && e.tipo !== 'ricorrente')
+      .filter(e => e.data >= TODAY && e.tipo !== 'fase')
       .slice(0, 3);
 
     // Icone per tipo evento
@@ -3036,15 +3032,60 @@ async function buildPhaseAppointments() {
       return `tra ${diff}gg`;
     };
 
+    // Settimana corrente dal programma attivo
+    let weekLabel = '';
+    if (activeProgram?.start_date && activeProgram?.weeks) {
+      const start = new Date(activeProgram.start_date + 'T00:00:00');
+      const today = new Date(TODAY + 'T00:00:00');
+      const diffDays = Math.floor((today - start) / 86400000);
+      if (diffDays >= 0) {
+        const week = Math.min(Math.floor(diffDays / 7) + 1, activeProgram.weeks);
+        weekLabel = ` · Settimana ${week} di ${activeProgram.weeks}`;
+      }
+    }
+
+    // Timeline fasi
+    const allFasi = events.filter(e => e.tipo === 'fase' && e.data_fine);
+    const FASE_COLORI = { 'cut': '#ff453a', 'transizione': '#ffc300', 'lean bulk': '#30d158', 'definizione': '#3a86ff' };
+    let timelineHtml = '';
+    if (allFasi.length >= 2) {
+      const globalStart = new Date(allFasi[0].data + 'T00:00:00');
+      const globalEnd = new Date(allFasi[allFasi.length - 1].data_fine + 'T00:00:00');
+      const totalDays = (globalEnd - globalStart) / 86400000;
+      const todayPos = Math.max(0, Math.min(100, ((new Date(TODAY + 'T00:00:00') - globalStart) / 86400000 / totalDays) * 100));
+
+      const bars = allFasi.map(f => {
+        const fStart = new Date(f.data + 'T00:00:00');
+        const fEnd = new Date(f.data_fine + 'T00:00:00');
+        const dur = (fEnd - fStart) / 86400000;
+        const titleLow = f.titolo.toLowerCase();
+        let color = '#6e6e73';
+        for (const [key, c] of Object.entries(FASE_COLORI)) { if (titleLow.includes(key)) { color = c; break; } }
+        const isCurrent = currentFase && f.data === currentFase.data;
+        return `<div style="flex:${Math.round(dur)};background:${color};opacity:${isCurrent ? '1' : '0.35'};border-radius:2px" title="${f.titolo}"></div>`;
+      }).join('');
+
+      timelineHtml = `
+        <div style="margin-top:12px;border-top:1px solid rgba(255,255,255,0.05);padding-top:12px">
+          <div style="font-size:10px;font-weight:800;color:var(--t3);letter-spacing:1px;margin-bottom:6px">PIANO</div>
+          <div style="position:relative">
+            <div style="display:flex;gap:2px;height:6px;border-radius:3px;overflow:hidden">${bars}</div>
+            <div style="position:absolute;top:-2px;left:${todayPos}%;width:2px;height:10px;background:var(--t1);border-radius:1px;transform:translateX(-1px)"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:9px;color:var(--t3)">
+            <span>Set '26</span><span>Giu '27</span>
+          </div>
+        </div>`;
+    }
+
     box.innerHTML = `
       <div style="background:linear-gradient(135deg,var(--bg2),#141416);border:1px solid var(--border);border-radius:16px;padding:16px;overflow:hidden">
         ${currentFase ? `
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:${currentBlocco || upcoming.length ? '14px' : '0'}">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:${upcoming.length ? '14px' : '0'}">
           <div style="width:36px;height:36px;border-radius:10px;background:rgba(124,111,255,0.12);display:flex;align-items:center;justify-content:center;font-size:16px">🎯</div>
           <div style="flex:1">
             <div style="font-size:10px;font-weight:800;color:var(--accent);letter-spacing:1px">FASE ATTUALE</div>
-            <div style="font-size:14px;font-weight:700;color:var(--t1);margin-top:2px">${currentFase.titolo}</div>
-            ${currentBlocco ? `<div style="font-size:11px;color:var(--t2);margin-top:2px">📊 ${currentBlocco.titolo}</div>` : ''}
+            <div style="font-size:14px;font-weight:700;color:var(--t1);margin-top:2px">${currentFase.titolo}${weekLabel}</div>
           </div>
         </div>` : ''}
         ${upcoming.length ? `
@@ -3059,6 +3100,7 @@ async function buildPhaseAppointments() {
               </div>
             </div>`).join('')}
         </div>` : ''}
+        ${timelineHtml}
       </div>`;
   } catch(e) {
     console.warn('buildPhaseAppointments error:', e);

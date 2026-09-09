@@ -18,21 +18,21 @@ let latestCheckWeight = null;
 let calendarEvents = [];
 
 const EVENTO_COLORI = {
-  micro_check: '#3a86ff', check_completo: '#3a86ff', misurazione: '#3a86ff',
-  decisione: '#ffc300', cancello: '#ffc300',
-  taratura_rpe: '#ff8a33', seduta: '#ff8a33',
-  fase: '#b5179e', blocco_scheda: '#b5179e',
-  salute: '#ff453a',
-  integrazione: '#30d158', protocollo: '#30d158', traguardo: '#30d158',
-  regola: '#6e6e73'
+  micro_check: '#3a86ff', check_completo: '#3a86ff',
+  cancello: '#ffc300',
+  fase: '#b5179e',
+  traguardo: '#30d158'
 };
 
 const EVENTO_ICONE = {
-  micro_check: '📋', check_completo: '📸', decisione: '⚖️',
-  cancello: '🚪', taratura_rpe: '🎯', fase: '🏁',
-  blocco_scheda: '📊', salute: '🏥', seduta: '💪',
-  integrazione: '💊', protocollo: '✨', traguardo: '🏆',
-  misurazione: '⚖️', regola: '📐'
+  micro_check: '📋', check_completo: '📸',
+  cancello: '🚪', fase: '🏁',
+  traguardo: '🏆'
+};
+
+const FASE_COLORI = {
+  'cut': '#ff453a', 'transizione': '#ffc300',
+  'lean bulk': '#30d158', 'definizione': '#3a86ff'
 };
 
 async function init() {
@@ -184,6 +184,36 @@ function renderGrid(year, month) {
   const firstDay    = new Date(year, month, 1).getDay();
   const offset      = firstDay === 0 ? 6 : firstDay - 1;
 
+  // Barre fasi sopra la griglia
+  const monthStart = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+  const monthEnd = `${year}-${String(month + 1).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
+  const monthFasi = calendarEvents.filter(e =>
+    e.tipo === 'fase' && e.data_fine && e.data <= monthEnd && e.data_fine >= monthStart
+  );
+
+  let phaseBarHtml = '';
+  for (const f of monthFasi) {
+    const titleLow = f.titolo.toLowerCase();
+    let color = '#6e6e73';
+    for (const [key, c] of Object.entries(FASE_COLORI)) { if (titleLow.includes(key)) { color = c; break; } }
+    const startD = f.data > monthStart ? f.data.split('-')[2].replace(/^0/, '') : '1';
+    const endD = f.data_fine < monthEnd ? f.data_fine.split('-')[2].replace(/^0/, '') : daysInMonth;
+    const shortTitle = f.titolo.replace(/^FASE \d+[b]?\s*—\s*/, '');
+    phaseBarHtml += `
+      <div style="margin-bottom:8px;padding:8px 12px;border-radius:8px;background:${color}10;border-left:3px solid ${color}">
+        <div style="font-size:10px;font-weight:800;letter-spacing:1px;color:${color}">${f.titolo}</div>
+        <div style="font-size:11px;color:var(--t2)">${startD}–${endD} ${new Date(year, month).toLocaleDateString('it-IT', { month: 'short' })}${f.esito ? ' · ' + f.esito : ''}</div>
+      </div>`;
+  }
+
+  const phaseContainer = document.getElementById('phase-bars') || (() => {
+    const div = document.createElement('div');
+    div.id = 'phase-bars';
+    el.parentNode.insertBefore(div, el);
+    return div;
+  })();
+  phaseContainer.innerHTML = phaseBarHtml;
+
   let html = '';
   for (let i = 0; i < offset; i++) html += '<div class="cal-day empty"></div>';
 
@@ -209,8 +239,10 @@ function renderGrid(year, month) {
       workoutDot = `<span class="cal-dot" style="background:var(--accent)"></span>`;
     }
 
-    // Dot eventi (raggruppa per colore per evitare duplicati visivi)
-    const dayEvents = calendarEvents.filter(e => e.data === dateStr || (e.data_fine && e.data <= dateStr && e.data_fine >= dateStr));
+    // Dot eventi (escludi fase — mostrata come barra)
+    const dayEvents = calendarEvents.filter(e =>
+      e.tipo !== 'fase' && (e.data === dateStr || (e.data_fine && e.data <= dateStr && e.data_fine >= dateStr))
+    );
     const eventColors = [...new Set(dayEvents.map(e => EVENTO_COLORI[e.tipo] || '#6e6e73'))];
     const eventDots = eventColors.slice(0, 2).map(c => `<span class="cal-dot" style="background:${c}"></span>`).join('');
 
