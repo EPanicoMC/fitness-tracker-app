@@ -6,6 +6,8 @@ import {
 import { showToast, showModal } from './app.js';
 import { AutoComplete, saveToLibrary } from './autocomplete.js';
 import { calcMacrosFromText } from './gemini.js';
+import { PHASE_CONFIG } from './phase-config.js';
+import { statusDot, getStatus, COLORS } from './widgets.js';
 
 let diets     = [];
 let editingId = null;
@@ -442,66 +444,84 @@ window.saveDiet = async function() {
   }
 };
 
-// ── Widget statistiche dieta ──────────────────────────────
-async function buildDietWidgets() {
+// ── Widget giornata dieta — macro residui ─────────────────
+function buildDietWidgets() {
   const box = document.getElementById('diet-widgets');
   if (!box) return;
-  const uid = getUserId();
-  if (!uid) return;
 
-  try {
-    const today = new Date();
-    const weekAgo = new Date(today);
-    weekAgo.setDate(weekAgo.getDate() - 7);
-    const pad = n => String(n).padStart(2, '0');
-    const weekAgoStr = `${weekAgo.getFullYear()}-${pad(weekAgo.getMonth()+1)}-${pad(weekAgo.getDate())}`;
-
-    const logsSnap = await getDocs(
-      query(collection(db, 'users', uid, 'daily_logs'), where('__name__', '>=', weekAgoStr))
-    );
-
-    // Target proteine dal piano dieta attivo
-    let protTarget = 0;
-    const activeDiet = diets.find(d => d.active);
-    if (activeDiet) {
-      protTarget = Math.max(activeDiet.day_on?.protein || 0, activeDiet.day_off?.protein || 0);
-    }
-
-    let totalKcal = 0, totalProt = 0, daysWithData = 0, daysProtOk = 0;
-    logsSnap.forEach(d => {
-      const data = d.data();
-      const kcal = Number(data.kcal) || 0;
-      const prot = Number(data.protein) || 0;
-      if (kcal > 0) {
-        totalKcal += kcal;
-        totalProt += prot;
-        daysWithData++;
-        if (protTarget > 0 && prot >= protTarget * 0.9) daysProtOk++;
-      }
-    });
-
-    const avgKcal = daysWithData > 0 ? Math.round(totalKcal / daysWithData) : 0;
-    const avgProt = daysWithData > 0 ? Math.round(totalProt / daysWithData) : 0;
-    const protAdh = daysWithData > 0 ? Math.round((daysProtOk / daysWithData) * 100) : 0;
-    const protAdhColor = protAdh >= 80 ? '#30d158' : protAdh >= 50 ? '#fbbf24' : '#ff453a';
-
-    box.innerHTML = `
-      <div style="font-size:10px;font-weight:800;color:var(--t3);letter-spacing:2px;margin-bottom:12px">STATISTICHE 7 GIORNI</div>
-      <div class="grid2" style="gap:10px">
-        <div class="card card-dark" style="margin:0;padding:14px">
-          <div style="font-size:10px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">🔥 Media giornaliera</div>
-          <div style="font-size:22px;font-weight:900;color:#fff">${avgKcal > 0 ? avgKcal.toLocaleString() : '—'} <span style="font-size:12px;color:var(--t2)">kcal</span></div>
-          <div style="font-size:13px;color:var(--t2);margin-top:4px">${avgProt > 0 ? avgProt + 'g proteine' : '—'}</div>
-        </div>
-        <div class="card card-dark" style="margin:0;padding:14px">
-          <div style="font-size:10px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">🥩 Aderenza proteine</div>
-          <div style="font-size:22px;font-weight:900;color:${protAdhColor}">${protTarget > 0 ? protAdh + '%' : '—'}</div>
-          <div style="font-size:12px;color:var(--t2);margin-top:4px">${daysProtOk}/${daysWithData} giorni ≥ 90% target</div>
-        </div>
-      </div>`;
-  } catch (e) {
-    console.warn('buildDietWidgets error:', e);
+  const diet = diets.find(d => d.active);
+  if (!diet) {
+    box.innerHTML = `<div class="w-card"><div class="w-section">GIORNATA</div><div class="w-empty">Nessun piano dieta attivo</div></div>`;
+    return;
   }
+
+  // Tipo giorno: impostato da daily_state.js sul body
+  const dayType = document.body.dataset.dayType || 'off';
+  const dayKey = dayType === 'on' ? 'day_on' : 'day_off';
+  const target = diet[dayKey] || diet.day_off || {};
+
+  // Consumo dal DOM (popolato da daily_state.js)
+  const rd = id => parseInt(document.getElementById(id)?.textContent) || 0;
+  const con = { kcal: rd('recap-kcal'), protein: rd('recap-pro'), carbs: rd('recap-carb'), fats: rd('recap-fat') };
+
+  // Target con fallback a PHASE_CONFIG
+  const tK = target.kcal || PHASE_CONFIG.kcal[dayType === 'on' ? 'training' : 'rest'];
+  const tP = target.protein || PHASE_CONFIG.macro[dayType === 'on' ? 'training' : 'rest'].protein;
+  const tC = target.carbs || PHASE_CONFIG.macro[dayType === 'on' ? 'training' : 'rest'].carbs;
+  const tF = target.fats || PHASE_CONFIG.macro[dayType === 'on' ? 'training' : 'rest'].fats;
+
+  // Percentuali e residui
+  const pK = tK > 0 ? con.kcal / tK : 0;
+  const pP = tP > 0 ? con.protein / tP : 0;
+  const pC = tC > 0 ? con.carbs / tC : 0;
+  const pF = tF > 0 ? con.fats / tF : 0;
+
+  const rK = Math.max(0, tK - con.kcal);
+  const rP = Math.max(0, Math.round(tP - con.protein));
+  const rC = Math.max(0, Math.round(tC - con.carbs));
+  const rF = Math.max(0, Math.round(tF - con.fats));
+
+  // Colore barra: ok/warn/alert
+  const bCol = (p, isProt) => {
+    if (isProt) {
+      if (con.protein >= PHASE_CONFIG.protein_band.min && con.protein <= PHASE_CONFIG.protein_band.max) return COLORS.ok;
+      if (p > 1.1) return COLORS.alert;
+      return COLORS.t1;
+    }
+    if (p > 1.1) return COLORS.alert;
+    if (p > 0.95) return COLORS.warn;
+    return COLORS.t1;
+  };
+
+  const bar = (label, pct, residual, unit, color, h = 8) => `
+    <div class="w-macro-bar">
+      <div class="w-macro-label" ${h > 8 ? 'style="color:var(--t1);font-weight:700"' : ''}>${label}</div>
+      <div class="w-macro-track" style="height:${h}px">
+        <div class="w-macro-fill" style="width:${Math.min(100, pct * 100).toFixed(0)}%;background:${color};height:100%"></div>
+      </div>
+      <div class="w-macro-vals" ${h > 8 ? 'style="color:var(--t1);font-weight:600"' : ''}>${residual}${unit} rim</div>
+    </div>`;
+
+  const dayLabel = dayType === 'on' ? 'GIORNO ON' : 'GIORNO OFF';
+
+  // Stato proteine rispetto alla banda
+  const protState = getStatus(con.protein, PHASE_CONFIG.protein_band.min, { tolerance: PHASE_CONFIG.protein_band.max - PHASE_CONFIG.protein_band.min });
+
+  box.innerHTML = `
+    <div class="w-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <div class="w-section" style="margin:0">${dayLabel}</div>
+        <div class="w-unit">${tK} kcal target</div>
+      </div>
+      ${bar('kcal', pK, rK, '', bCol(pK))}
+      ${bar('P', pP, rP, 'g', bCol(pP, true), 12)}
+      ${bar('C', pC, rC, 'g', bCol(pC), 6)}
+      ${bar('G', pF, rF, 'g', bCol(pF), 6)}
+      <div class="w-status">
+        ${statusDot(protState)}
+        <span>proteine: ${con.protein}g · banda ${PHASE_CONFIG.protein_band.min}–${PHASE_CONFIG.protein_band.max}g</span>
+      </div>
+    </div>`;
 }
 
 (async function() {

@@ -1,20 +1,24 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 :root {
-  --bg:#111111; --bg2:#1b1b1d; --bg3:#242427; --bg4:#2a2a2e;
+  /* Palette clinica Fase 3 */
+  --bg:#14181B; --bg2:#1C2226; --bg3:#232A2F; --bg4:#2A3237;
+  --t1:#ECEFF1; --t2:#93A1A8; --t3:#5C6970;
+  --border:#2A3237; --border2:rgba(110,147,168,0.25);
+  --ok:#6FA88A; --warn:#D39A3C; --alert:#C0553F;
+  --band:rgba(110,147,168,0.15); --band-stroke:rgba(110,147,168,0.3);
+  /* Alias retrocompatibilita' — session.html, checks.html, diary.html */
   --accent:#ff6a00; --accent2:#ff8a33;
-  --green:#1ce370; --orange:#ff6a00; --red:#ff453a;
-  --blue:#3a86ff; --yellow:#ffc300; --purple:#b5179e;
-  --t1:#f5f5f2; --t2:#a7a7ad; --t3:#6e6e73;
-  --border:#2f2f33; --border2:rgba(255,106,0,0.25);
+  --green:var(--ok); --orange:#ff6a00; --red:var(--alert);
+  --blue:#6E93A8; --yellow:var(--warn); --purple:#8A7FA8;
   --r:14px; --rs:10px; --rl:26px;
   --shadow:0 8px 30px rgba(0,0,0,0.4);
-  --glow:0 0 25px rgba(255,106,0,0.15);
+  --glow:none;
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{background:var(--bg);color:var(--t1);font-family:'Outfit',sans-serif;min-height:100vh;overscroll-behavior:none;padding-top:env(safe-area-inset-top);overflow-x:hidden}
+body{background:var(--bg);color:var(--t1);font-family:'Inter',sans-serif;min-height:100vh;overscroll-behavior:none;padding-top:env(safe-area-inset-top);overflow-x:hidden;font-feature-settings:'tnum' 1}
 ::-webkit-scrollbar{width:0;height:0}
-input,button,select,textarea{font-family:'Outfit',sans-serif}
+input,button,select,textarea{font-family:'Inter',sans-serif}
 a{color:inherit;text-decoration:none}
 
 .wrap{max-width:430px;margin:0 auto;padding:env(safe-area-inset-top) 16px 120px;padding-top:max(env(safe-area-inset-top),16px)}
@@ -325,7 +329,7 @@ textarea.fi{resize:vertical;min-height:70px;line-height:1.5}
 
 /* TAB SWITCHER */
 .tab-sw{display:flex;gap:8px;margin-bottom:16px}
-.tab-btn{flex:1;padding:9px 0;border:1px solid var(--border);border-radius:var(--rs);background:rgba(255,255,255,.04);color:var(--t2);font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;font-family:'Outfit',sans-serif}
+.tab-btn{flex:1;padding:9px 0;border:1px solid var(--border);border-radius:var(--rs);background:rgba(255,255,255,.04);color:var(--t2);font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;font-family:'Inter',sans-serif}
 .tab-btn.tab-active{background:rgba(124,111,255,.15);border-color:var(--border2);color:var(--accent2)}
 
 /* WEEK VIEW */
@@ -908,3 +912,305 @@ body.minimal-dark {
 .dot-bad { background: var(--red); box-shadow: 0 0 6px rgba(255, 69, 58, 0.3); }
 .dot-none { background: rgba(255,255,255,0.08); }
 
+/* =========================================
+   WIDGET SYSTEM — Cruscotto clinico
+   ========================================= */
+
+/* Sezione titolo widget */
+.w-section {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--t2);
+  margin: 24px 0 12px;
+  padding: 0;
+}
+
+/* Card widget base */
+.w-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  margin-bottom: 14px;
+}
+.w-card-flush {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0 0 16px;
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Riga compatta: label + valore */
+.w-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+}
+.w-row + .w-row {
+  border-top: 1px solid rgba(42,50,55,0.5);
+}
+
+/* Label */
+.w-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--t2);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* Dato primario grande */
+.w-big {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--t1);
+  letter-spacing: -1px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Dato secondario */
+.w-val {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--t1);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Unita' e caption */
+.w-unit {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--t3);
+}
+
+/* Delta (variazione) */
+.w-delta {
+  font-size: 10px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.w-delta-ok { color: var(--ok); }
+.w-delta-warn { color: var(--warn); }
+.w-delta-alert { color: var(--alert); }
+.w-delta-neutral { color: var(--t3); }
+
+/* Stato inline: pallino + testo */
+.w-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--t2);
+  margin-top: 8px;
+}
+
+/* Striscia oggi (fissa in alto) */
+.w-today-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0 16px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+.w-today-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.w-today-date {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t1);
+}
+.w-today-type {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--t2);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.w-today-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.w-today-metric {
+  text-align: right;
+}
+.w-today-metric-val {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t1);
+  font-variant-numeric: tabular-nums;
+}
+.w-today-metric-lbl {
+  font-size: 9px;
+  color: var(--t3);
+  font-weight: 500;
+}
+
+/* Griglia leve (5 celle) */
+.w-levers {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+.w-lever {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 4px;
+  background: var(--bg3);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+.w-lever-val {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--t1);
+  font-variant-numeric: tabular-nums;
+}
+.w-lever-lbl {
+  font-size: 8px;
+  font-weight: 600;
+  color: var(--t3);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  text-align: center;
+}
+
+/* Aderenza settimanale — 7 celle */
+.w-adherence {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+.w-adh-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+  border-radius: 8px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+}
+.w-adh-day {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--t3);
+  text-transform: uppercase;
+}
+.w-adh-ok { background: rgba(111,168,138,0.12); border-color: rgba(111,168,138,0.3); }
+.w-adh-warn { background: rgba(211,154,60,0.12); border-color: rgba(211,154,60,0.3); }
+.w-adh-miss { background: var(--bg3); border-color: var(--border); }
+
+/* Regole armate — lista compatta */
+.w-rule {
+  display: grid;
+  grid-template-columns: 6px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 0;
+}
+.w-rule + .w-rule {
+  border-top: 1px solid rgba(42,50,55,0.5);
+}
+.w-rule-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.w-rule-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--t1);
+}
+.w-rule-counter {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--t3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Macro barre (dieta) */
+.w-macro-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.w-macro-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--t2);
+  width: 28px;
+  flex-shrink: 0;
+  text-transform: uppercase;
+}
+.w-macro-track {
+  flex: 1;
+  height: 8px;
+  background: var(--bg3);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+.w-macro-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.4s ease;
+}
+.w-macro-vals {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--t2);
+  width: 80px;
+  text-align: right;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Contenitore grafico SVG */
+.w-chart {
+  width: 100%;
+  overflow: hidden;
+  margin: 8px 0;
+}
+.w-chart svg {
+  font-family: 'Inter', sans-serif;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* Stato vuoto widget */
+.w-empty {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--t3);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Skeleton caricamento */
+.w-skeleton {
+  background: linear-gradient(90deg, var(--bg3) 25%, var(--bg2) 50%, var(--bg3) 75%);
+  background-size: 200% 100%;
+  animation: w-shimmer 1.5s infinite;
+  border-radius: 6px;
+  height: 16px;
+}
+@keyframes w-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}

@@ -1,11 +1,13 @@
 import { requireAuth, loadSmart } from './app.js';
 import {
-  db, getUserId, doc, getDoc, setDoc, getDocs, addDoc, deleteDoc, collection, query, orderBy, limit
+  db, getUserId, doc, getDoc, setDoc, getDocs, addDoc, deleteDoc, collection, query, orderBy, limit, where
 } from './firebase-config.js';
 import {
   getTodayString, getYesterdayString, getDayOfWeek, formatDateIT, formatDateShort, addDays, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER, cleanOldLogs, calcFitScore, calcSmartScore, calcRecoveryPlan
 } from './app.js';
 import { calcMacrosFromText, analyzeFoodImageAI, generateSmartAdviceAI, generateRecoveryAdviceAI, generateAdvisor360AI, saveAICorrection } from './gemini.js';
+import { PHASE_CONFIG, getCurrentPhaseWeek } from './phase-config.js';
+import { svgLineChart, movingAverage, linearRegression, statusDot, COLORS } from './widgets.js';
 
 const TODAY = getTodayString();
 
@@ -161,6 +163,8 @@ async function init() {
     buildSmartAdvisor();
   }).catch(e => console.warn('loadWeeklyLogsForScore background error:', e));
 
+  buildWeightCorridor();
+
   try {
     const refs = [
       doc(db, 'users', userId, 'daily_logs', TODAY),
@@ -308,6 +312,7 @@ async function init() {
       } catch(e) {}
     }
     buildNutrition(); buildMeals(); buildWorkout(); buildStats(); buildFitScore();
+    buildTodayStrip();
   });
 
   window.addEventListener('pagehide', () => {
@@ -401,7 +406,8 @@ function renderDailyStateUI(local) {
   } else {
     isTrainingDay = !!progDay;
   }
-  
+  document.body.dataset.dayType = isTrainingDay ? 'on' : 'off';
+
   const activeWorkoutEl = document.getElementById('active-workout-info');
   if (activeWorkoutEl) {
     if (isTrainingDay && progDay) {
@@ -425,6 +431,7 @@ function renderDailyStateUI(local) {
   buildStepsCard();
   buildFitScore();
   buildSmartAdvisor();
+  buildTodayStrip();
 
   checkYesterdayLog();
 }
@@ -648,6 +655,176 @@ function updateNutritionTotals() {
   if (recapPro) recapPro.textContent = Math.round(tots.protein) + 'g';
   if (recapCarb) recapCarb.textContent = Math.round(tots.carbs) + 'g';
   if (recapFat) recapFat.textContent = Math.round(tots.fats) + 'g';
+}
+
+// ── Striscia oggi ──────────────────────────────────────────
+function buildTodayStrip() {
+  const box = document.getElementById('today-strip-box');
+  if (!box) return;
+
+  const dayKey = isTrainingDay ? 'day_on' : 'day_off';
+  const plan = activeDiet?.[dayKey] || null;
+  const tots = calcTotals();
+
+  const tgtK = plan?.kcal || PHASE_CONFIG.kcal[isTrainingDay ? 'training' : 'rest'];
+  const tgtP = plan?.protein || PHASE_CONFIG.macro[isTrainingDay ? 'training' : 'rest'].protein;
+  const residK = Math.max(0, tgtK - tots.kcal);
+  const residP = Math.max(0, Math.round(tgtP - tots.protein));
+
+  const steps = logData.steps || 0;
+  const sGoal = appSettings?.steps_goal || PHASE_CONFIG.steps_daily;
+
+  const d = new Date(TODAY + 'T00:00:00');
+  const gi = ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab'];
+  const me = ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'];
+  const dateStr = `${gi[d.getDay()]} ${d.getDate()} ${me[d.getMonth()]}`;
+
+  const todayKey = getDayOfWeek(TODAY);
+  const schedDay = activeProgram?.schedule?.[todayKey];
+  const sessName = typeof schedDay === 'string' ? schedDay : (schedDay?.name || null);
+  const typeStr = isTrainingDay ? `ON · ${sessName || 'Allenamento'}` : 'OFF';
+
+  const fmtS = steps >= 1000 ? (steps / 1000).toFixed(1) + 'k' : String(steps);
+  const fmtG = sGoal >= 1000 ? (sGoal / 1000).toFixed(0) + 'k' : String(sGoal);
+
+  box.innerHTML = `
+    <div class="w-today-strip">
+      <div class="w-today-left">
+        <div class="w-today-date">${dateStr}</div>
+        <div class="w-today-type">${typeStr}</div>
+      </div>
+      <div class="w-today-right">
+        <div class="w-today-metric">
+          <div class="w-today-metric-val">${residK}</div>
+          <div class="w-today-metric-lbl">kcal</div>
+        </div>
+        <div class="w-today-metric">
+          <div class="w-today-metric-val">${residP}g</div>
+          <div class="w-today-metric-lbl">proteine</div>
+        </div>
+        <div class="w-today-metric">
+          <div class="w-today-metric-val">${fmtS}</div>
+          <div class="w-today-metric-lbl">/ ${fmtG}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── Corridoio del peso ─────────────────────────────────────
+async function buildWeightCorridor() {
+  const box = document.getElementById('weight-corridor-box');
+  if (!box) return;
+  const uid = getUserId();
+  if (!uid) return;
+
+  const phaseStart = new Date(PHASE_CONFIG.start_date + 'T00:00:00');
+  const phaseEnd = new Date(PHASE_CONFIG.end_date + 'T00:00:00');
+  const today = new Date(TODAY + 'T00:00:00');
+
+  if (today < phaseStart) {
+    box.innerHTML = `<div class="w-section">CORRIDOIO DEL PESO</div><div class="w-empty">Fase 3 inizia il ${phaseStart.toLocaleDateString('it-IT', { day: 'numeric', month: 'long' })}</div>`;
+    return;
+  }
+
+  try {
+    const pad = n => String(n).padStart(2, '0');
+    const qStart = new Date(phaseStart);
+    qStart.setDate(qStart.getDate() - 14);
+    const qStartStr = `${qStart.getFullYear()}-${pad(qStart.getMonth() + 1)}-${pad(qStart.getDate())}`;
+
+    const snap = await getDocs(
+      query(collection(db, 'users', uid, 'daily_logs'), where('__name__', '>=', qStartStr))
+    );
+
+    const weights = [];
+    snap.forEach(docSnap => {
+      const w = docSnap.data().weight_kg;
+      if (w > 0) weights.push({ date: docSnap.id, y: w });
+    });
+    weights.sort((a, b) => a.date.localeCompare(b.date));
+
+    if (!weights.length) {
+      box.innerHTML = `<div class="w-section">CORRIDOIO DEL PESO</div><div class="w-empty">Nessuna pesata registrata</div>`;
+      return;
+    }
+
+    const toMs = dt => new Date(dt + 'T00:00:00').getTime();
+    const points = weights.map(w => ({ x: toMs(w.date), y: w.y }));
+
+    // Media mobile 7gg
+    const maVals = movingAverage(weights.map(w => w.y), 7, 4);
+    const maLine = maVals.map((m, i) => m.value != null ? { x: toMs(weights[i].date), y: m.value } : null).filter(Boolean);
+
+    // Peso base: prima pesata dopo inizio fase
+    const phaseW = weights.filter(w => w.date >= PHASE_CONFIG.start_date);
+    const baseW = phaseW.length > 0 ? phaseW[0].y : weights[weights.length - 1].y;
+
+    // Corridoio corrente (soglie mobili)
+    const weekNow = getCurrentPhaseWeek(TODAY);
+    const corrMax = baseW - PHASE_CONFIG.weight.drop_min_per_week * weekNow;
+    const corrMin = baseW - PHASE_CONFIG.weight.drop_max_per_week * weekNow;
+
+    // Target finale
+    const tgtMin = PHASE_CONFIG.weight.target_min;
+    const tgtMax = PHASE_CONFIG.weight.target_max;
+
+    // Proiezione
+    const proj = [];
+    if (maLine.length >= 4) {
+      const recent = maLine.slice(-14);
+      const reg = linearRegression(recent.map((p, i) => ({ x: i, y: p.y })));
+      if (recent.length > 1) {
+        const dayStep = (recent[recent.length - 1].x - recent[0].x) / 86400000 / (recent.length - 1);
+        const daysLeft = (phaseEnd.getTime() - recent[recent.length - 1].x) / 86400000;
+        const projY = recent[recent.length - 1].y + reg.slope * (daysLeft / dayStep);
+        proj.push({ x: recent[recent.length - 1].x, y: recent[recent.length - 1].y });
+        proj.push({ x: phaseEnd.getTime(), y: projY, label: projY.toFixed(1) + ' kg' });
+      }
+    }
+
+    // Stato
+    const lastMA = maLine.length > 0 ? maLine[maLine.length - 1].y : null;
+    let stText = '', stState = 'off';
+    if (lastMA != null) {
+      if (lastMA <= corrMax && lastMA >= corrMin) { stText = 'dentro il corridoio'; stState = 'ok'; }
+      else if (lastMA > corrMax) { stText = 'sopra: troppo lento'; stState = 'warn'; }
+      else { stText = 'sotto: troppo rapido, verificare forza'; stState = 'alert'; }
+    } else {
+      stText = `media non calcolabile: ${phaseW.length} pesate su 7`;
+    }
+
+    // Etichette assi
+    const xLabels = [];
+    for (let w = 0; w <= PHASE_CONFIG.weeks; w += 3) {
+      xLabels.push({ x: phaseStart.getTime() + w * 7 * 86400000, label: `S${w}` });
+    }
+    const allY = points.map(p => p.y);
+    if (tgtMin) allY.push(tgtMin);
+    if (tgtMax) allY.push(tgtMax);
+    const yMinV = Math.floor(Math.min(...allY) - 0.5);
+    const yMaxV = Math.ceil(Math.max(...allY) + 0.5);
+    const yLabels = [];
+    for (let y = yMinV; y <= yMaxV; y++) yLabels.push({ y, label: String(y) });
+
+    const chart = svgLineChart({
+      points, line: maLine, projection: proj,
+      bandMin: tgtMin, bandMax: tgtMax,
+      xDomain: [phaseStart.getTime(), phaseEnd.getTime()],
+      yDomain: [yMinV, yMaxV],
+      xLabels, yLabels,
+      thresholds: [
+        { y: corrMax, color: COLORS.warn, dashed: true },
+        { y: corrMin, color: COLORS.alert, dashed: true },
+      ],
+    });
+
+    box.innerHTML = `
+      <div class="w-section">CORRIDOIO DEL PESO</div>
+      <div class="w-chart">${chart}</div>
+      <div class="w-status">${statusDot(stState)} <span>${stText}</span></div>`;
+  } catch (e) {
+    console.warn('buildWeightCorridor error:', e);
+  }
 }
 
 // ── SmartScore ─────────────────────────────────────────────

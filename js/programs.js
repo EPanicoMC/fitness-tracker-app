@@ -5,6 +5,8 @@ import {
 } from './firebase-config.js';
 import { showToast, showModal, DAYS_IT, DAY_ORDER } from './app.js';
 import { AutoComplete, saveToLibrary } from './autocomplete.js';
+import { PHASE_CONFIG, getCurrentPhaseWeek, getCurrentBlock, calcE1RM } from './phase-config.js';
+import { svgDivergentBars, statusDot, COLORS } from './widgets.js';
 
 let programs  = [];
 let editingId = null;
@@ -369,7 +371,7 @@ window.saveProgram = async function() {
   }
 };
 
-// ── Widget statistiche allenamento ────────────────────────
+// ── Widget forza vs baseline ──────────────────────────────
 async function buildProgWidgets() {
   const box = document.getElementById('prog-widgets');
   if (!box) return;
@@ -377,54 +379,133 @@ async function buildProgWidgets() {
   if (!uid) return;
 
   try {
-    // Ultimo allenamento da last_sessions
-    const lsSnap = await getDocs(collection(db, 'users', uid, 'last_sessions'));
-    let lastSession = null;
-    lsSnap.forEach(d => {
-      const data = d.data();
-      if (!lastSession || (data.completed_date || '') > (lastSession.completed_date || '')) {
-        lastSession = data;
-      }
-    });
-
-    // Volume settimanale dagli ultimi 7 giorni di daily_logs
-    const today = new Date();
-    const weekAgo = new Date(today);
-    weekAgo.setDate(weekAgo.getDate() - 7);
     const pad = n => String(n).padStart(2, '0');
-    const weekAgoStr = `${weekAgo.getFullYear()}-${pad(weekAgo.getMonth()+1)}-${pad(weekAgo.getDate())}`;
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+    const weekNum = getCurrentPhaseWeek(todayStr);
+    const block = getCurrentBlock(weekNum);
+    const refExercises = PHASE_CONFIG.reference_exercises;
+    const isPreBaseline = now < new Date(PHASE_CONFIG.baseline_week_end + 'T23:59:59');
 
-    const logsSnap = await getDocs(
-      query(collection(db, 'users', uid, 'daily_logs'), where('__name__', '>=', weekAgoStr))
-    );
-    let weekVolume = 0;
-    let sessionsCount = 0;
-    logsSnap.forEach(d => {
-      const data = d.data();
-      if (data.session_volume) {
-        weekVolume += Number(data.session_volume) || 0;
-        sessionsCount++;
+    // Carica last_sessions
+    const lsSnap = await getDocs(collection(db, 'users', uid, 'last_sessions'));
+
+    // Per ogni esercizio di riferimento, trova il dato piu' recente
+    const exData = {};
+    lsSnap.forEach(d => {
+      const session = d.data();
+      if (!session.exercises) return;
+      for (const ex of session.exercises) {
+        if (!refExercises.includes(ex.name)) continue;
+        let bestE1RM = 0, bestW = 0, bestR = 0;
+        for (const s of (ex.sets || [])) {
+          if (s.done === false) continue;
+          const e = calcE1RM(s.weight, s.reps);
+          if (e > bestE1RM) { bestE1RM = e; bestW = s.weight; bestR = s.reps; }
+        }
+        if (bestE1RM > 0) {
+          const prev = exData[ex.name];
+          if (!prev || (session.completed_date || '') > (prev.date || '')) {
+            exData[ex.name] = { date: session.completed_date || '', e1rm: bestE1RM, w: bestW, r: bestR };
+          }
+        }
       }
     });
 
-    // Render
-    const lastInfo = lastSession
-      ? `<div style="font-size:15px;font-weight:700;color:#fff">${lastSession.session_name || 'Sessione'}</div>
-         <div style="font-size:12px;color:var(--t2);margin-top:2px">${lastSession.completed_date || '—'} · ${lastSession.total_volume ? lastSession.total_volume + ' kg' : '—'} · ${lastSession.duration_seconds ? Math.round(lastSession.duration_seconds/60) + ' min' : '—'}</div>`
-      : `<div style="font-size:13px;color:var(--t3)">Nessun allenamento recente</div>`;
+    // Cerca dati baseline (settimana 3)
+    const baselineData = {};
+    if (!isPreBaseline) {
+      lsSnap.forEach(d => {
+        const session = d.data();
+        const sd = session.completed_date || '';
+        if (sd < PHASE_CONFIG.baseline_week_start || sd > PHASE_CONFIG.baseline_week_end) return;
+        if (!session.exercises) return;
+        for (const ex of session.exercises) {
+          if (!refExercises.includes(ex.name)) continue;
+          let best = 0;
+          for (const s of (ex.sets || [])) {
+            if (s.done === false) continue;
+            best = Math.max(best, calcE1RM(s.weight, s.reps));
+          }
+          if (best > (baselineData[ex.name] || 0)) baselineData[ex.name] = best;
+        }
+      });
+    }
+
+    // Riga info blocco
+    const blockInfo = block
+      ? `settimana ${weekNum} di ${PHASE_CONFIG.weeks} · ${block.label.toLowerCase()} · RPE fond ${block.rpe_fond}, iso ${block.rpe_iso}${block.intensification ? ' · intensificazione attiva' : ''}`
+      : weekNum === 0 ? 'fase non ancora iniziata' : `settimana ${weekNum} di ${PHASE_CONFIG.weeks}`;
+
+    // Abbreviazioni nomi esercizi
+    const shortName = n => {
+      const map = {
+        'Trazioni alla sbarra': 'Trazioni',
+        'Row machine appoggio pettorale': 'Row machine',
+        'Hack squat': 'Hack squat',
+        'Pressa 45 gradi': 'Pressa 45',
+        'Lat machine presa neutra media': 'Lat machine',
+      };
+      return map[n] || n.split(' ').slice(0, 2).join(' ');
+    };
+
+    // Pre-baseline: mostra valori grezzi
+    if (isPreBaseline) {
+      const baselineStart = new Date(PHASE_CONFIG.baseline_week_start + 'T00:00:00');
+      const daysTo = Math.max(0, Math.ceil((baselineStart - now) / 86400000));
+
+      const rows = refExercises.map(name => {
+        const d = exData[name];
+        return `<div class="w-row">
+          <span style="font-size:12px;color:var(--t2)">${shortName(name)}</span>
+          <span class="w-val">${d ? `${d.w}kg x ${d.r}` : '—'}</span>
+        </div>`;
+      }).join('');
+
+      box.innerHTML = `
+        <div style="font-size:11px;color:var(--t2);padding-bottom:12px;margin-bottom:12px;border-bottom:1px solid var(--border)">${blockInfo}</div>
+        <div class="w-card">
+          <div class="w-section">FORZA vs BASELINE</div>
+          <div class="w-status" style="margin-top:0;margin-bottom:12px">
+            ${statusDot('off')}
+            <span>baseline in costruzione${daysTo > 0 ? ` · tra ${daysTo} giorni` : ''}</span>
+          </div>
+          ${rows}
+        </div>`;
+      return;
+    }
+
+    // Post-baseline: barre divergenti
+    const hasBaseline = Object.keys(baselineData).length > 0;
+    const items = refExercises.filter(n => exData[n]).map(name => {
+      const cur = exData[name].e1rm;
+      const base = baselineData[name] || cur;
+      const delta = base > 0 ? ((cur - base) / base) * 100 : 0;
+      return { label: name, shortLabel: shortName(name), value: delta };
+    });
+
+    let content = '';
+    if (items.length > 0 && hasBaseline) {
+      content = `<div class="w-chart">${svgDivergentBars({ items, maxPct: 15 })}</div>`;
+    }
+
+    // Dettaglio kg x rip sotto le barre
+    const detail = refExercises.map(name => {
+      const d = exData[name];
+      const b = baselineData[name];
+      return d ? `<div class="w-row">
+        <span style="font-size:11px;color:var(--t2)">${shortName(name)}</span>
+        <span class="w-val">${d.w}kg x ${d.r}${b ? ` <span class="w-unit">(base: ${Math.round(b)})</span>` : ''}</span>
+      </div>` : '';
+    }).join('');
 
     box.innerHTML = `
-      <div style="font-size:10px;font-weight:800;color:var(--t3);letter-spacing:2px;margin-bottom:12px">STATISTICHE</div>
-      <div class="grid2" style="gap:10px">
-        <div class="card card-dark" style="margin:0;padding:14px">
-          <div style="font-size:10px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">🏋️ Ultimo allenamento</div>
-          ${lastInfo}
-        </div>
-        <div class="card card-dark" style="margin:0;padding:14px">
-          <div style="font-size:10px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">📊 Volume 7gg</div>
-          <div style="font-size:22px;font-weight:900;color:#fff">${weekVolume > 0 ? Math.round(weekVolume).toLocaleString() + ' kg' : '—'}</div>
-          <div style="font-size:12px;color:var(--t2);margin-top:2px">${sessionsCount} session${sessionsCount !== 1 ? 'i' : 'e'} questa settimana</div>
-        </div>
+      <div style="font-size:11px;color:var(--t2);padding-bottom:12px;margin-bottom:12px;border-bottom:1px solid var(--border)">${blockInfo}</div>
+      <div class="w-card">
+        <div class="w-section">FORZA vs BASELINE</div>
+        ${!hasBaseline ? `<div class="w-status" style="margin-top:0;margin-bottom:12px">${statusDot('off')}<span>nessun dato baseline dalla settimana 3</span></div>` : ''}
+        ${content}
+        ${detail}
       </div>`;
   } catch (e) {
     console.warn('buildProgWidgets error:', e);

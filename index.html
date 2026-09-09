@@ -34,28 +34,15 @@
   <!-- WELCOME SUBTITLE -->
   <div id="welcome-name" class="home-subtitle" style="font-size:14px; color:var(--t2); margin-top:-10px; margin-bottom:24px;">Benvenuto, Enrico — recupera le energie.</div>
 
-  <!-- SMARTSCORE CARD -->
-  <div class="smartscore-card" style="margin-top:24px; background:linear-gradient(135deg, var(--bg2), #141416); border-radius:20px; padding:20px; border:1px solid var(--border); position:relative; overflow:hidden;">
-    <div class="smartscore-card-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-      <div class="smartscore-label" style="font-size:10px; font-weight:800; color:var(--t3); letter-spacing:1.5px; text-transform:uppercase;">SMARTSCORE</div>
-      <div class="smartscore-badge" id="smartscore-badge" style="font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:0.8px; padding:3px 8px; border-radius:6px; border:1px solid rgba(251,191,36,0.3); color:#fbbf24; background:rgba(251,191,36,0.06);">⚠ ATTENZIONE</div>
-    </div>
-    
-    <!-- Split columns -->
-    <div id="fitscore-box"></div>
+  <!-- STRISCIA OGGI -->
+  <div id="today-strip-box"></div>
 
-    <div class="smartscore-footer" style="margin-top:16px; border-top:1px solid rgba(255,255,255,0.03); padding-top:12px; display:flex; justify-content:space-between; font-size:11px; color:var(--t3); font-weight:500;">
-      <span>calcolato in tempo reale</span>
-      <span class="smartscore-link" id="smartscore-howto-toggle" onclick="const h = document.getElementById('smartscore-howto'); h.style.display = h.style.display === 'none' ? 'block' : 'none';" style="cursor:pointer; color:var(--t2); text-decoration:underline;">come si legge</span>
-    </div>
-    <div id="smartscore-howto" class="smartscore-howto" style="display:none; margin-top:14px; font-size:12px; color:var(--t2); line-height:1.75; text-align:left; border-top:1px dashed rgba(255,255,255,0.05); padding-top:12px;">
-      <div style="display:flex;gap:8px;margin-bottom:4px"><span>🍽️</span><span><b>Pasti (35pt)</b> — pasti spuntati rispetto all'orario attuale</span></div>
-      <div style="display:flex;gap:8px;margin-bottom:4px"><span>💪</span><span><b>Allenamento (30pt)</b> — sessione completata o programmata</span></div>
-      <div style="display:flex;gap:8px;margin-bottom:4px"><span>🥩</span><span><b>Proteine (15pt)</b> — apporto proteico proporzionale</span></div>
-      <div style="display:flex;gap:8px;margin-bottom:4px"><span>📈</span><span><b>Trend 7gg (10pt)</b> — costanza settimanale</span></div>
-      <div style="display:flex;gap:8px"><span>👏</span><span><b>Passi (10pt)</b> — solo se hai un obiettivo passi</span></div>
-    </div>
-  </div>
+  <!-- CORRIDOIO DEL PESO -->
+  <div id="weight-corridor-box" style="margin-top:8px"></div>
+
+  <!-- Elementi nascosti per compatibilita' buildFitScore -->
+  <div id="fitscore-box" style="display:none"></div>
+  <div id="smartscore-badge" style="display:none"></div>
 
   <!-- NOTIFICHE IN-APP -->
   <div id="notifications-box" style="margin-top:16px"></div>
