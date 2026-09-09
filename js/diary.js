@@ -1,6 +1,6 @@
 import { requireAuth, loadSmart } from './app.js';
 import {
-  db, getUserId, collection, doc, getDoc, getDocs, setDoc, deleteField, query, where, orderBy, limit
+  db, getUserId, collection, doc, getDoc, getDocs, setDoc, deleteDoc, deleteField, query, where, orderBy, limit
 } from './firebase-config.js';
 import { getTodayString, getDayOfWeek, formatDateIT, formatDateShort, showToast, DAYS_IT, DAY_ORDER } from './app.js';
 import { generateWeeklyCoachReportAI, calcMacrosFromText, analyzeFoodImageAI } from './gemini.js';
@@ -15,6 +15,25 @@ let selectedDate = null;
 let settingsData = null;
 let _dietPlanCache = null;
 let latestCheckWeight = null;
+let calendarEvents = [];
+
+const EVENTO_COLORI = {
+  micro_check: '#3a86ff', check_completo: '#3a86ff', misurazione: '#3a86ff',
+  decisione: '#ffc300', cancello: '#ffc300',
+  taratura_rpe: '#ff8a33', seduta: '#ff8a33',
+  fase: '#b5179e', blocco_scheda: '#b5179e',
+  salute: '#ff453a',
+  integrazione: '#30d158', protocollo: '#30d158', traguardo: '#30d158',
+  regola: '#6e6e73'
+};
+
+const EVENTO_ICONE = {
+  micro_check: '📋', check_completo: '📸', decisione: '⚖️',
+  cancello: '🚪', taratura_rpe: '🎯', fase: '🏁',
+  blocco_scheda: '📊', salute: '🏥', seduta: '💪',
+  integrazione: '💊', protocollo: '✨', traguardo: '🏆',
+  misurazione: '⚖️', regola: '📐'
+};
 
 async function init() {
   const userId = getUserId();
@@ -52,6 +71,18 @@ async function init() {
       buildWeekView();
       loadCalendar();
     });
+
+    // Carica eventi calendario in background
+    try {
+      const evSnap = await getDocs(query(
+        collection(db, 'users', getUserId(), 'calendar_events'),
+        orderBy('data')
+      ));
+      calendarEvents = evSnap.docs
+        .filter(d => d.id !== '_ricorrenze')
+        .map(d => ({ ...d.data(), _id: d.id }));
+      renderGrid(currentMonth.getFullYear(), currentMonth.getMonth());
+    } catch(e) { /* non-critical */ }
 
     // Load latest body check weight in background
     try {
@@ -165,20 +196,54 @@ function renderGrid(year, month) {
 
     let cls = 'cal-day';
     if (isToday) cls += ' today';
+    if (dateStr === selectedDate) cls += ' selected';
 
+    // Dot workout
+    let workoutDot = '';
     if (log) {
-      cls += log.workout?.completed ? ' has-on' : ' has-off';
-    } else if (dateStr < TODAY) {
-      if (isOn) cls += ' missed';
-    } else if (dateStr > TODAY) {
-      if (isOn) cls += ' planned';
+      const c = log.workout?.completed ? 'var(--green)' : 'var(--t3)';
+      workoutDot = `<span class="cal-dot" style="background:${c}"></span>`;
+    } else if (dateStr < TODAY && isOn) {
+      workoutDot = `<span class="cal-dot" style="background:var(--red)"></span>`;
+    } else if (dateStr > TODAY && isOn) {
+      workoutDot = `<span class="cal-dot" style="background:var(--accent)"></span>`;
     }
 
-    if (dateStr === selectedDate) cls += ' selected';
-    html += `<div class="${cls}" onclick="showDay('${dateStr}')">${d}</div>`;
+    // Dot eventi (raggruppa per colore per evitare duplicati visivi)
+    const dayEvents = calendarEvents.filter(e => e.data === dateStr || (e.data_fine && e.data <= dateStr && e.data_fine >= dateStr));
+    const eventColors = [...new Set(dayEvents.map(e => EVENTO_COLORI[e.tipo] || '#6e6e73'))];
+    const eventDots = eventColors.slice(0, 2).map(c => `<span class="cal-dot" style="background:${c}"></span>`).join('');
+
+    html += `<div class="${cls}" onclick="showDay('${dateStr}')"><span class="cal-num">${d}</span><div class="cal-dots">${workoutDot}${eventDots}</div></div>`;
   }
 
   el.innerHTML = html;
+}
+
+// ── Helper: eventi di un giorno ────────────────────────────
+function getEventsForDate(dateStr) {
+  return calendarEvents.filter(e =>
+    e.data === dateStr || (e.data_fine && e.data <= dateStr && e.data_fine >= dateStr)
+  );
+}
+
+function renderDayEvents(dateStr) {
+  const evts = getEventsForDate(dateStr);
+  if (!evts.length) return '';
+  return `
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+      <div style="font-size:10px;font-weight:800;color:var(--t3);letter-spacing:1.5px;margin-bottom:8px">EVENTI</div>
+      ${evts.map(ev => `
+        <div style="margin-bottom:8px;padding:10px;background:rgba(255,255,255,0.02);border-radius:8px;border-left:3px solid ${EVENTO_COLORI[ev.tipo] || '#6e6e73'}">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:14px">${EVENTO_ICONE[ev.tipo] || '📌'}</span>
+            <span style="font-size:13px;font-weight:700;color:var(--t1)">${ev.titolo}</span>
+          </div>
+          ${ev.descrizione ? `<div style="font-size:11px;color:var(--t2);margin-top:4px;line-height:1.5">${ev.descrizione}</div>` : ''}
+          ${ev.azione ? `<div style="font-size:11px;color:var(--accent);margin-top:4px;font-weight:600">📋 ${ev.azione}</div>` : ''}
+        </div>
+      `).join('')}
+    </div>`;
 }
 
 // ── Day detail ─────────────────────────────────────────────
@@ -241,6 +306,7 @@ window.showDay = async function(dateStr) {
           ).join('')}
           ${session.cardio ? `<div style="font-size:12px;color:var(--blue);margin-top:4px">🏃 ${session.cardio.type} ${session.cardio.duration_minutes}min</div>` : ''}
         </div>
+        ${renderDayEvents(dateStr)}
       </div>`;
     return;
   }
@@ -262,6 +328,7 @@ window.showDay = async function(dateStr) {
             ).join('')}
           </div>` : ''}
         <button class="btn btn-ghost btn-sm" style="margin-top:12px;width:100%" onclick="openRecoverDay('${dateStr}')">📋 Recupera questa giornata</button>
+        ${renderDayEvents(dateStr)}
       </div>`;
     return;
   }
@@ -278,6 +345,7 @@ window.showDay = async function(dateStr) {
           <button class="btn btn-ghost btn-sm" onclick="window.openAddMealWithCameraForDate('${dateStr}')" style="flex:1">📸 Scanner</button>
         </div>
         ${isPast ? `<button class="btn btn-ghost btn-sm" style="margin-top:10px;width:100%" onclick="openRecoverDay('${dateStr}')">📋 Recupera questa giornata</button>` : ''}
+        ${renderDayEvents(dateStr)}
       </div>`;
     return;
   }
@@ -405,6 +473,7 @@ window.showDay = async function(dateStr) {
       </div>
 
       ${workoutHtml}
+      ${renderDayEvents(dateStr)}
     </div>`;
 };
 
@@ -907,6 +976,140 @@ window.changeMonth = function(delta) {
   selectedDate = null;
   document.getElementById('day-detail').style.display = 'none';
   loadCalendar();
+};
+
+// ── Pannello eventi calendario (CRUD) ─────────────────────
+window.showEventsPanel = function() {
+  const panel = document.getElementById('events-panel');
+  const calView = document.getElementById('cal-view');
+  const weekView = document.getElementById('week-view');
+  const tabSw = document.querySelector('.tab-sw');
+
+  if (panel.style.display !== 'none') {
+    panel.style.display = 'none';
+    calView.style.display = 'block';
+    if (tabSw) tabSw.style.display = '';
+    return;
+  }
+
+  calView.style.display = 'none';
+  weekView.style.display = 'none';
+  if (tabSw) tabSw.style.display = 'none';
+  panel.style.display = 'block';
+
+  const today = getTodayString();
+  const future = calendarEvents.filter(e => e.data >= today).sort((a, b) => a.data.localeCompare(b.data));
+  const past = calendarEvents.filter(e => e.data < today).sort((a, b) => b.data.localeCompare(a.data));
+
+  const renderEvt = (ev) => {
+    const col = EVENTO_COLORI[ev.tipo] || '#6e6e73';
+    const ico = EVENTO_ICONE[ev.tipo] || '📌';
+    const dStr = new Date(ev.data + 'T12:00:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'short' });
+    return `
+      <div style="padding:12px;background:var(--bg2);border-radius:10px;border-left:3px solid ${col};margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div style="flex:1">
+            <div style="font-size:10px;color:var(--t3);font-weight:700">${dStr} · ${ev.tipo.replace(/_/g, ' ')}</div>
+            <div style="font-size:13px;font-weight:700;color:var(--t1);margin-top:2px">${ico} ${ev.titolo}</div>
+            ${ev.descrizione ? `<div style="font-size:11px;color:var(--t2);margin-top:4px;line-height:1.4">${ev.descrizione.substring(0, 120)}${ev.descrizione.length > 120 ? '…' : ''}</div>` : ''}
+          </div>
+          <button onclick="window.deleteEvent('${ev._id}')" style="background:none;border:none;color:var(--red);font-size:16px;cursor:pointer;padding:4px 8px;flex-shrink:0">✕</button>
+        </div>
+      </div>`;
+  };
+
+  panel.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h2 style="font-size:18px;font-weight:800">📋 Eventi calendario</h2>
+      <button class="btn btn-ghost btn-sm" onclick="window.showEventsPanel()">← Calendario</button>
+    </div>
+    <button class="btn btn-v btn-sm" style="width:100%;margin-bottom:16px" onclick="window.showAddEventForm()">➕ Nuovo evento</button>
+    <div id="add-event-form" style="display:none"></div>
+    ${future.length ? `
+      <div style="font-size:10px;font-weight:800;color:var(--t3);letter-spacing:1.5px;margin-bottom:8px">PROSSIMI (${future.length})</div>
+      ${future.map(renderEvt).join('')}
+    ` : '<p style="color:var(--t3);font-size:13px;margin-bottom:12px">Nessun evento futuro</p>'}
+    ${past.length ? `
+      <details style="margin-top:16px">
+        <summary style="font-size:10px;font-weight:800;color:var(--t3);letter-spacing:1.5px;cursor:pointer">PASSATI (${past.length})</summary>
+        <div style="margin-top:8px">${past.map(renderEvt).join('')}</div>
+      </details>
+    ` : ''}
+  `;
+};
+
+window.showAddEventForm = function() {
+  const form = document.getElementById('add-event-form');
+  if (form.style.display !== 'none') { form.style.display = 'none'; return; }
+
+  const tipi = Object.keys(EVENTO_COLORI).map(t =>
+    `<option value="${t}">${t.replace(/_/g, ' ')}</option>`
+  ).join('');
+
+  form.style.display = 'block';
+  form.innerHTML = `
+    <div style="padding:14px;background:var(--bg2);border-radius:12px;border:1px solid var(--border);margin-bottom:16px">
+      <div style="font-size:12px;font-weight:700;margin-bottom:10px">Nuovo evento</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+        <div>
+          <label style="font-size:10px;color:var(--t3)">Data</label>
+          <input type="date" id="evt-date" class="fi" value="${getTodayString()}" style="font-size:13px">
+        </div>
+        <div>
+          <label style="font-size:10px;color:var(--t3)">Tipo</label>
+          <select id="evt-tipo" class="fi" style="font-size:13px">${tipi}</select>
+        </div>
+      </div>
+      <div style="margin-bottom:8px">
+        <label style="font-size:10px;color:var(--t3)">Titolo</label>
+        <input type="text" id="evt-titolo" class="fi" placeholder="Titolo evento" style="font-size:13px">
+      </div>
+      <div style="margin-bottom:10px">
+        <label style="font-size:10px;color:var(--t3)">Descrizione (opzionale)</label>
+        <textarea id="evt-desc" class="fi" rows="2" placeholder="Dettagli..." style="font-size:13px;resize:vertical"></textarea>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-v btn-sm" style="flex:1" onclick="window.saveNewEvent()">💾 Salva</button>
+        <button class="btn btn-ghost btn-sm" style="flex:1" onclick="document.getElementById('add-event-form').style.display='none'">Annulla</button>
+      </div>
+    </div>
+  `;
+};
+
+window.saveNewEvent = async function() {
+  const data = document.getElementById('evt-date').value;
+  const tipo = document.getElementById('evt-tipo').value;
+  const titolo = document.getElementById('evt-titolo').value.trim();
+  const desc = document.getElementById('evt-desc').value.trim();
+
+  if (!data || !titolo) { showToast('Data e titolo obbligatori', 'err'); return; }
+
+  const userId = getUserId();
+  const docId = `${data}_${tipo}`;
+  const eventDoc = { data, tipo, titolo, descrizione: desc || null, azione: null, data_fine: null };
+
+  try {
+    await setDoc(doc(db, 'users', userId, 'calendar_events', docId), eventDoc);
+    calendarEvents.push({ ...eventDoc, _id: docId });
+    calendarEvents.sort((a, b) => a.data.localeCompare(b.data));
+    showToast('Evento salvato');
+    window.showEventsPanel();
+  } catch(e) {
+    showToast('Errore salvataggio: ' + e.message, 'err');
+  }
+};
+
+window.deleteEvent = async function(eventId) {
+  if (!confirm('Eliminare questo evento?')) return;
+  const userId = getUserId();
+  try {
+    await deleteDoc(doc(db, 'users', userId, 'calendar_events', eventId));
+    calendarEvents = calendarEvents.filter(e => e._id !== eventId);
+    showToast('Evento eliminato');
+    window.showEventsPanel();
+  } catch(e) {
+    showToast('Errore eliminazione: ' + e.message, 'err');
+  }
 };
 
 // ── Recupero giornata passata ──────────────────────────────

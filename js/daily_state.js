@@ -1291,14 +1291,6 @@ function buildStats() {
   }
 
   // Campi giornalieri Fase 3
-  const wf = document.getElementById('daily-weight');
-  if(wf) {
-    wf.value = logData.weight_kg ?? '';
-    wf.addEventListener('change', () => {
-      logData.weight_kg = parseFloat(wf.value) || null;
-      saveToLocal();
-    });
-  }
   const slpf = document.getElementById('daily-sleep');
   if(slpf) {
     slpf.value = logData.sleep_hours ?? '';
@@ -1473,8 +1465,6 @@ async function syncToFirebase() {
   if(nf) logData.daily_note = nf.value;
 
   // Leggi valori giornalieri Fase 3 dagli input
-  const wf = document.getElementById('daily-weight');
-  if(wf && wf.value) logData.weight_kg = parseFloat(wf.value) || null;
   const slpf = document.getElementById('daily-sleep');
   if(slpf && slpf.value) logData.sleep_hours = parseFloat(slpf.value) || null;
   const drf = document.getElementById('daily-drinks');

@@ -17,8 +17,14 @@
 <div class="wrap">
   <div class="ph">
     <h1>📅 Diario</h1>
-    <a href="checks.html" class="btn btn-ghost btn-sm">📸 Check</a>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-ghost btn-sm" onclick="window.showEventsPanel()">📋 Eventi</button>
+      <a href="checks.html" class="btn btn-ghost btn-sm">📸 Check</a>
+    </div>
   </div>
+
+  <!-- PANNELLO EVENTI (nascosto) -->
+  <div id="events-panel" style="display:none"></div>
 
   <!-- PROSSIMA SESSIONE -->
   <div id="next-session"></div>

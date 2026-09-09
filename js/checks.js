@@ -13,9 +13,11 @@ let formPhotos = [];
 
 const MEASURES = [
   { key:'weight',    label:'Peso',    unit:'kg', icon:'⚖️' },
+  { key:'neck',      label:'Collo',   unit:'cm', icon:'🔴' },
   { key:'shoulders', label:'Spalle',  unit:'cm', icon:'🔴' },
   { key:'chest',     label:'Petto',   unit:'cm', icon:'🔴' },
   { key:'waist',     label:'Vita',    unit:'cm', icon:'🔴' },
+  { key:'hips',      label:'Fianchi', unit:'cm', icon:'🔴' },
   { key:'bicep',     label:'Braccia', unit:'cm', icon:'💪' },
   { key:'thigh',     label:'Gambe',   unit:'cm', icon:'🦵' }
 ];

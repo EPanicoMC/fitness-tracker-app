@@ -261,10 +261,9 @@ textarea.fi{resize:vertical;min-height:70px;line-height:1.5}
 .cal-day{aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;transition:all .2s;position:relative;z-index:1;gap:2px;min-width:0;overflow:hidden}
 .cal-day:hover{background:rgba(255,255,255,.05)}
 .cal-day.today{border:2px solid var(--accent)}
-.cal-day.has-on::after{content:'';width:6px;height:6px;border-radius:50%;background:var(--green)}
-.cal-day.has-off::after{content:'';width:6px;height:6px;border-radius:50%;background:var(--t3)}
-.cal-day.missed::after{content:'';width:6px;height:6px;border-radius:50%;background:var(--red)}
-.cal-day.planned::after{content:'';width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.cal-dots{display:flex;gap:2px;justify-content:center;min-height:6px}
+.cal-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0}
+.cal-num{line-height:1.2}
 .cal-day.empty{opacity:.2;cursor:default}
 .cal-day.selected{background:var(--accent);color:#fff;z-index:2}
 

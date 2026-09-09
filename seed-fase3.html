@@ -23,6 +23,7 @@
       <button class="btn btn-flat" id="seed-prog" onclick="window.seedProgram()">💪 Solo Scheda</button>
       <button class="btn btn-flat" id="seed-diet" onclick="window.seedDiet()">🥗 Solo Dieta</button>
       <button class="btn btn-flat" id="seed-cal" onclick="window.seedCalendar()">📅 Solo Calendario</button>
+      <button class="btn btn-flat" id="seed-check" onclick="window.seedCheck()" style="margin-top:8px">📋 Carica Check 10/09</button>
     </div>
   </div>
   <div id="log" style="font-size:13px;font-family:monospace;color:var(--t2);line-height:2;margin-top:16px"></div>
@@ -1254,6 +1255,41 @@ window.seedCalendar = async function() {
     log(`✅ ${count} eventi calendario salvati!`);
   } catch(e) {
     log(`❌ Errore calendario: ${e.message}`, false);
+    console.error(e);
+  }
+};
+
+// Seed check corporeo 10/09/2026
+window.seedCheck = async function() {
+  try {
+    const userId = getUserId();
+    if (!userId) { log('⚠️ Non autenticato', false); return; }
+    document.getElementById('seed-check').disabled = true;
+
+    const checkData = {
+      date: '2026-09-10',
+      weight: 78.0,
+      body_fat: null,
+      muscle_mass: null,
+      notes: 'Check post-viaggio. Peso grezzo 78 kg contiene 1.5–2.5 kg acqua da viaggio e creatina carica — NON è baseline. Peso asciutto stimato ~76 kg, da confermare al 21/09. Vita 93 cm contiene 2–3 cm di assetto APT. Braccio dx: luglio era 37, il +1 è acqua.',
+      measurements: {
+        neck: 41.0,
+        shoulders: 125.0,
+        chest: 107.0,
+        waist: 93.0,
+        hips: 102.0,
+        bicep: 38.0,
+        thigh: 56.0
+      },
+      photos: [],
+      previous: null
+    };
+
+    await setDoc(doc(db, 'users', userId, 'checks', 'check_20260910'), checkData);
+    log('✅ Check 10/09/2026 salvato con successo!');
+    document.getElementById('seed-check').textContent = '✅ Check caricato!';
+  } catch(e) {
+    log(`❌ Errore check: ${e.message}`, false);
     console.error(e);
   }
 };

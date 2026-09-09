@@ -222,6 +222,79 @@ function buildExState(session, dayKey, prevLog, tips) {
   });
 }
 
+// Guida metodologia della fase corrente
+window.showMethodGuide = function() {
+  const regole = programData?.regole_globali;
+  const blocchi = programData?.blocchi_settimanali;
+
+  if (!regole) {
+    showModal({ title: 'ℹ️ Guida', body: '<p style="color:var(--t2)">Nessuna guida disponibile per questa scheda.</p>', confirmText: 'OK' });
+    return;
+  }
+
+  // Determina blocco corrente in base alla data
+  let bloccoCorrente = null;
+  if (blocchi?.length) {
+    const today = new Date(TODAY + 'T12:00:00');
+    for (const b of blocchi) {
+      if (b.date) {
+        const parts = b.date.split('-');
+        if (parts.length === 2) {
+          const [startStr] = parts;
+          const [dd, mm] = startStr.split('/');
+          const startDate = new Date(today.getFullYear(), parseInt(mm) - 1, parseInt(dd));
+          if (today >= startDate) bloccoCorrente = b;
+        }
+      }
+    }
+  }
+
+  const bc = bloccoCorrente;
+  const bloccoHtml = bc ? `
+    <div style="background:rgba(124,111,255,0.08);border-radius:10px;padding:12px;margin-bottom:14px;border:1px solid rgba(124,111,255,0.15)">
+      <div style="font-size:10px;font-weight:800;color:var(--accent);letter-spacing:1px;margin-bottom:4px">BLOCCO ATTUALE</div>
+      <div style="font-size:14px;font-weight:700">Sett. ${bc.settimane} · ${bc.modalita}</div>
+      <div style="font-size:12px;color:var(--t2);margin-top:4px">RPE fondamentali: <b>${bc.rpe_fondamentali}</b> · RPE isolamento: <b>${bc.rpe_isolamento}</b></div>
+      <div style="font-size:12px;color:var(--t2)">Intensificazione: <b>${bc.intensificazione ? 'SÌ (myo-reps/drop set)' : 'NO'}</b></div>
+      ${bc.nota ? `<div style="font-size:11px;color:var(--orange);margin-top:4px">📌 ${bc.nota}</div>` : ''}
+      ${bc.carichi ? `<div style="font-size:11px;color:var(--t3);margin-top:2px">${bc.carichi}</div>` : ''}
+    </div>` : '';
+
+  const avanzHtml = regole.avanzamento?.length ? `
+    <div style="margin-bottom:14px">
+      <div style="font-size:10px;font-weight:800;color:var(--t3);letter-spacing:1px;margin-bottom:6px">PROGRESSIONE CARICHI</div>
+      ${regole.avanzamento.map(r => `<div style="font-size:12px;color:var(--t2);padding:3px 0;line-height:1.4">→ ${r}</div>`).join('')}
+    </div>` : '';
+
+  const intHtml = (bc?.intensificazione) ? `
+    <div style="margin-bottom:14px">
+      <div style="font-size:10px;font-weight:800;color:var(--t3);letter-spacing:1px;margin-bottom:6px">TECNICHE INTENSIFICAZIONE</div>
+      ${regole.myo_reps ? `<div style="font-size:12px;color:var(--t2);padding:3px 0"><b>Myo-reps:</b> ${regole.myo_reps}</div>` : ''}
+      ${regole.drop_set ? `<div style="font-size:12px;color:var(--t2);padding:3px 0"><b>Drop set:</b> ${regole.drop_set}</div>` : ''}
+      ${regole.intensificazione ? `<div style="font-size:11px;color:var(--orange);padding:3px 0">⚡ ${regole.intensificazione}</div>` : ''}
+    </div>` : '';
+
+  const sicurHtml = `
+    <div style="margin-bottom:14px">
+      <div style="font-size:10px;font-weight:800;color:var(--t3);letter-spacing:1px;margin-bottom:6px">SICUREZZA</div>
+      ${regole.cervicale ? `<div style="font-size:12px;color:var(--t2);padding:3px 0">🦴 <b>Cervicale:</b> ${regole.cervicale}</div>` : ''}
+      ${regole.coccige ? `<div style="font-size:12px;color:var(--t2);padding:3px 0">🦴 <b>Coccige:</b> ${regole.coccige}</div>` : ''}
+      ${regole.stop ? `<div style="font-size:12px;color:var(--red);padding:3px 0;font-weight:600">🛑 ${regole.stop}</div>` : ''}
+    </div>`;
+
+  const setsHtml = regole.straight_sets ? `
+    <div style="margin-bottom:14px">
+      <div style="font-size:10px;font-weight:800;color:var(--t3);letter-spacing:1px;margin-bottom:6px">REGOLA SERIE</div>
+      <div style="font-size:12px;color:var(--t2)">${regole.straight_sets}</div>
+    </div>` : '';
+
+  showModal({
+    title: 'ℹ️ Guida Fase 3',
+    body: `${bloccoHtml}${setsHtml}${avanzHtml}${intHtml}${sicurHtml}`,
+    confirmText: 'OK, capito!'
+  });
+};
+
 function launchActive(title, sub) {
   document.getElementById('st-sel').style.display = 'none';
   document.getElementById('st-act').style.display = 'block';
@@ -325,8 +398,23 @@ document.addEventListener('visibilitychange', onVisibilityChange);
 
 // ── Render exercises ───────────────────────────────────────
 function renderExercises() {
+  const total = exState.length;
+  const done = exState.filter((ex) => {
+    const isBlock = Array.isArray(ex.componenti) && ex.componenti.length > 0;
+    return isBlock ? (ex._compDone || []).length >= ex.componenti.length : ex.sets.every(s => s.done);
+  }).length;
+
+  const progressHtml = `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:8px 12px;background:var(--bg2);border-radius:10px;border:1px solid var(--border)">
+      <div style="font-size:12px;font-weight:800;color:var(--t1)">Esercizio ${Math.min(done + 1, total)}/${total}</div>
+      <div style="flex:1;height:4px;background:var(--bg3);border-radius:2px;overflow:hidden">
+        <div style="height:100%;width:${(done / total) * 100}%;background:var(--accent);border-radius:2px;transition:width .3s"></div>
+      </div>
+      <div style="font-size:11px;color:var(--t3)">${done} ✓</div>
+    </div>`;
+
   document.getElementById('s-exercises').innerHTML =
-    exState.map((ex, ei) => renderExCard(ex, ei)).join('');
+    progressHtml + exState.map((ex, ei) => renderExCard(ex, ei)).join('');
 }
 
 function renderExCard(ex, ei) {
@@ -360,7 +448,7 @@ function renderExCard(ex, ei) {
   return `
     <div class="ex-live ${allDone ? 'completed' : ''}" id="exlive-${ei}">
       <div class="ex-head">
-        <span class="ex-name">${ex.name}</span>
+        <span class="ex-name"><span style="color:var(--t3);font-weight:800;margin-right:4px">#${ei + 1}</span>${ex.name}</span>
         <div style="display:flex;gap:8px;align-items:center">
           ${ex.notes ? `<button class="btn-icon" style="width:34px;height:34px;font-size:14px" onclick="toggleNote(${ei})">ℹ️</button>` : ''}
           ${ex.variante_sicura ? `<button class="btn-icon" style="width:34px;height:34px;font-size:13px" onclick="window.toggleVariant(${ei})">🔄</button>` : ''}
