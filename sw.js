@@ -1,4 +1,4 @@
-const CACHE = 'ft-v66';
+const CACHE = 'ft-v67';
 const BASE = self.location.pathname.substring(0, self.location.pathname.lastIndexOf('/') + 1);
 const FILES = [
   '',
@@ -25,6 +25,8 @@ const FILES = [
   'js/autocomplete.js',
   'js/ai_coach.js',
   'js/firebase-config.js',
+  'js/phase-config.js',
+  'js/widgets.js',
   'icon.svg',
   'img/anatomy.png'
 ].map(path => BASE + path);
