@@ -12,34 +12,57 @@ let checks = [];
 let formPhotos = [];
 
 const MEASURES = [
-  { key:'weight',    label:'Peso',    unit:'kg', icon:'⚖️' },
-  { key:'neck',      label:'Collo',   unit:'cm', icon:'🔴' },
-  { key:'shoulders', label:'Spalle',  unit:'cm', icon:'🔴' },
-  { key:'chest',     label:'Petto',   unit:'cm', icon:'🔴' },
-  { key:'waist',     label:'Vita',    unit:'cm', icon:'🔴' },
-  { key:'hips',      label:'Fianchi', unit:'cm', icon:'🔴' },
-  { key:'bicep',     label:'Braccia', unit:'cm', icon:'💪' },
-  { key:'thigh',     label:'Gambe',   unit:'cm', icon:'🦵' }
+  { key: 'weight',        label: 'Peso',                  unit: 'kg', icon: '⚖️' },
+  { key: 'waist_navel',   label: 'Vita ombelico',         unit: 'cm', icon: '🔴' },
+  { key: 'neck',          label: 'Collo',                 unit: 'cm', icon: '🔴' },
+  { key: 'chest',         label: 'Torace',                unit: 'cm', icon: '🔴' },
+  { key: 'shoulders',     label: 'Spalle',                unit: 'cm', icon: '🔴' },
+  { key: 'hips',          label: 'Fianchi',               unit: 'cm', icon: '🔴' },
+  { key: 'bicep_r_flex',  label: 'Braccio dx contratto',  unit: 'cm', icon: '💪' },
+  { key: 'thigh_r',       label: 'Coscia dx',             unit: 'cm', icon: '🦵' }
 ];
 
-// Backward-compat lookup: handles old bicep_l/r and thigh_l/r fields
+const POSE_LABELS = {
+  'frontale': 'Frontale',
+  'laterale': 'Laterale',
+  'schiena': 'Posteriore / Schiena',
+  'frontale_contratto': 'Frontale (braccia contratte)',
+  'schiena_contratto': 'Posteriore (braccia contratte)'
+};
+
+// Backward-compat lookup: handles new and old measurement field keys
 function getMeasure(ms, key) {
   if (!ms) return null;
   if (ms[key] != null) return ms[key];
-  if (key === 'bicep') {
+
+  if (key === 'waist_navel' || key === 'waist') {
+    return ms.waist_navel ?? ms.waist ?? null;
+  }
+  if (key === 'bicep_r_flex' || key === 'bicep') {
+    if (ms.bicep_r_flex != null) return ms.bicep_r_flex;
+    if (ms.bicep_r != null) return ms.bicep_r;
+    if (ms.bicep != null) return ms.bicep;
     const vals = [ms.bicep_l, ms.bicep_r].filter(v => v != null);
     return vals.length ? vals.reduce((a, b) => a + b) / vals.length : null;
   }
-  if (key === 'thigh') {
+  if (key === 'thigh_r' || key === 'thigh') {
+    if (ms.thigh_r != null) return ms.thigh_r;
+    if (ms.thigh != null) return ms.thigh;
     const vals = [ms.thigh_l, ms.thigh_r].filter(v => v != null);
     return vals.length ? vals.reduce((a, b) => a + b) / vals.length : null;
+  }
+  if (key === 'chest') {
+    return ms.chest ?? ms.torace ?? null;
   }
   return null;
 }
 
 // Photo helpers — supports both legacy string URLs and new { url, view } objects
 const photoUrl  = p => typeof p === 'string' ? p : p?.url;
-const photoView = p => typeof p === 'object' && p ? p.view : null;
+const photoView = p => {
+  const v = typeof p === 'object' && p ? p.view : null;
+  return POSE_LABELS[v] || v;
+};
 
 // ── Load & render ──────────────────────────────────────────
 async function loadChecks() {
@@ -361,11 +384,11 @@ async function loadCheckStats() {
 
   // Map: legend id -> { measureKey, label }
   const groups = {
-    chest:     { measureKey: 'chest',     label: 'PETTO' },
-    shoulders: { measureKey: 'shoulders', label: 'SPALLE' },
-    waist:     { measureKey: 'waist',     label: 'VITA' },
-    arms:      { measureKey: 'bicep',     label: 'BRACCIA' },
-    legs:      { measureKey: 'thigh',     label: 'GAMBE' }
+    chest:     { measureKey: 'chest',        label: 'TORACE' },
+    shoulders: { measureKey: 'shoulders',    label: 'SPALLE' },
+    waist:     { measureKey: 'waist_navel',  label: 'VITA OMBELICO' },
+    arms:      { measureKey: 'bicep_r_flex', label: 'BRACCIO DX CONTRATTO' },
+    legs:      { measureKey: 'thigh_r',      label: 'COSCIA DX' }
   };
 
   // Collect values for bar scaling
@@ -737,9 +760,10 @@ window.openNewCheck = function() {
       img.src = URL.createObjectURL(f);
       const sel = document.createElement('select');
       sel.style.cssText = 'font-size:10px;background:var(--bg3);color:var(--t2);border:1px solid var(--border2);border-radius:6px;padding:3px 5px;width:82px;text-align:center';
-      ['frontale','laterale','schiena'].forEach(v => {
+      ['frontale', 'laterale', 'schiena', 'frontale_contratto', 'schiena_contratto'].forEach(v => {
         const opt = document.createElement('option');
-        opt.value = v; opt.textContent = v.charAt(0).toUpperCase() + v.slice(1);
+        opt.value = v;
+        opt.textContent = POSE_LABELS[v] || v;
         sel.appendChild(opt);
       });
       sel.addEventListener('change', () => { formPhotos[i].view = sel.value; });
@@ -769,6 +793,11 @@ window.saveCheck = async function() {
     const v = document.getElementById(`ck-${m.key}`)?.value;
     measurements[m.key] = v ? parseFloat(v) : null;
   });
+
+  // Backward compatibility alias keys for legacy readers
+  if (measurements.waist_navel != null) measurements.waist = measurements.waist_navel;
+  if (measurements.bicep_r_flex != null) measurements.bicep = measurements.bicep_r_flex;
+  if (measurements.thigh_r != null) measurements.thigh = measurements.thigh_r;
 
   showToast('💾 Salvataggio...', 'info');
 

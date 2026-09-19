@@ -162,15 +162,26 @@ export async function generatePDF(exportModel) {
   y += 14;
 
   if (checks && checks.length > 0) {
-    const checkHeaders = [['Data Check', 'Peso (kg)', 'Delta Peso', '% Massa Grassa', '% Massa Muscolare', 'Misure (cm) / Note']];
+    const POSE_SHORT_LABELS = {
+      'frontale': 'Frontale',
+      'laterale': 'Laterale',
+      'schiena': 'Posteriore',
+      'frontale_contratto': 'Front. contr.',
+      'schiena_contratto': 'Post. contr.'
+    };
+
+    const checkHeaders = [['Data Check', 'Peso (kg)', 'Delta Peso', '% Grasso', '% Muscolo', 'Misure Antropometriche (cm) / Note']];
     const checkRows = checks.map(c => {
       const ms = c.measurements || {};
       const msParts = [];
-      if (ms.chest) msParts.push(`Petto:${ms.chest}`);
-      if (ms.waist) msParts.push(`Vita:${ms.waist}`);
-      if (ms.bicep) msParts.push(`Braccia:${ms.bicep}`);
-      if (ms.thigh) msParts.push(`Gambe:${ms.thigh}`);
-      const msStr = msParts.length ? msParts.join(' ') : '—';
+      if (ms.waist_navel != null) msParts.push(`Vita omb:${ms.waist_navel}`);
+      if (ms.neck != null) msParts.push(`Collo:${ms.neck}`);
+      if (ms.chest != null) msParts.push(`Torace:${ms.chest}`);
+      if (ms.shoulders != null) msParts.push(`Spalle:${ms.shoulders}`);
+      if (ms.hips != null) msParts.push(`Fianchi:${ms.hips}`);
+      if (ms.bicep_r_flex != null) msParts.push(`Braccio dx:${ms.bicep_r_flex}`);
+      if (ms.thigh_r != null) msParts.push(`Coscia dx:${ms.thigh_r}`);
+      const msStr = msParts.length ? msParts.join(' | ') : '—';
 
       return [
         c.date,
@@ -190,6 +201,7 @@ export async function generatePDF(exportModel) {
         theme: 'grid',
         headStyles: { fillColor: darkHeader, textColor: [255, 255, 255] },
         styles: { fontSize: 8 },
+        columnStyles: { 5: { cellWidth: 220 } },
         margin: { left: 40, right: 40 }
       });
       y = doc.lastAutoTable.finalY + 20;
@@ -200,7 +212,7 @@ export async function generatePDF(exportModel) {
     checks.forEach(c => {
       if (c.photos && c.photos.length > 0) {
         c.photos.forEach(p => {
-          if (p.url) photosToLoad.push({ date: c.date, url: p.url, view: p.view || 'foto' });
+          if (p.url) photosToLoad.push({ date: c.date, url: p.url, view: p.view || 'frontale' });
         });
       }
     });
@@ -225,25 +237,25 @@ export async function generatePDF(exportModel) {
         }
 
         const dataUrl = await fetchImageAsDataURL(item.url);
+        const poseLabel = POSE_SHORT_LABELS[item.view] || item.view;
         if (dataUrl) {
           try {
             doc.addImage(dataUrl, 'JPEG', photoX, y, photoWidth, photoHeight);
             doc.setFontSize(8);
             doc.setFont('helvetica', 'normal');
             doc.setTextColor(...mutedColor);
-            doc.text(`${item.date} (${item.view})`, photoX, y + photoHeight + 12);
+            doc.text(`${item.date} (${poseLabel})`, photoX, y + photoHeight + 12);
           } catch (err) {
             console.warn('Failed to embed image into PDF:', err);
           }
         } else {
-          // If image download fails, render a helpful placeholder box with link text
           doc.setDrawColor(200, 200, 200);
           doc.setFillColor(245, 245, 245);
           doc.rect(photoX, y, photoWidth, photoHeight, 'FD');
           doc.setFontSize(8);
           doc.setTextColor(...mutedColor);
           doc.text(`📸 ${item.date}`, photoX + 10, y + 50);
-          doc.text(`(${item.view})`, photoX + 10, y + 65);
+          doc.text(`(${poseLabel})`, photoX + 10, y + 65);
         }
         photoX += photoWidth + 20;
       }

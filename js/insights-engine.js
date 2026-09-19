@@ -533,15 +533,36 @@ export function buildExportModel(metrics, rankedInsights, actionPlan, validDays,
     }
   }
 
+  const extractMs = (ms, key) => {
+    if (!ms) return null;
+    if (ms[key] != null) return ms[key];
+    if (key === 'waist_navel' || key === 'waist') return ms.waist_navel ?? ms.waist ?? null;
+    if (key === 'bicep_r_flex' || key === 'bicep') return ms.bicep_r_flex ?? ms.bicep_r ?? ms.bicep ?? null;
+    if (key === 'thigh_r' || key === 'thigh') return ms.thigh_r ?? ms.thigh ?? null;
+    if (key === 'chest') return ms.chest ?? ms.torace ?? null;
+    return null;
+  };
+
   const checks = periodChecks.map((c, idx, arr) => {
     const prev = idx > 0 ? arr[idx - 1] : null;
     const weightDelta = prev && c.weight != null && prev.weight != null
       ? Number((c.weight - prev.weight).toFixed(1))
       : null;
 
+    const ms = c.measurements || {};
+    const formattedMs = {
+      waist_navel: extractMs(ms, 'waist_navel'),
+      neck: extractMs(ms, 'neck'),
+      chest: extractMs(ms, 'chest'),
+      shoulders: extractMs(ms, 'shoulders'),
+      hips: extractMs(ms, 'hips'),
+      bicep_r_flex: extractMs(ms, 'bicep_r_flex'),
+      thigh_r: extractMs(ms, 'thigh_r')
+    };
+
     const photos = (c.photos || []).map(p => {
-      if (typeof p === 'string') return { url: p, view: 'foto' };
-      if (typeof p === 'object' && p) return { url: p.url || '', view: p.view || 'foto' };
+      if (typeof p === 'string') return { url: p, view: 'frontale' };
+      if (typeof p === 'object' && p) return { url: p.url || '', view: p.view || 'frontale' };
       return null;
     }).filter(p => p && p.url);
 
@@ -552,7 +573,7 @@ export function buildExportModel(metrics, rankedInsights, actionPlan, validDays,
       weightDelta,
       bodyFat: c.body_fat || null,
       muscleMass: c.muscle_mass || null,
-      measurements: c.measurements || {},
+      measurements: formattedMs,
       notes: c.notes || '',
       photos
     };
