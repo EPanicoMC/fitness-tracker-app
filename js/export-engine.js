@@ -23,6 +23,25 @@ async function ensureJsPDFLoaded() {
 }
 
 /**
+ * Helper to fetch image URL and convert to DataURL (base64) for jsPDF embedding
+ */
+async function fetchImageAsDataURL(url) {
+  try {
+    const res = await fetch(url, { mode: 'cors' });
+    const blob = await res.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch (e) {
+    console.warn('Failed to load image for PDF embedding:', url, e);
+    return null;
+  }
+}
+
+/**
  * Generates and downloads a structured PDF report for the given export model.
  */
 export async function generatePDF(exportModel) {
@@ -31,58 +50,67 @@ export async function generatePDF(exportModel) {
   const jsPDFClass = await ensureJsPDFLoaded();
   const doc = new jsPDFClass({ unit: 'pt', format: 'a4' });
 
-  const { meta, metrics, insights, actionPlan, dailyTable } = exportModel;
+  const { meta, metrics, insights, actionPlan, dailyTable, workoutSessions, exerciseProgressions, checks } = exportModel;
 
-  const primaryColor = [255, 106, 0];   // #ff6a00 (Accent)
-  const textColor = [35, 42, 47];      // #232a2f
-  const mutedColor = [92, 105, 112];   // #5c6970
+  const primaryColor = [255, 106, 0];   // #ff6a00 (Accent Orange)
+  const darkHeader = [35, 42, 47];      // #232a2f
+  const textColor = [35, 42, 47];
+  const mutedColor = [92, 105, 112];
 
   let y = 40;
 
+  const checkAddPage = (neededSpace = 60) => {
+    if (y + neededSpace > 780) {
+      doc.addPage();
+      y = 40;
+    }
+  };
+
   // Title & Header
-  doc.setFontSize(22);
+  doc.setFontSize(20);
   doc.setTextColor(...primaryColor);
   doc.setFont('helvetica', 'bold');
-  doc.text('KOVA. — Andamento Fitness', 40, y);
+  doc.text('KOVA. — Report Tecnico Fitness & Coach', 40, y);
 
-  y += 20;
-  doc.setFontSize(10);
+  y += 18;
+  doc.setFontSize(9);
   doc.setTextColor(...mutedColor);
   doc.setFont('helvetica', 'normal');
   doc.text(`Periodo: ${meta.dateFrom} – ${meta.dateTo}  |  Generato il: ${meta.generatedAt}`, 40, y);
-  doc.text(`Giorni registrati: ${meta.daysLogged} su ${meta.totalDays}`, 40, y + 14);
+  doc.text(`Giorni registrati: ${meta.daysLogged} su ${meta.totalDays}`, 40, y + 12);
 
-  y += 35;
+  y += 28;
   doc.setDrawColor(220, 224, 226);
   doc.line(40, y, 555, y);
 
-  // Section 1: Executive Summary
+  // 1. Executive Summary & AI Insights
   y += 20;
-  doc.setFontSize(14);
+  doc.setFontSize(13);
   doc.setTextColor(...textColor);
   doc.setFont('helvetica', 'bold');
-  doc.text('1. Sintesi del Periodo', 40, y);
+  doc.text('1. Sintesi Analitica del Periodo', 40, y);
 
-  y += 18;
-  doc.setFontSize(10);
+  y += 16;
+  doc.setFontSize(9.5);
   doc.setFont('helvetica', 'normal');
 
-  const primaryInsightText = insights.primary
-    ? `${insights.primary.title}: ${insights.primary.evidence}`
-    : 'Alimentazione ed allenamenti in linea con gli obiettivi previsti.';
+  const primaryInsightText = insights?.primary
+    ? `📌 ${insights.primary.title}: ${insights.primary.evidence} → ${insights.primary.recommendedAction}`
+    : 'Alimentazione ed allenamenti in linea con gli obiettivi previsti nel periodo.';
 
   const splitSummary = doc.splitTextToSize(primaryInsightText, 515);
   doc.text(splitSummary, 40, y);
-  y += (splitSummary.length * 14) + 10;
+  y += (splitSummary.length * 13) + 12;
 
-  // Section 2: Energy & Macros Table
-  doc.setFontSize(14);
+  // 2. Energy & Macros Table
+  checkAddPage(120);
+  doc.setFontSize(13);
   doc.setFont('helvetica', 'bold');
   doc.text('2. Calorie e Macronutrienti (Medie Giornaliere)', 40, y);
-  y += 15;
+  y += 12;
 
-  const tableHeaders = [['Metrica', 'Effettivo', 'Target', 'Scostamento / Giorno']];
-  const tableRows = [
+  const nutHeaders = [['Metrica', 'Effettivo Medio', 'Target Dietetico', 'Scostamento Giornaliero']];
+  const nutRows = [
     ['Calorie', `${metrics.calories.averageActual} kcal`, `${metrics.calories.averageTarget} kcal`, `${metrics.calories.averageDelta > 0 ? '+' : ''}${metrics.calories.averageDelta} kcal`],
     ['Proteine', `${metrics.protein.avgActual} g`, `${metrics.protein.avgTarget} g`, `${metrics.protein.avgDelta > 0 ? '+' : ''}${metrics.protein.avgDelta} g`],
     ['Grassi', `${metrics.fat.avgActual} g`, `${metrics.fat.avgTarget} g`, `${metrics.fat.avgDelta > 0 ? '+' : ''}${metrics.fat.avgDelta} g`],
@@ -92,39 +120,212 @@ export async function generatePDF(exportModel) {
   if (doc.autoTable) {
     doc.autoTable({
       startY: y,
-      head: tableHeaders,
-      body: tableRows,
+      head: nutHeaders,
+      body: nutRows,
       theme: 'striped',
-      headStyles: { fillColor: primaryColor },
+      headStyles: { fillColor: primaryColor, textColor: [255, 255, 255], fontStyle: 'bold' },
+      styles: { fontSize: 8.5 },
       margin: { left: 40, right: 40 }
     });
     y = doc.lastAutoTable.finalY + 20;
-  } else {
-    // Fallback if autoTable not available
-    tableRows.forEach(row => {
-      doc.text(`${row[0]}: ${row[1]} / ${row[2]} (${row[3]})`, 40, y);
-      y += 14;
-    });
-    y += 15;
   }
 
-  // Section 3: Training Summary
-  doc.setFontSize(14);
+  // 3. Detailed Workout Logs (OGNI SEDUTA DEL PERIODO)
+  checkAddPage(100);
+  doc.setFontSize(13);
   doc.setFont('helvetica', 'bold');
-  doc.text('3. Allenamenti', 40, y);
-  y += 18;
-  doc.setFontSize(10);
+  doc.setTextColor(...textColor);
+  doc.text('3. Registro Dettagliato Sedute di Allenamento', 40, y);
+  y += 14;
+
+  doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text(`Allenamenti completati: ${metrics.training.completedCount} su ${metrics.training.plannedCount} pianificati.`, 40, y);
-  y += 25;
+  doc.setTextColor(...mutedColor);
+  doc.text(`Sedute completate nel periodo: ${metrics.training.completedCount} su ${metrics.training.plannedCount} pianificate.`, 40, y);
+  y += 16;
 
-  // Section 4: Daily Breakdown Table
-  doc.setFontSize(14);
+  if (workoutSessions && workoutSessions.length > 0) {
+    workoutSessions.forEach((s, idx) => {
+      checkAddPage(100);
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(...primaryColor);
+      doc.text(`Seduta ${idx + 1}: ${s.sessionName} (${s.date})`, 40, y);
+
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(...mutedColor);
+      const metaLine = `Durata: ${s.durationMin ? `${s.durationMin} min` : 'N/D'}  |  Volume Totale: ${s.totalVolumeKg} kg${s.notes ? `  |  Note: ${s.notes}` : ''}`;
+      doc.text(metaLine, 40, y + 11);
+      y += 22;
+
+      if (s.exercises && s.exercises.length > 0) {
+        const exHeaders = [['Esercizio', 'Serie × Ripetizioni / Pesi / RPE', 'Carico Max', 'Volume (kg)']];
+        const exRows = s.exercises.map(ex => [
+          ex.name,
+          ex.setsDetail || '—',
+          `${ex.maxKg} kg`,
+          `${ex.volume} kg`
+        ]);
+
+        if (doc.autoTable) {
+          doc.autoTable({
+            startY: y,
+            head: exHeaders,
+            body: exRows,
+            theme: 'grid',
+            headStyles: { fillColor: darkHeader, textColor: [255, 255, 255] },
+            styles: { fontSize: 8 },
+            columnStyles: { 0: { cellWidth: 140 }, 1: { cellWidth: 230 } },
+            margin: { left: 40, right: 40 }
+          });
+          y = doc.lastAutoTable.finalY + 16;
+        }
+      }
+    });
+  } else {
+    doc.setFontSize(9);
+    doc.setTextColor(...mutedColor);
+    doc.text('Nessuna seduta di allenamento registrata nel periodo selezionato.', 40, y);
+    y += 20;
+  }
+
+  // 4. Progressioni Carichi per Esercizio
+  if (exerciseProgressions && exerciseProgressions.length > 0) {
+    checkAddPage(120);
+    doc.setFontSize(13);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...textColor);
+    doc.text('4. Progressioni Carichi per Esercizio', 40, y);
+    y += 14;
+
+    const progHeaders = [['Esercizio', 'Sedute', 'Carico Iniziale', 'Carico Max / Finale', 'Delta Peso', 'Volume Cumulato']];
+    const progRows = exerciseProgressions.map(p => [
+      p.name,
+      `${p.sessionCount}`,
+      `${p.initialLoad} kg`,
+      `${p.finalLoad} kg`,
+      `${p.deltaKg > 0 ? '+' : ''}${p.deltaKg} kg`,
+      `${p.totalVolumeInPeriod} kg`
+    ]);
+
+    if (doc.autoTable) {
+      doc.autoTable({
+        startY: y,
+        head: progHeaders,
+        body: progRows,
+        theme: 'striped',
+        headStyles: { fillColor: primaryColor, textColor: [255, 255, 255] },
+        styles: { fontSize: 8 },
+        margin: { left: 40, right: 40 }
+      });
+      y = doc.lastAutoTable.finalY + 20;
+    }
+  }
+
+  // 5. Check Corporei & Misure Antropometriche
+  checkAddPage(120);
+  doc.setFontSize(13);
   doc.setFont('helvetica', 'bold');
-  doc.text('4. Dettaglio Giornaliero', 40, y);
-  y += 15;
+  doc.setTextColor(...textColor);
+  doc.text('5. Check Corporei e Misure Antropometriche', 40, y);
+  y += 14;
 
-  const dailyHeaders = [['Data', 'Stato', 'Kcal', 'Proteine', 'Grassi', 'Carbo', 'Workout']];
+  if (checks && checks.length > 0) {
+    const checkHeaders = [['Data Check', 'Peso (kg)', 'Delta Peso', '% Massa Grassa', '% Massa Muscolare', 'Misure (cm) / Note']];
+    const checkRows = checks.map(c => {
+      const ms = c.measurements || {};
+      const msParts = [];
+      if (ms.chest) msParts.push(`Petto:${ms.chest}`);
+      if (ms.waist) msParts.push(`Vita:${ms.waist}`);
+      if (ms.bicep) msParts.push(`Braccia:${ms.bicep}`);
+      if (ms.thigh) msParts.push(`Gambe:${ms.thigh}`);
+      const msStr = msParts.length ? msParts.join(' ') : '—';
+
+      return [
+        c.date,
+        c.weight ? `${c.weight} kg` : '—',
+        c.weightDelta !== null ? `${c.weightDelta > 0 ? '+' : ''}${c.weightDelta} kg` : '—',
+        c.bodyFat ? `${c.bodyFat}%` : '—',
+        c.muscleMass ? `${c.muscleMass}%` : '—',
+        `${msStr}${c.notes ? ` (${c.notes})` : ''}`
+      ];
+    });
+
+    if (doc.autoTable) {
+      doc.autoTable({
+        startY: y,
+        head: checkHeaders,
+        body: checkRows,
+        theme: 'grid',
+        headStyles: { fillColor: darkHeader, textColor: [255, 255, 255] },
+        styles: { fontSize: 8 },
+        margin: { left: 40, right: 40 }
+      });
+      y = doc.lastAutoTable.finalY + 20;
+    }
+
+    // Photo Gallery Section (if photos present)
+    const photosToLoad = [];
+    checks.forEach(c => {
+      if (c.photos && c.photos.length > 0) {
+        c.photos.forEach(p => {
+          if (p.url) photosToLoad.push({ date: c.date, url: p.url, view: p.view });
+        });
+      }
+    });
+
+    if (photosToLoad.length > 0) {
+      checkAddPage(150);
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(...primaryColor);
+      doc.text(`📸 Foto Check Corporei (${photosToLoad.length} foto nel periodo)`, 40, y);
+      y += 15;
+
+      let photoX = 40;
+      const photoWidth = 100;
+      const photoHeight = 100;
+
+      for (const item of photosToLoad) {
+        if (photoX + photoWidth > 555) {
+          photoX = 40;
+          y += photoHeight + 30;
+          checkAddPage(photoHeight + 30);
+        }
+
+        const dataUrl = await fetchImageAsDataURL(item.url);
+        if (dataUrl) {
+          try {
+            doc.addImage(dataUrl, 'JPEG', photoX, y, photoWidth, photoHeight);
+            doc.setFontSize(7.5);
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(...mutedColor);
+            doc.text(`${item.date} (${item.view})`, photoX, y + photoHeight + 10);
+          } catch (err) {
+            console.warn('Failed to embed image into PDF:', err);
+          }
+        }
+        photoX += photoWidth + 20;
+      }
+      y += photoHeight + 30;
+    }
+  } else {
+    doc.setFontSize(9);
+    doc.setTextColor(...mutedColor);
+    doc.text('Nessun check-in registrato nel periodo selezionato.', 40, y);
+    y += 20;
+  }
+
+  // 6. Dettaglio Giornaliero Completo (Nutrizione e Stato)
+  checkAddPage(140);
+  doc.setFontSize(13);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(...textColor);
+  doc.text('6. Registro Giornaliero Dieta & Allenamento', 40, y);
+  y += 14;
+
+  const dailyHeaders = [['Data', 'Stato', 'Calorie (Eff/Tgt)', 'Proteine', 'Grassi', 'Carbo', 'Workout']];
   const dailyRows = dailyTable.map(d => [
     d.date,
     d.status,
@@ -141,14 +342,15 @@ export async function generatePDF(exportModel) {
       head: dailyHeaders,
       body: dailyRows,
       theme: 'grid',
-      headStyles: { fillColor: [50, 60, 70] },
+      headStyles: { fillColor: darkHeader, textColor: [255, 255, 255] },
       styles: { fontSize: 8 },
       margin: { left: 40, right: 40 }
     });
+    y = doc.lastAutoTable.finalY + 20;
   }
 
   // Save PDF
-  const filename = `andamento-fitness_${meta.dateFrom}_${meta.dateTo}.pdf`;
+  const filename = `report-coach_${meta.dateFrom}_${meta.dateTo}.pdf`;
   doc.save(filename);
   return filename;
 }

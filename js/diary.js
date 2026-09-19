@@ -1172,8 +1172,31 @@ window.triggerExportPDF = async function() {
       curr.setDate(curr.getDate() + 1);
     }
 
+    let periodChecks = [];
+    try {
+      const checksSnap = await getDocs(query(
+        collection(db, 'users', getUserId(), 'checks'),
+        orderBy('date', 'asc')
+      ));
+      periodChecks = checksSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch (err) {
+      console.warn('Checks fetch for PDF export failed:', err);
+    }
+
     const report = analyzeWeeklyData(dates, allRecentLogs, programData, _dietPlanCache, settingsData, TODAY);
-    const exportModel = buildExportModel(report.metrics, report.rankedInsights, report.actionPlan, report.validDays, dates, _exportDateFrom, _exportDateTo);
+    const exportModel = buildExportModel(
+      report.metrics,
+      report.rankedInsights,
+      report.actionPlan,
+      report.validDays,
+      dates,
+      _exportDateFrom,
+      _exportDateTo,
+      {
+        allDays: report.allDays,
+        checks: periodChecks
+      }
+    );
 
     const filename = await generatePDF(exportModel);
     showToast(`✅ PDF scaricato: ${filename}`);
@@ -1184,7 +1207,7 @@ window.triggerExportPDF = async function() {
   }
 };
 
-window.triggerExportCSV = function() {
+window.triggerExportCSV = async function() {
   if (_exportDateFrom > _exportDateTo) return showToast('Intervallo date non valido', 'err');
 
   try {
@@ -1197,8 +1220,31 @@ window.triggerExportCSV = function() {
       curr.setDate(curr.getDate() + 1);
     }
 
+    let periodChecks = [];
+    try {
+      const checksSnap = await getDocs(query(
+        collection(db, 'users', getUserId(), 'checks'),
+        orderBy('date', 'asc')
+      ));
+      periodChecks = checksSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch (err) {
+      console.warn('Checks fetch for CSV export failed:', err);
+    }
+
     const report = analyzeWeeklyData(dates, allRecentLogs, programData, _dietPlanCache, settingsData, TODAY);
-    const exportModel = buildExportModel(report.metrics, report.rankedInsights, report.actionPlan, report.validDays, dates, _exportDateFrom, _exportDateTo);
+    const exportModel = buildExportModel(
+      report.metrics,
+      report.rankedInsights,
+      report.actionPlan,
+      report.validDays,
+      dates,
+      _exportDateFrom,
+      _exportDateTo,
+      {
+        allDays: report.allDays,
+        checks: periodChecks
+      }
+    );
 
     const filename = generateCSV(exportModel);
     showToast(`✅ CSV scaricato: ${filename}`);

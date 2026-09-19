@@ -516,7 +516,101 @@ export function validateAIResponse(aiText, metrics, rankedInsights) {
 /**
  * Builds shared export model for PDF / CSV.
  */
-export function buildExportModel(metrics, rankedInsights, actionPlan, validDays, dates, dateFrom, dateTo) {
+export function buildExportModel(metrics, rankedInsights, actionPlan, validDays, dates, dateFrom, dateTo, options = {}) {
+  const allDays = options.allDays || validDays;
+  const checksInput = options.checks || [];
+
+  // 1. Process Workout Sessions
+  const workoutSessions = (allDays || [])
+    .filter(d => d.log && d.log.workout && (d.log.workout.completed || (d.log.workout.exercises && d.log.workout.exercises.length > 0)))
+    .map(d => {
+      const w = d.log.workout;
+      const exercises = (w.exercises || []).map(ex => {
+        const sets = ex.sets || [];
+        const workingSets = sets.filter(s => !s.is_warmup);
+        const setsDetail = sets.map(s => `${s.reps || 0}×${s.kg || 0}kg${s.rpe ? ` @RPE${s.rpe}` : ''}`).join(', ');
+        const maxKg = Math.max(...sets.map(s => Number(s.kg) || 0), 0);
+        const exVolume = sets.reduce((sum, s) => sum + ((Number(s.reps) || 0) * (Number(s.kg) || 0)), 0);
+
+        return {
+          name: ex.name || 'Esercizio',
+          setsCount: workingSets.length || sets.length,
+          setsDetail: setsDetail || 'Serie completate',
+          maxKg,
+          volume: exVolume,
+          notes: ex.notes || ''
+        };
+      });
+
+      const totalVol = w.total_volume || w.total_volume_kg || exercises.reduce((a, b) => a + b.volume, 0);
+
+      return {
+        date: d.date,
+        sessionName: w.session_name || d.workoutName || 'Allenamento',
+        durationMin: w.duration_seconds ? Math.round(w.duration_seconds / 60) : null,
+        totalVolumeKg: totalVol,
+        exercises,
+        notes: w.notes || '',
+        coachFeedback: w.coach_feedback || ''
+      };
+    });
+
+  // 2. Process Exercise Load Progressions
+  const exMap = {};
+  workoutSessions.forEach(s => {
+    s.exercises.forEach(ex => {
+      if (!exMap[ex.name]) {
+        exMap[ex.name] = [];
+      }
+      exMap[ex.name].push({ date: s.date, maxKg: ex.maxKg, volume: ex.volume });
+    });
+  });
+
+  const exerciseProgressions = Object.keys(exMap).map(exName => {
+    const records = exMap[exName];
+    const initialLoad = records[0].maxKg;
+    const finalLoad = records[records.length - 1].maxKg;
+    const maxLoad = Math.max(...records.map(r => r.maxKg));
+    const totalVolumeInPeriod = records.reduce((a, b) => a + b.volume, 0);
+    const deltaKg = records.length > 1 ? Number((finalLoad - initialLoad).toFixed(1)) : 0;
+
+    return {
+      name: exName,
+      sessionCount: records.length,
+      initialLoad,
+      finalLoad,
+      maxLoad,
+      deltaKg,
+      totalVolumeInPeriod
+    };
+  });
+
+  // 3. Process Checks in Period
+  const checks = (checksInput || [])
+    .filter(c => c && c.date && dates.includes(c.date))
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((c, idx, arr) => {
+      const prev = idx > 0 ? arr[idx - 1] : null;
+      const weightDelta = prev && c.weight != null && prev.weight != null
+        ? Number((c.weight - prev.weight).toFixed(1))
+        : null;
+
+      return {
+        id: c.id,
+        date: c.date,
+        weight: c.weight || null,
+        weightDelta,
+        bodyFat: c.body_fat || null,
+        muscleMass: c.muscle_mass || null,
+        measurements: c.measurements || {},
+        notes: c.notes || '',
+        photos: (c.photos || []).map(p => ({
+          url: typeof p === 'string' ? p : p.url,
+          view: typeof p === 'object' ? (p.view || 'foto') : 'foto'
+        }))
+      };
+    });
+
   return {
     meta: {
       title: 'Andamento Fitness KOVA',
@@ -542,7 +636,10 @@ export function buildExportModel(metrics, rankedInsights, actionPlan, validDays,
       carbsActual: d.nut.carbs,
       carbsTarget: d.target.carbs,
       workout: d.workoutDone ? (d.workoutName || 'Completato') : (d.isTrainingDay ? 'Saltato' : 'Riposo')
-    }))
+    })),
+    workoutSessions,
+    exerciseProgressions,
+    checks
   };
 }
 
