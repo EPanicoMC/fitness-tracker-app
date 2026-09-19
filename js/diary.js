@@ -58,21 +58,27 @@ async function init() {
   try {
     await loadSmart(refs, (snaps) => {
       const [progSnap, logsSnap, settSnap, dietSnap] = snaps;
-      const activeDoc = progSnap.docs.find(d => d.data().active);
+      const activeDoc = progSnap?.docs?.find(d => d.data()?.active);
       if (activeDoc) programData = activeDoc.data();
-      settingsData = settSnap.exists() ? settSnap.data() : {};
-      _dietPlanCache = dietSnap.docs.find(d => d.data().active)?.data() || null;
+      settingsData = settSnap?.exists() ? settSnap.data() : {};
+      _dietPlanCache = dietSnap?.docs?.find(d => d.data()?.active)?.data() || null;
 
-      logsSnap.docs.forEach(d => { allRecentLogs[d.data().date] = d.data(); });
+      if (logsSnap?.docs) {
+        logsSnap.docs.forEach(d => {
+          const data = d.data();
+          if (data && data.date) allRecentLogs[data.date] = data;
+        });
+      }
 
-      const lastCompleted = logsSnap.docs
-        .map(d => d.data())
-        .find(d => d.workout?.completed);
+      const lastCompleted = logsSnap?.docs
+        ?.map(d => d.data())
+        ?.find(d => d && d.workout?.completed);
 
-      renderNextSession(lastCompleted);
-      buildWeekView();
-      loadCalendar();
+      try { renderNextSession(lastCompleted); } catch(e) { console.error('renderNextSession error:', e); }
+      try { buildWeekView(); } catch(e) { console.error('buildWeekView error:', e); }
+      try { loadCalendar(); } catch(e) { console.error('loadCalendar error:', e); }
     });
+
 
     // Carica eventi calendario in background
     try {
@@ -195,12 +201,14 @@ function renderGrid(year, month) {
 
   let phaseBarHtml = '';
   for (const f of monthFasi) {
-    const titleLow = f.titolo.toLowerCase();
+    if (!f || !f.titolo) continue;
+    const titleLow = (f.titolo || '').toLowerCase();
     let color = '#6e6e73';
     for (const [key, c] of Object.entries(FASE_COLORI)) { if (titleLow.includes(key)) { color = c; break; } }
-    const startD = f.data > monthStart ? f.data.split('-')[2].replace(/^0/, '') : '1';
-    const endD = f.data_fine < monthEnd ? f.data_fine.split('-')[2].replace(/^0/, '') : daysInMonth;
-    const shortTitle = f.titolo.replace(/^FASE \d+[b]?\s*—\s*/, '');
+    const startD = (f.data && f.data > monthStart) ? f.data.split('-')[2].replace(/^0/, '') : '1';
+    const endD = (f.data_fine && f.data_fine < monthEnd) ? f.data_fine.split('-')[2].replace(/^0/, '') : daysInMonth;
+    const shortTitle = (f.titolo || '').replace(/^FASE \d+[b]?\s*—\s*/, '');
+
     phaseBarHtml += `
       <div style="margin-bottom:8px;padding:8px 12px;border-radius:8px;background:${color}10;border-left:3px solid ${color}">
         <div style="font-size:10px;font-weight:800;letter-spacing:1px;color:${color}">${f.titolo}</div>

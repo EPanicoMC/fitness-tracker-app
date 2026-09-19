@@ -1,4 +1,4 @@
-const CACHE = 'ft-v67';
+const CACHE = 'ft-v68';
 const BASE = self.location.pathname.substring(0, self.location.pathname.lastIndexOf('/') + 1);
 const FILES = [
   '',
@@ -18,6 +18,8 @@ const FILES = [
   'js/programs.js',
   'js/diet.js',
   'js/diary.js',
+  'js/insights-engine.js',
+  'js/export-engine.js',
   'js/checks.js',
   'js/settings.js',
   'js/gemini.js',
@@ -30,6 +32,7 @@ const FILES = [
   'icon.svg',
   'img/anatomy.png'
 ].map(path => BASE + path);
+
 
 self.addEventListener('install', e => e.waitUntil(
   caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting())
