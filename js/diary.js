@@ -4,6 +4,7 @@ import {
 } from './firebase-config.js';
 import { getTodayString, getDayOfWeek, formatDateIT, formatDateShort, showToast, DAYS_IT, DAY_ORDER } from './app.js';
 import { generateWeeklyCoachReportAI, calcMacrosFromText, analyzeFoodImageAI } from './gemini.js';
+import { analyzeWeeklyData, buildAISummary, generateLocalFallback } from './insights-engine.js';
 
 const TODAY = getTodayString();
 let currentMonth = new Date(TODAY + 'T12:00:00');
@@ -839,7 +840,7 @@ function buildWeekView() {
   const el = document.getElementById('week-view');
   if (!el) return;
 
-  // Calcola ultimi 7 giorni (da 6 giorni fa ad oggi)
+  // Compute last 7 days
   const todayDate = new Date(TODAY + 'T12:00:00');
   const startDate = new Date(todayDate);
   startDate.setDate(todayDate.getDate() - 6);
@@ -851,150 +852,137 @@ function buildWeekView() {
     dates.push(d.toISOString().split('T')[0]);
   }
 
-  const wss = calcWeeklySmartScore(dates, allRecentLogs, programData, _dietPlanCache, settingsData);
+  // Analyze data with pure Insights Engine
+  const report = analyzeWeeklyData(dates, allRecentLogs, programData, _dietPlanCache, settingsData, TODAY);
 
-  // ── #recent-recap: Weekly Score Hero ──────────────────────
+  // 1. Render #recent-recap: Focus di Oggi Hero Card
   const recapEl = document.getElementById('recent-recap');
   if (recapEl) {
-    if (wss.finalScore !== null) {
-      const score = wss.finalScore;
-      const col   = score >= 85 ? '#1ce370' : score >= 70 ? '#4ade80' : score >= 55 ? '#fbbf24' : score >= 35 ? '#ff6a00' : '#ff453a';
-      const label = score >= 85 ? 'Eccellente' : score >= 70 ? 'Ottimo' : score >= 55 ? 'Nella media' : score >= 35 ? 'Da migliorare' : 'Critico';
+    if (report.focusInsights.length > 0) {
+      const topFocus = report.focusInsights[0];
+      const severityClass = topFocus.type === 'alert' ? 'insight-item--alert' 
+        : topFocus.type === 'warning' ? 'insight-item--warning' : 'insight-item--positive';
 
-      const r = 28, cx = 34, cy = 34;
-      const circ  = 2 * Math.PI * r;
-      const offset = circ * (1 - score / 100);
-
-      const pCol = (s) => s >= 80 ? 'var(--green)' : s >= 60 ? 'var(--yellow)' : 'var(--orange)';
-      const pillars = [
-        { label: '💪 Workout',   score: wss.workoutScore },
-        { label: '🍽 Nutrizione', score: wss.nutritionScore },
-        { label: '📋 Costanza',   score: wss.consistencyScore },
-      ].filter(p => p.score !== null);
-
-      const pillarsHtml = pillars.map(p => `
-        <div class="wss-pillar">
-          <span class="wss-pillar-label">${p.label}</span>
-          <div class="wss-pillar-bar">
-            <div class="pbb h6"><div class="pbf" style="width:${p.score}%;background:${pCol(p.score)}"></div></div>
-          </div>
-          <span class="wss-pillar-val" style="color:${pCol(p.score)}">${p.score}%</span>
-        </div>`).join('');
+      const otherInsights = report.focusInsights.slice(1).map(i => {
+        const c = i.type === 'alert' ? 'insight-item--alert' : i.type === 'warning' ? 'insight-item--warning' : 'insight-item--positive';
+        return `
+          <div class="insight-item ${c}">
+            <div class="insight-item-title">${i.title}</div>
+            <div class="insight-item-evidence">${i.evidence}</div>
+            <div class="insight-item-action">${i.action}</div>
+          </div>`;
+      }).join('');
 
       recapEl.innerHTML = `
-        <div class="card" style="margin-bottom:16px">
-          <div class="clabel" style="margin-bottom:12px"><i class="ri-bar-chart-box-line"></i> Weekly Performance</div>
-          <div style="display:flex;align-items:center;gap:16px">
-            <div style="flex-shrink:0;text-align:center">
-              <svg width="68" height="68" viewBox="0 0 68 68">
-                <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="5"/>
-                <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${col}" stroke-width="5"
-                  stroke-dasharray="${circ.toFixed(2)}" stroke-dashoffset="${offset.toFixed(2)}" stroke-linecap="round"
-                  transform="rotate(-90 ${cx} ${cy})" style="filter:drop-shadow(0 0 6px ${col}80)"/>
-                <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central"
-                  font-size="15" font-weight="900" fill="${col}">${score}</text>
-              </svg>
-              <div style="margin-top:2px;font-size:10px;font-weight:800;color:${col}">${label}</div>
-            </div>
-            <div style="flex:1;min-width:0">${pillarsHtml}</div>
+        <div class="insight-focus card">
+          <div class="insight-focus-header">
+            <span style="font-size:14px;font-weight:900;color:var(--t1)">📌 FOCUS DI OGGI</span>
+            <span class="insight-pill">7 GIORNI</span>
           </div>
+          <div class="insight-item ${severityClass}" style="margin-bottom:12px">
+            <div class="insight-item-title">${topFocus.title}</div>
+            <div class="insight-item-evidence">${topFocus.evidence}</div>
+            <div class="insight-item-action">➡️ ${topFocus.action}</div>
+          </div>
+          ${otherInsights}
         </div>`;
     } else {
-      recapEl.innerHTML = '';
+      recapEl.innerHTML = `
+        <div class="insight-focus card">
+          <div class="insight-focus-header">
+            <span style="font-size:14px;font-weight:900;color:var(--t1)">📌 FOCUS DI OGGI</span>
+            <span class="insight-pill">7 GIORNI</span>
+          </div>
+          <div class="insight-item insight-item--positive">
+            <div class="insight-item-title">Andamento Regolare</div>
+            <div class="insight-item-evidence">I tuoi dati nutrizionali ed allenamenti sono ben bilanciati.</div>
+            <div class="insight-item-action">Continua a mantenere questo ritmo costante!</div>
+          </div>
+        </div>`;
     }
   }
 
-  // ── #week-view: 7-Day Heatmap + Smart Tips ────────────────
-  const heatCards = dates.map(dateStr => {
-    const log    = allRecentLogs[dateStr];
-    const isFut  = dateStr > TODAY;
-    const isToday = dateStr === TODAY;
-    const dayDow = getDayOfWeek(dateStr);
-    let isOn = !!(programData?.schedule?.[dayDow]);
-    if (log?.is_training_day != null) isOn = log.is_training_day;
+  // 2. Render #week-view: Action Plan + Trend Overview + AI Coach Card
+  const actionItemsHtml = (report.actionPlan && report.actionPlan.length > 0)
+    ? report.actionPlan.flatMap(ap => ap.actions.map(act => `
+        <div class="action-plan-item">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--t1)">• ${act.text}</div>
+            <div class="action-plan-rationale">${act.rationale}</div>
+          </div>
+        </div>`
+      )).join('')
+    : '<div class="action-plan-item"><div style="font-size:12px;color:var(--t2)">Nessuna azione urgente consigliata oggi.</div></div>';
 
-    let ico;
-    if (isFut)                        ico = isOn ? '📅' : '😴';
-    else if (log?.workout?.completed) ico = '✅';
-    else if (!isOn)                   ico = '😴';
-    else if (log)                     ico = '⚠️';
-    else                              ico = '❌';
-
-    const kcal = log?.nutrition?.totals?.kcal || 0;
-    const isOn2 = log?.is_training_day != null ? log.is_training_day : isOn;
-    const dayPlan = isOn2 ? _dietPlanCache?.day_on : _dietPlanCache?.day_off;
-    const targetKcal = dayPlan?.kcal || 0;
-    const kcalPct = targetKcal > 0 && kcal > 0 ? Math.min(130, Math.round(kcal / targetKcal * 100)) : 0;
-
-    let barCol = 'var(--accent)';
-    if (kcalPct > 115)        barCol = 'var(--red)';
-    else if (kcalPct >= 90)   barCol = 'var(--green)';
-    else if (kcalPct >= 70)   barCol = 'var(--yellow)';
-    else if (kcalPct > 0)     barCol = 'var(--orange)';
-
-    const dayShort = new Date(dateStr + 'T12:00:00').toLocaleDateString('it-IT', { weekday: 'short' }).replace('.', '');
-    const dayNum   = new Date(dateStr + 'T12:00:00').getDate();
-
-    const miniR = 11, miniCx = 14, miniCy = 14;
-    const miniCirc   = 2 * Math.PI * miniR;
-    const miniOffset = miniCirc * (1 - Math.min(1, kcalPct / 100));
-    const kcalMini = kcalPct > 0
-      ? `<svg width="28" height="28" viewBox="0 0 28 28">
-          <circle cx="${miniCx}" cy="${miniCy}" r="${miniR}" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="3"/>
-          <circle cx="${miniCx}" cy="${miniCy}" r="${miniR}" fill="none" stroke="${barCol}" stroke-width="3"
-            stroke-dasharray="${miniCirc.toFixed(2)}" stroke-dashoffset="${miniOffset.toFixed(2)}" stroke-linecap="round"
-            transform="rotate(-90 ${miniCx} ${miniCy})"/>
-          <text x="${miniCx}" y="${miniCy}" text-anchor="middle" dominant-baseline="central" font-size="7" font-weight="800" fill="${barCol}">${kcalPct}%</text>
-        </svg>`
-      : `<div style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--t3)">—</div>`;
-
-    return `
-      <div class="day-heat-card${isToday ? ' day-today' : ''}" onclick="selectWeekDay('${dateStr}')">
-        <div class="day-heat-label" style="${isToday ? 'color:var(--accent)' : ''}">${dayShort}</div>
-        <div style="font-size:9px;color:var(--t3);font-weight:600;margin-top:-1px">${dayNum}</div>
-        <div class="day-heat-ico">${ico}</div>
-        ${kcalMini}
-      </div>`;
-  }).join('');
-
-  const tipsHtml = wss.tips.length > 0 ? `
-    <p class="sdiv" style="margin-top:18px">Consigli</p>
-    ${wss.tips.map(tip => `
-      <div class="tip-card tip-${tip.type}">
-        <div class="tip-card-icon">${tip.icon}</div>
-        <div>
-          <div class="tip-card-title">${tip.title}</div>
-          <div class="tip-card-text">${tip.text}</div>
+  const t = report.trendOverview;
+  const metricsHtml = t ? `
+    <div class="trend-overview card" style="margin-top:16px">
+      <div class="clabel" style="margin-bottom:12px"><i class="ri-line-chart-line"></i> Panoramica Trend (7 gg)</div>
+      
+      <div class="trend-metric trend-metric--${t.calories?.status || 'good'}">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+          <span class="trend-metric-label">🔥 Calorie</span>
+          <span class="trend-metric-values">${t.calories?.value} / ${t.calories?.target} kcal</span>
         </div>
-      </div>`).join('')}` : '';
+        <div class="pbb h6"><div class="pbf" style="width:${Math.min(100, t.calories?.pct || 0)}%"></div></div>
+        <div class="trend-metric-detail">${t.calories?.detail || ''}</div>
+      </div>
 
-  const s = new Date(dates[0] + 'T12:00:00');
-  const e = new Date(dates[6] + 'T12:00:00');
-  const dateRangeLabel = `${s.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} – ${e.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}`;
+      <div class="trend-metric trend-metric--${t.protein?.status || 'good'}" style="margin-top:12px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+          <span class="trend-metric-label">🥩 Proteine</span>
+          <span class="trend-metric-values">${t.protein?.value} / ${t.protein?.target} g</span>
+        </div>
+        <div class="pbb h6"><div class="pbf" style="width:${Math.min(100, t.protein?.pct || 0)}%"></div></div>
+        <div class="trend-metric-detail">${t.protein?.detail || ''}</div>
+      </div>
+
+      <div class="trend-metric trend-metric--${t.fat?.status || 'good'}" style="margin-top:12px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+          <span class="trend-metric-label">🥑 Grassi</span>
+          <span class="trend-metric-values">${t.fat?.value} / ${t.fat?.target} g</span>
+        </div>
+        <div class="pbb h6"><div class="pbf" style="width:${Math.min(100, t.fat?.pct || 0)}%"></div></div>
+        <div class="trend-metric-detail">${t.fat?.detail || ''}</div>
+      </div>
+
+      <div class="trend-metric trend-metric--${t.carbs?.status || 'good'}" style="margin-top:12px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+          <span class="trend-metric-label">🌾 Carboidrati</span>
+          <span class="trend-metric-values">${t.carbs?.value} / ${t.carbs?.target} g</span>
+        </div>
+        <div class="pbb h6"><div class="pbf" style="width:${Math.min(100, t.carbs?.pct || 0)}%"></div></div>
+        <div class="trend-metric-detail">${t.carbs?.detail || ''}</div>
+      </div>
+    </div>` : '';
+
+  const fallbackText = generateLocalFallback(report);
 
   el.innerHTML = `
-    <p class="sdiv" style="margin-bottom:10px">Ultimi 7 giorni · ${dateRangeLabel}</p>
-    <div class="day-heat-wrap">
-      <div class="day-heat-row">${heatCards}</div>
-    </div>
-    <div style="margin-top:5px;font-size:10px;color:var(--t3);text-align:center">Tocca un giorno per i dettagli</div>
-    
-    <!-- AI Weekly Coach Card -->
-    <div class="card" style="margin-top:18px;background:rgba(124,111,255,0.04);border:1px solid rgba(124,111,255,0.12);padding:18px;border-radius:18px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <span style="font-size:10px;font-weight:800;color:var(--accent);letter-spacing:0.5px">🤖 AI WEEKLY COACH</span>
-        <span style="font-size:9px;color:var(--t3);font-weight:700">FEEDBACK PERSONALIZZATO</span>
-      </div>
-      <p style="font-size:12px;color:var(--t2);line-height:1.55;margin-bottom:12px;text-align:left">
-        Analizza l'andamento settimanale delle tue calorie, macro, passi e allenamenti svolti per ricevere consigli strategici mirati.
-      </p>
-      <button class="btn btn-v btn-sm" onclick="window.generateWeeklyCoachReport()" style="width:100%;font-weight:700">
-        🧠 Genera Report AI Settimanale
-      </button>
+    <!-- Action Plan Card -->
+    <div class="action-plan card">
+      <div class="clabel" style="margin-bottom:12px"><i class="ri-checkbox-circle-line"></i> Piano Azione Prossimi Giorni</div>
+      ${actionItemsHtml}
     </div>
 
-    ${tipsHtml}`;
+    <!-- Trend Metrics -->
+    ${metricsHtml}
+
+    <!-- AI Weekly Coach Card -->
+    <div class="card ai-insight" style="margin-top:16px">
+      <div class="ai-insight-header">
+        <span style="font-size:11px;font-weight:800;color:var(--accent);letter-spacing:0.5px">🤖 AI WEEKLY COACH</span>
+        <span class="insight-pill">INTELLIGENZA ARTIFICIALE</span>
+      </div>
+      <div style="font-size:12px;color:var(--t2);line-height:1.5;margin-bottom:12px">
+        ${fallbackText}
+      </div>
+      <button class="btn btn-v btn-sm" onclick="window.generateWeeklyCoachReport()" style="width:100%;font-weight:700">
+        🧠 Genera Report AI Dettagliato
+      </button>
+    </div>`;
 }
+
 
 // Naviga al giorno selezionato nella heatmap: switcha al calendario e apre il detail
 window.selectWeekDay = function(dateStr) {

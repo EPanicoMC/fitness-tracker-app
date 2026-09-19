@@ -1,13 +1,32 @@
 import { requireAuth, loadSmart } from './app.js';
 import {
   db, getUserId, collection, doc, getDocs, addDoc, setDoc, deleteDoc,
-  query, where
+  query, where, orderBy, limit
 } from './firebase-config.js';
 import { showToast, showModal } from './app.js';
 import { AutoComplete, saveToLibrary } from './autocomplete.js';
 import { calcMacrosFromText } from './gemini.js';
 import { PHASE_CONFIG } from './phase-config.js';
-import { statusDot, getStatus, COLORS } from './widgets.js';
+import { statusDot, getStatus, COLORS, svgSparkline, svgHorizontalBar } from './widgets.js';
+
+// Data odierna in formato YYYY-MM-DD (scope modulo)
+const _today = new Date();
+const _pad = n => String(n).padStart(2, '0');
+const TODAY = `${_today.getFullYear()}-${_pad(_today.getMonth() + 1)}-${_pad(_today.getDate())}`;
+
+// Restituisce intervallo lunedi-domenica per una data
+function getWeekRange(todayStr) {
+  const d = new Date(todayStr + 'T00:00:00');
+  const dayOfWeek = d.getDay();
+  const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  const mon = new Date(d);
+  mon.setDate(d.getDate() - diff);
+  const sun = new Date(mon);
+  sun.setDate(mon.getDate() + 6);
+  const pad = n => String(n).padStart(2, '0');
+  const fmt = dt => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+  return { start: fmt(mon), end: fmt(sun) };
+}
 
 let diets     = [];
 let editingId = null;
@@ -524,9 +543,393 @@ function buildDietWidgets() {
     </div>`;
 }
 
+// ── Widget aderenza settimanale ──────────────────────────────
+async function buildAdherence() {
+  try {
+    const box = document.getElementById('diet-widgets');
+    if (!box) return;
+
+    const diet = diets.find(d => d.active);
+    if (!diet) return;
+
+    const userId = getUserId();
+    if (!userId) return;
+
+    const { start, end } = getWeekRange(TODAY);
+
+    // Query log giornalieri della settimana corrente
+    const logsRef = collection(db, 'users', userId, 'daily_logs');
+    const q = query(logsRef, where('date', '>=', start), where('date', '<=', end));
+    const snap = await getDocs(q);
+    const logs = {};
+    snap.forEach(d => { logs[d.data().date] = d.data(); });
+
+    // Numero pasti attesi dal piano attivo
+    const mealCountOn  = diet.day_on?.meals?.length  || 0;
+    const mealCountOff = diet.day_off?.meals?.length || 0;
+
+    // Genera le 7 celle lun-dom
+    const dayLabels = ['L', 'M', 'M', 'G', 'V', 'S', 'D'];
+    let completeDays = 0;
+    let totalDays = 0;
+
+    const cells = [];
+    const mon = new Date(start + 'T00:00:00');
+    for (let i = 0; i < 7; i++) {
+      const dt = new Date(mon);
+      dt.setDate(mon.getDate() + i);
+      const pad = n => String(n).padStart(2, '0');
+      const dateStr = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+      const log = logs[dateStr];
+
+      // Salta giorni futuri
+      if (dateStr > TODAY) {
+        cells.push(`<div class="w-adh-cell"><span style="font-size:10px;color:var(--t3)">${dayLabels[i]}</span>${statusDot('off')}</div>`);
+        continue;
+      }
+
+      totalDays++;
+
+      if (!log || !log.meals_state) {
+        // Non registrato
+        cells.push(`<div class="w-adh-cell"><span style="font-size:10px;color:var(--t3)">${dayLabels[i]}</span>${statusDot('off')}</div>`);
+        continue;
+      }
+
+      // Determina se giorno ON o OFF dal log
+      const isOn = log.is_training_day === true;
+      const expectedMeals = isOn ? mealCountOn : mealCountOff;
+      const targetKcal = isOn
+        ? (diet.day_on?.kcal || PHASE_CONFIG.kcal.training)
+        : (diet.day_off?.kcal || PHASE_CONFIG.kcal.rest);
+
+      // Conta pasti mangiati
+      const mealsState = log.meals_state || {};
+      const eatenCount = Object.values(mealsState).filter(m => m.eaten === true).length;
+      const allEaten = expectedMeals > 0 && eatenCount >= expectedMeals;
+
+      // Kcal consumate dal log
+      const logKcal = log.macro_totals?.kcal || log.total_kcal || 0;
+      const kcalInRange = Math.abs(logKcal - targetKcal) <= PHASE_CONFIG.kcal.tolerance;
+
+      let state;
+      if (allEaten && kcalInRange) {
+        state = 'ok';
+        completeDays++;
+      } else if (eatenCount > 0) {
+        state = 'warn';
+      } else {
+        state = 'off';
+      }
+
+      cells.push(`<div class="w-adh-cell"><span style="font-size:10px;color:var(--t3)">${dayLabels[i]}</span>${statusDot(state)}</div>`);
+    }
+
+    const pct = totalDays > 0 ? Math.round((completeDays / totalDays) * 100) : 0;
+
+    // Leva calorica: sbloccata se aderenza >= soglia S5
+    const levaLabel = pct >= PHASE_CONFIG.s5.adherence_min_pct ? 'sbloccata' : 'bloccata';
+
+    const html = `
+      <div class="w-card">
+        <div class="w-section">ADERENZA SETTIMANALE</div>
+        <div class="w-adherence" style="display:flex;gap:8px;justify-content:space-between;margin-bottom:8px">
+          ${cells.join('')}
+        </div>
+        <div class="w-status">${statusDot(getStatus(pct, PHASE_CONFIG.s5.adherence_min_pct))} ${pct}% · leva calorica ${levaLabel}</div>
+        <div style="font-size:10px;color:var(--t3);margin-top:4px">completo = tutte le righe compilate con opzione del piano, kcal entro ±${PHASE_CONFIG.kcal.tolerance} del target</div>
+      </div>`;
+
+    box.insertAdjacentHTML('beforeend', html);
+  } catch (e) {
+    console.warn('buildAdherence errore:', e);
+  }
+}
+
+// ── Widget medie 7 giorni ────────────────────────────────────
+async function buildAverages() {
+  try {
+    const box = document.getElementById('diet-widgets');
+    if (!box) return;
+
+    const userId = getUserId();
+    if (!userId) return;
+
+    // Calcola data 7 giorni fa
+    const sevenAgo = new Date(_today);
+    sevenAgo.setDate(_today.getDate() - 6);
+    const startDate = `${sevenAgo.getFullYear()}-${_pad(sevenAgo.getMonth() + 1)}-${_pad(sevenAgo.getDate())}`;
+
+    // Query log ultimi 7 giorni
+    const logsRef = collection(db, 'users', userId, 'daily_logs');
+    const q = query(logsRef, where('date', '>=', startDate), where('date', '<=', TODAY));
+    const snap = await getDocs(q);
+
+    if (snap.empty) {
+      box.insertAdjacentHTML('beforeend', `
+        <div class="w-card">
+          <div class="w-section">MEDIE 7 GIORNI</div>
+          <div class="w-empty">Nessun dato disponibile</div>
+        </div>`);
+      return;
+    }
+
+    let sumKcal = 0, sumProtein = 0, sumCarbs = 0, sumFats = 0, count = 0;
+    snap.forEach(d => {
+      const data = d.data();
+      const kcal = data.macro_totals?.kcal || data.total_kcal || 0;
+      const protein = data.macro_totals?.protein || data.total_protein || 0;
+      const carbs = data.macro_totals?.carbs || data.total_carbs || 0;
+      const fats = data.macro_totals?.fats || data.total_fats || 0;
+      if (kcal > 0) {
+        sumKcal += kcal;
+        sumProtein += protein;
+        sumCarbs += carbs;
+        sumFats += fats;
+        count++;
+      }
+    });
+
+    if (count === 0) {
+      box.insertAdjacentHTML('beforeend', `
+        <div class="w-card">
+          <div class="w-section">MEDIE 7 GIORNI</div>
+          <div class="w-empty">Nessun dato con kcal registrate</div>
+        </div>`);
+      return;
+    }
+
+    const avgKcal = Math.round(sumKcal / count);
+    const avgProtein = Math.round(sumProtein / count);
+    const avgCarbs = Math.round(sumCarbs / count);
+    const avgFats = Math.round(sumFats / count);
+
+    // Stato kcal rispetto al target settimanale
+    const kcalStatus = getStatus(avgKcal, PHASE_CONFIG.kcal.weekly_avg, { tolerance: PHASE_CONFIG.kcal.tolerance });
+    const kcalColor = kcalStatus === 'ok' ? `color:${COLORS.ok}` : kcalStatus === 'warn' ? `color:${COLORS.warn}` : `color:${COLORS.alert}`;
+
+    const html = `
+      <div class="w-card">
+        <div class="w-section">MEDIE 7 GIORNI</div>
+        <div class="w-row">
+          <span class="w-label">Media kcal</span>
+          <span class="w-big" style="${kcalColor}">${avgKcal}</span>
+          <span class="w-unit">/ ${PHASE_CONFIG.kcal.weekly_avg} target</span>
+        </div>
+        <div class="w-row">
+          <span class="w-label">Proteine</span>
+          <span class="w-val">${avgProtein}g / ${PHASE_CONFIG.macro.avg.protein}g</span>
+        </div>
+        <div class="w-row">
+          <span class="w-label">Carbo</span>
+          <span class="w-val">${avgCarbs}g / ${PHASE_CONFIG.macro.avg.carbs}g</span>
+        </div>
+        <div class="w-row">
+          <span class="w-label">Grassi</span>
+          <span class="w-val">${avgFats}g / ${PHASE_CONFIG.macro.avg.fats}g</span>
+        </div>
+      </div>`;
+
+    box.insertAdjacentHTML('beforeend', html);
+  } catch (e) {
+    console.warn('buildAverages errore:', e);
+  }
+}
+
+// ── Widget proteine in banda ─────────────────────────────────
+async function buildProteinBand() {
+  try {
+    const box = document.getElementById('diet-widgets');
+    if (!box) return;
+
+    const userId = getUserId();
+    if (!userId) return;
+
+    // Query ultimi 30 giorni
+    const thirtyAgo = new Date(_today);
+    thirtyAgo.setDate(_today.getDate() - 29);
+    const startDate = `${thirtyAgo.getFullYear()}-${_pad(thirtyAgo.getMonth() + 1)}-${_pad(thirtyAgo.getDate())}`;
+
+    const logsRef = collection(db, 'users', userId, 'daily_logs');
+    const q = query(logsRef, where('date', '>=', startDate), where('date', '<=', TODAY), orderBy('date', 'desc'));
+    const snap = await getDocs(q);
+
+    if (snap.empty) {
+      box.insertAdjacentHTML('beforeend', `
+        <div class="w-card">
+          <div class="w-section">PROTEINE IN BANDA</div>
+          <div class="w-empty">Nessun dato disponibile</div>
+        </div>`);
+      return;
+    }
+
+    // Raccogli dati proteici ordinati per data decrescente
+    const proteinDays = [];
+    snap.forEach(d => {
+      const data = d.data();
+      const protein = data.macro_totals?.protein || data.total_protein || null;
+      proteinDays.push({ date: data.date, protein });
+    });
+
+    // Ordina per data decrescente (piu recente prima)
+    proteinDays.sort((a, b) => b.date.localeCompare(a.date));
+
+    // Conta giorni consecutivi in banda partendo da oggi
+    const bandMin = PHASE_CONFIG.protein_band.min;
+    const bandMax = PHASE_CONFIG.protein_band.max;
+    let consecutiveDays = 0;
+    let lastBreakDate = null;
+
+    for (const day of proteinDays) {
+      if (day.protein == null) break;
+      if (day.protein >= bandMin && day.protein <= bandMax) {
+        consecutiveDays++;
+      } else {
+        lastBreakDate = day.date;
+        break;
+      }
+    }
+
+    // Formatta data ultima interruzione
+    const breakLabel = lastBreakDate || '—';
+
+    const html = `
+      <div class="w-card">
+        <div class="w-section">PROTEINE IN BANDA</div>
+        <div class="w-row">
+          <span class="w-big">${consecutiveDays}</span>
+          <span class="w-unit">giorni consecutivi in ${bandMin}–${bandMax}g</span>
+        </div>
+        <div class="w-row" style="margin-top:4px">
+          <span style="font-size:11px;color:var(--t3)">ultima interruzione: ${breakLabel}</span>
+        </div>
+      </div>`;
+
+    box.insertAdjacentHTML('beforeend', html);
+  } catch (e) {
+    console.warn('buildProteinBand errore:', e);
+  }
+}
+
+// ── Widget serate e drink ────────────────────────────────────
+async function buildDrinks() {
+  try {
+    const box = document.getElementById('diet-widgets');
+    if (!box) return;
+
+    const userId = getUserId();
+    if (!userId) return;
+
+    // Primo e ultimo giorno del mese corrente
+    const monthStart = `${_today.getFullYear()}-${_pad(_today.getMonth() + 1)}-01`;
+    const lastDay = new Date(_today.getFullYear(), _today.getMonth() + 1, 0).getDate();
+    const monthEnd = `${_today.getFullYear()}-${_pad(_today.getMonth() + 1)}-${_pad(lastDay)}`;
+
+    // Query log del mese
+    const logsRef = collection(db, 'users', userId, 'daily_logs');
+    const q = query(logsRef, where('date', '>=', monthStart), where('date', '<=', monthEnd));
+    const snap = await getDocs(q);
+
+    let nightsCount = 0;
+    let totalDrinks = 0;
+
+    snap.forEach(d => {
+      const data = d.data();
+      const drinks = data.drinks || 0;
+      if (drinks > 0) {
+        nightsCount++;
+        totalDrinks += drinks;
+      }
+    });
+
+    // Stato rispetto al target mensile
+    const nightsStatus = getStatus(
+      PHASE_CONFIG.drinks.expected_nights_per_month - nightsCount,
+      0,
+      { tolerance: 1 }
+    );
+
+    // Avviso terza serata
+    const warningHtml = nightsCount >= 3
+      ? `<div class="w-status">${statusDot('warn')} terza serata del mese: si rilegge il protocollo al check</div>`
+      : '';
+
+    const html = `
+      <div class="w-card">
+        <div class="w-section">SERATE E DRINK</div>
+        <div class="w-row">
+          <span class="w-label">Serate</span>
+          <span class="w-val">${nightsCount} / ${PHASE_CONFIG.drinks.expected_nights_per_month}</span>
+          <span>${statusDot(nightsCount <= PHASE_CONFIG.drinks.expected_nights_per_month ? 'ok' : 'alert')}</span>
+        </div>
+        <div class="w-row">
+          <span class="w-label">Drink totali</span>
+          <span class="w-val">${totalDrinks}</span>
+        </div>
+        ${warningHtml}
+      </div>`;
+
+    box.insertAdjacentHTML('beforeend', html);
+  } catch (e) {
+    console.warn('buildDrinks errore:', e);
+  }
+}
+
+// ── Widget pasti fuori ───────────────────────────────────────
+async function buildMealsOut() {
+  try {
+    const box = document.getElementById('diet-widgets');
+    if (!box) return;
+
+    const userId = getUserId();
+    if (!userId) return;
+
+    const { start, end } = getWeekRange(TODAY);
+
+    // Query log della settimana corrente
+    const logsRef = collection(db, 'users', userId, 'daily_logs');
+    const q = query(logsRef, where('date', '>=', start), where('date', '<=', end));
+    const snap = await getDocs(q);
+
+    let mealsOutCount = 0;
+
+    snap.forEach(d => {
+      const data = d.data();
+      const mealsOut = data.meals_out || 0;
+      if (mealsOut > 0) {
+        mealsOutCount += mealsOut;
+      }
+    });
+
+    // Stato rispetto al target settimanale
+    const mealsOutStatus = mealsOutCount <= PHASE_CONFIG.meals_out.expected_per_week ? 'ok' : 'alert';
+
+    const html = `
+      <div class="w-card">
+        <div class="w-section">PASTI FUORI</div>
+        <div class="w-row">
+          <span class="w-label">Questa settimana</span>
+          <span class="w-val">${mealsOutCount} / ${PHASE_CONFIG.meals_out.expected_per_week}</span>
+          <span>${statusDot(mealsOutStatus)}</span>
+        </div>
+      </div>`;
+
+    box.insertAdjacentHTML('beforeend', html);
+  } catch (e) {
+    console.warn('buildMealsOut errore:', e);
+  }
+}
+
 (async function() {
   await requireAuth();
   loadDiets();
   // Aspetta che le diete si carichino prima dei widget (per target proteine)
-  setTimeout(() => buildDietWidgets(), 1500);
+  setTimeout(() => {
+    buildDietWidgets();
+    buildAdherence();
+    buildAverages();
+    buildProteinBand();
+    buildDrinks();
+    buildMealsOut();
+  }, 1500);
 })();

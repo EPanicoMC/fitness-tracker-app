@@ -6,8 +6,8 @@ import {
   getTodayString, getYesterdayString, getDayOfWeek, formatDateIT, formatDateShort, addDays, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER, cleanOldLogs, calcFitScore, calcSmartScore, calcRecoveryPlan
 } from './app.js';
 import { calcMacrosFromText, analyzeFoodImageAI, generateSmartAdviceAI, generateRecoveryAdviceAI, generateAdvisor360AI, saveAICorrection } from './gemini.js';
-import { PHASE_CONFIG, getCurrentPhaseWeek } from './phase-config.js';
-import { svgLineChart, movingAverage, linearRegression, statusDot, COLORS } from './widgets.js';
+import { PHASE_CONFIG, getCurrentPhaseWeek, getCurrentBlock, calcE1RM } from './phase-config.js';
+import { svgLineChart, svgSparkline, svgHorizontalBar, movingAverage, linearRegression, statusDot, getStatus, COLORS } from './widgets.js';
 
 const TODAY = getTodayString();
 
@@ -824,6 +824,698 @@ async function buildWeightCorridor() {
       <div class="w-status">${statusDot(stState)} <span>${stText}</span></div>`;
   } catch (e) {
     console.warn('buildWeightCorridor error:', e);
+  }
+}
+
+// ── Regole Armate ──────────────────────────────────────────
+async function buildArmedRules() {
+  const box = document.getElementById('armed-rules-box');
+  if (!box) return;
+  const uid = getUserId();
+  if (!uid) return;
+
+  try {
+    const rules = PHASE_CONFIG.rules;
+    if (!rules || !rules.length) return;
+
+    // Calcola la data limite per la finestra massima (14 giorni)
+    const pad = n => String(n).padStart(2, '0');
+    const dLimit = new Date(TODAY + 'T00:00:00');
+    dLimit.setDate(dLimit.getDate() - 14);
+    const limitStr = `${dLimit.getFullYear()}-${pad(dLimit.getMonth() + 1)}-${pad(dLimit.getDate())}`;
+
+    // Query daily_logs ultimi 14 giorni
+    const logsSnap = await getDocs(
+      query(collection(db, 'users', uid, 'daily_logs'), where('__name__', '>=', limitStr))
+    );
+    const logs = [];
+    logsSnap.forEach(d => {
+      logs.push({ date: d.id, ...d.data() });
+    });
+    logs.sort((a, b) => a.date.localeCompare(b.date));
+
+    // Filtra solo gli ultimi N giorni per ogni regola
+    const filterLast = (arr, days) => {
+      const cutDate = new Date(TODAY + 'T00:00:00');
+      cutDate.setDate(cutDate.getDate() - days);
+      const cutStr = `${cutDate.getFullYear()}-${pad(cutDate.getMonth() + 1)}-${pad(cutDate.getDate())}`;
+      return arr.filter(l => l.date >= cutStr && l.date <= TODAY);
+    };
+
+    // Calcolo aderenza pasti per un singolo giorno
+    const calcDayAdherence = (log) => {
+      const ms = log.meals_state || {};
+      const keys = Object.keys(ms);
+      if (!keys.length) return null;
+      const eaten = keys.filter(k => ms[k]?.eaten).length;
+      return eaten / keys.length;
+    };
+
+    // Calcolo media peso con media mobile 7gg
+    const calcWeightMA = (logsWindow) => {
+      const wArr = logsWindow.filter(l => l.weight_kg > 0).map(l => l.weight_kg);
+      if (wArr.length < 3) return null;
+      // Media mobile semplice degli ultimi punti
+      const maVals = movingAverage(wArr, 7, 3);
+      const valid = maVals.filter(m => m.value != null);
+      if (valid.length < 2) return null;
+      return { first: valid[0].value, last: valid[valid.length - 1].value };
+    };
+
+    // Query last_sessions per la regola forza
+    let forceCounter = 0;
+    const isPreBaseline = new Date(TODAY + 'T00:00:00') < new Date(PHASE_CONFIG.baseline_week_end + 'T23:59:59');
+    if (!isPreBaseline) {
+      try {
+        const sessSnap = await getDocs(collection(db, 'users', uid, 'last_sessions'));
+        const refExercises = PHASE_CONFIG.reference_exercises;
+        // Baseline: migliore e1RM nella settimana baseline
+        const baselineData = {};
+        const currentData = {};
+        sessSnap.forEach(d => {
+          const session = d.data();
+          const sd = session.completed_date || '';
+          if (!session.exercises) return;
+          for (const ex of session.exercises) {
+            if (!refExercises.includes(ex.name)) continue;
+            let best = 0;
+            for (const s of (ex.sets || [])) {
+              if (s.done === false) continue;
+              best = Math.max(best, calcE1RM(s.weight, s.reps));
+            }
+            if (best > 0) {
+              // Dati baseline
+              if (sd >= PHASE_CONFIG.baseline_week_start && sd <= PHASE_CONFIG.baseline_week_end) {
+                if (best > (baselineData[ex.name] || 0)) baselineData[ex.name] = best;
+              }
+              // Dati piu' recenti
+              if (!currentData[ex.name] || sd > currentData[ex.name].date) {
+                currentData[ex.name] = { date: sd, e1rm: best };
+              }
+            }
+          }
+        });
+        // Conta esercizi con calo >= soglia
+        const threshold = PHASE_CONFIG.rules.find(r => r.id === 'perdita_forza')?.params?.threshold_pct || -5;
+        for (const name of refExercises) {
+          if (baselineData[name] && currentData[name]) {
+            const pctChange = ((currentData[name].e1rm - baselineData[name]) / baselineData[name]) * 100;
+            if (pctChange <= threshold) forceCounter++;
+          }
+        }
+      } catch (e) {
+        console.warn('buildArmedRules forza query error:', e);
+      }
+    }
+
+    // Valuta ogni regola
+    const ruleRows = rules.map(rule => {
+      let counter = 0;
+      let windowSize = rule.window_days || (rule.window_weeks ? rule.window_weeks * 7 : 7);
+
+      switch (rule.id) {
+        case 'stallo': {
+          // Media 7gg varia < 0.2 kg, aderenza >= 90%
+          const wLogs = filterLast(logs, 14);
+          const ma = calcWeightMA(wLogs);
+          if (ma) {
+            const delta = Math.abs(ma.last - ma.first);
+            if (delta < (rule.params?.weight_delta_max || 0.2)) {
+              // Verifica aderenza
+              const adhLogs = filterLast(logs, 7);
+              const adhValues = adhLogs.map(calcDayAdherence).filter(v => v != null);
+              const avgAdh = adhValues.length ? adhValues.reduce((a, b) => a + b, 0) / adhValues.length : 0;
+              if (avgAdh >= (rule.params?.adherence_min || 0.9)) {
+                counter = wLogs.filter(l => l.weight_kg > 0).length;
+              }
+            }
+          }
+          break;
+        }
+        case 'stallo_bassa_aderenza': {
+          // Come stallo ma aderenza < 90%
+          const wLogs = filterLast(logs, 14);
+          const ma = calcWeightMA(wLogs);
+          if (ma) {
+            const delta = Math.abs(ma.last - ma.first);
+            if (delta < (rule.params?.weight_delta_max || 0.2)) {
+              const adhLogs = filterLast(logs, 7);
+              const adhValues = adhLogs.map(calcDayAdherence).filter(v => v != null);
+              const avgAdh = adhValues.length ? adhValues.reduce((a, b) => a + b, 0) / adhValues.length : 0;
+              if (avgAdh < (rule.params?.adherence_max || 0.9)) {
+                counter = wLogs.filter(l => l.weight_kg > 0).length;
+              }
+            }
+          }
+          break;
+        }
+        case 'calo_rapido': {
+          // Calo >= 0.9 kg/sett (escluse prime 2 settimane)
+          const weekNum = getCurrentPhaseWeek(TODAY);
+          const excluded = rule.params?.excluded_weeks || [1, 2];
+          if (!excluded.includes(weekNum)) {
+            const wLogs = filterLast(logs, 14);
+            const wArr = wLogs.filter(l => l.weight_kg > 0);
+            if (wArr.length >= 4) {
+              const firstW = wArr.slice(0, Math.ceil(wArr.length / 2));
+              const lastW = wArr.slice(Math.ceil(wArr.length / 2));
+              const avgFirst = firstW.reduce((s, l) => s + l.weight_kg, 0) / firstW.length;
+              const avgLast = lastW.reduce((s, l) => s + l.weight_kg, 0) / lastW.length;
+              const weeksSpan = (new Date(wArr[wArr.length - 1].date) - new Date(wArr[0].date)) / 86400000 / 7;
+              if (weeksSpan > 0) {
+                const ratePerWeek = (avgLast - avgFirst) / weeksSpan;
+                if (ratePerWeek <= (rule.params?.threshold_per_week || -0.9)) {
+                  counter = windowSize;
+                }
+              }
+            }
+          }
+          break;
+        }
+        case 'perdita_forza': {
+          // Usa il conteggio calcolato sopra dalle sessioni
+          counter = forceCounter;
+          windowSize = rule.params?.min_exercises || 2;
+          break;
+        }
+        case 'sonno': {
+          // Media sonno < 5.5h negli ultimi 7 giorni
+          const sleepLogs = filterLast(logs, rule.window_days || 7);
+          const sleepVals = sleepLogs.filter(l => l.sleep_hours > 0).map(l => l.sleep_hours);
+          if (sleepVals.length >= 3) {
+            const avg = sleepVals.reduce((a, b) => a + b, 0) / sleepVals.length;
+            if (avg < (rule.params?.avg_threshold || 5.5)) {
+              counter = sleepVals.length;
+            }
+          }
+          windowSize = rule.window_days || 7;
+          break;
+        }
+        case 'sintomi': {
+          // Cervicale o coccige > 5/10 negli ultimi 3 giorni
+          const symLogs = filterLast(logs, rule.window_days || 3);
+          const threshold = rule.params?.threshold || 5;
+          counter = symLogs.filter(l =>
+            (l.symptoms_cervicale || 0) >= threshold || (l.symptoms_coccige || 0) >= threshold
+          ).length;
+          windowSize = rule.window_days || 3;
+          break;
+        }
+        case 'aderenza_bassa': {
+          // Aderenza < 80% nell'ultima settimana
+          const adhLogs = filterLast(logs, 7);
+          const adhValues = adhLogs.map(calcDayAdherence).filter(v => v != null);
+          const avgAdh = adhValues.length ? adhValues.reduce((a, b) => a + b, 0) / adhValues.length * 100 : 100;
+          if (avgAdh < (rule.params?.threshold_pct || 80)) {
+            counter = adhValues.length;
+          }
+          windowSize = 7;
+          break;
+        }
+      }
+
+      // Stato: off se counter = 0, warn se >= meta' finestra, alert se >= finestra
+      let status = 'off';
+      if (counter > 0 && counter >= windowSize) status = 'alert';
+      else if (counter > 0 && counter >= Math.ceil(windowSize / 2)) status = 'warn';
+      else if (counter > 0) status = 'warn';
+
+      return `<div class="w-rule">
+        <span class="w-rule-dot">${statusDot(status)}</span>
+        <span class="w-rule-label">${rule.label}</span>
+        <span class="w-rule-counter">${counter}/${windowSize}</span>
+        <span class="w-rule-consequence">${rule.consequence}</span>
+      </div>`;
+    });
+
+    box.innerHTML = `<div class="w-section">REGOLE ARMATE</div>${ruleRows.join('')}`;
+  } catch (e) {
+    console.warn('buildArmedRules error:', e);
+  }
+}
+
+// ── Cinque Leve ────────────────────────────────────────────
+async function buildFiveLevers() {
+  const box = document.getElementById('five-levers-box');
+  if (!box) return;
+  const uid = getUserId();
+  if (!uid) return;
+
+  try {
+    // Query daily_logs ultimi 28 giorni per storico sparkline
+    const pad = n => String(n).padStart(2, '0');
+    const dLimit = new Date(TODAY + 'T00:00:00');
+    dLimit.setDate(dLimit.getDate() - 28);
+    const limitStr = `${dLimit.getFullYear()}-${pad(dLimit.getMonth() + 1)}-${pad(dLimit.getDate())}`;
+
+    const logsSnap = await getDocs(
+      query(collection(db, 'users', uid, 'daily_logs'), where('__name__', '>=', limitStr))
+    );
+    const logs = [];
+    logsSnap.forEach(d => {
+      logs.push({ date: d.id, ...d.data() });
+    });
+    logs.sort((a, b) => a.date.localeCompare(b.date));
+
+    // Raggruppa per settimana (ultime 4 settimane)
+    const weekBuckets = [[], [], [], []];
+    const todayMs = new Date(TODAY + 'T00:00:00').getTime();
+    logs.forEach(l => {
+      const dayMs = new Date(l.date + 'T00:00:00').getTime();
+      const daysAgo = Math.floor((todayMs - dayMs) / 86400000);
+      const weekIdx = 3 - Math.min(3, Math.floor(daysAgo / 7));
+      if (weekIdx >= 0 && weekIdx < 4) weekBuckets[weekIdx].push(l);
+    });
+
+    // Ultimi 7 giorni per valori correnti
+    const dWeek = new Date(TODAY + 'T00:00:00');
+    dWeek.setDate(dWeek.getDate() - 7);
+    const weekStr = `${dWeek.getFullYear()}-${pad(dWeek.getMonth() + 1)}-${pad(dWeek.getDate())}`;
+    const last7 = logs.filter(l => l.date >= weekStr && l.date <= TODAY);
+
+    // Helper: aderenza pasti per un array di log
+    const calcAdherence = (arr) => {
+      let total = 0, eaten = 0;
+      arr.forEach(l => {
+        const ms = l.meals_state || {};
+        const keys = Object.keys(ms);
+        total += keys.length;
+        eaten += keys.filter(k => ms[k]?.eaten).length;
+      });
+      return total > 0 ? (eaten / total) * 100 : null;
+    };
+
+    // Helper: conta sedute (giorni con is_training_day true e workout registrato)
+    const countSessions = (arr) => arr.filter(l => l.is_training_day).length;
+
+    // Helper: media di un campo numerico
+    const avgField = (arr, field) => {
+      const vals = arr.filter(l => l[field] > 0).map(l => l[field]);
+      return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+    };
+
+    // Helper: max sintomi
+    const maxSymptoms = (arr) => {
+      let mx = 0;
+      arr.forEach(l => {
+        mx = Math.max(mx, l.symptoms_cervicale || 0, l.symptoms_coccige || 0);
+      });
+      return mx;
+    };
+
+    // Sessioni pianificate questa settimana
+    const plannedSessions = activeProgram?.schedule
+      ? Object.keys(activeProgram.schedule).filter(d => activeProgram.schedule[d]).length
+      : 0;
+
+    // Le 5 leve con valori settimanali per sparkline
+    const levers = [
+      {
+        label: 'Aderenza pasti',
+        current: calcAdherence(last7),
+        threshold: 90,
+        unit: '%',
+        weekly: weekBuckets.map(w => calcAdherence(w)),
+        status: null,
+      },
+      {
+        label: 'Sedute fatte',
+        current: countSessions(last7),
+        threshold: plannedSessions,
+        unit: `/ ${plannedSessions}`,
+        weekly: weekBuckets.map(w => countSessions(w)),
+        status: null,
+      },
+      {
+        label: 'Sonno medio',
+        current: avgField(last7, 'sleep_hours'),
+        threshold: PHASE_CONFIG.sleep?.warning || 5.5,
+        unit: 'h',
+        weekly: weekBuckets.map(w => avgField(w, 'sleep_hours')),
+        status: null,
+      },
+      {
+        label: 'Passi medi',
+        current: avgField(last7, 'steps'),
+        threshold: PHASE_CONFIG.steps_daily || 11000,
+        unit: '',
+        weekly: weekBuckets.map(w => avgField(w, 'steps')),
+        status: null,
+      },
+      {
+        label: 'Sintomi',
+        current: maxSymptoms(last7),
+        threshold: PHASE_CONFIG.symptoms?.session_stop || 3,
+        unit: '/ 10',
+        weekly: weekBuckets.map(w => maxSymptoms(w)),
+        isInverse: true,
+        status: null,
+      },
+    ];
+
+    // Calcola stato per ciascuna leva
+    levers.forEach(lev => {
+      if (lev.current == null) {
+        lev.status = 'off';
+        return;
+      }
+      if (lev.isInverse) {
+        lev.status = getStatus(lev.current, lev.threshold, { inverse: true });
+      } else {
+        lev.status = getStatus(lev.current, lev.threshold);
+      }
+    });
+
+    // Formatta valori per visualizzazione
+    const fmtVal = (lev) => {
+      if (lev.current == null) return '—';
+      if (lev.label === 'Passi medi') return Math.round(lev.current).toLocaleString('it-IT');
+      if (lev.label === 'Aderenza pasti') return `${Math.round(lev.current)}%`;
+      if (lev.label === 'Sonno medio') return `${lev.current.toFixed(1)}h`;
+      if (lev.label === 'Sintomi') return `${lev.current}`;
+      return `${lev.current}`;
+    };
+
+    // Stato testo
+    const statusText = (lev) => {
+      if (lev.status === 'ok') return 'in target';
+      if (lev.status === 'warn') return 'attenzione';
+      if (lev.status === 'alert') return 'critico';
+      return 'nessun dato';
+    };
+
+    // Genera HTML per ogni leva
+    const leversHtml = levers.map(lev => {
+      // Filtra null dai valori settimanali per la sparkline
+      const sparkVals = lev.weekly.map(v => v != null ? v : 0);
+      const spark = sparkVals.some(v => v > 0)
+        ? svgSparkline({ values: sparkVals, threshold: lev.isInverse ? lev.threshold : null, color: COLORS.t2 })
+        : '';
+
+      return `<div class="w-lever">
+        <div class="w-lever-hdr">
+          <span class="w-lever-label">${lev.label}</span>
+          <span class="w-lever-spark">${spark}</span>
+        </div>
+        <div class="w-lever-val">${fmtVal(lev)} <span class="w-unit">${lev.unit}</span></div>
+        <div class="w-lever-status">${statusDot(lev.status)} ${statusText(lev)}</div>
+      </div>`;
+    }).join('');
+
+    // Leva calorica: sbloccata solo se aderenza >= 90%
+    const adherencePct = levers[0].current != null ? Math.round(levers[0].current) : 0;
+    const caloricUnlocked = adherencePct >= 90;
+    const caloricStatus = caloricUnlocked ? 'ok' : 'alert';
+    const caloricText = caloricUnlocked ? 'sbloccata' : 'bloccata';
+
+    box.innerHTML = `
+      <div class="w-section">CINQUE LEVE</div>
+      <div class="w-levers">${leversHtml}</div>
+      <div class="w-status">${statusDot(caloricStatus)} leva calorica ${caloricText} (aderenza ${adherencePct}%)</div>`;
+  } catch (e) {
+    console.warn('buildFiveLevers error:', e);
+  }
+}
+
+// ── Cancello di Fase ───────────────────────────────────────
+async function buildGate() {
+  const box = document.getElementById('gate-box');
+  if (!box) return;
+  const uid = getUserId();
+  if (!uid) return;
+
+  try {
+    const gate = PHASE_CONFIG.gate;
+    const waistCfg = PHASE_CONFIG.waist;
+    if (!gate) return;
+
+    // Query checks per misura vita
+    const checksSnap = await getDocs(
+      query(collection(db, 'users', uid, 'checks'), orderBy('date', 'desc'), limit(4))
+    );
+    const checks = checksSnap.docs.map(d => d.data());
+
+    // Vita: cerca il valore piu' recente
+    let currentWaist = null;
+    let waistDate = null;
+    for (const c of checks) {
+      const ms = c.measurements || {};
+      if (ms.waist) {
+        currentWaist = ms.waist;
+        waistDate = c.date;
+        break;
+      }
+    }
+
+    // Barra vita
+    let waistHtml = '';
+    if (currentWaist != null && waistCfg) {
+      const waistStart = waistCfg.start;
+      const waistTarget = gate.waist_target;
+      const range = waistStart - waistTarget;
+      // Posizione corrente nella barra (0 = start, 100% = target raggiunto)
+      const progress = range > 0 ? Math.max(0, Math.min(1, (waistStart - currentWaist) / range)) : 0;
+      const pctDone = Math.round(progress * 100);
+      const remaining = currentWaist - waistTarget;
+
+      waistHtml = `
+        <div style="margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--t3);margin-bottom:4px">
+            <span>Vita: ${currentWaist} cm</span>
+            <span>target ${waistTarget} cm</span>
+          </div>
+          ${svgHorizontalBar({ value: pctDone, target: 100, color: COLORS.ok })}
+          <div style="font-size:10px;color:var(--t3);margin-top:2px">-${(waistStart - currentWaist).toFixed(1)} cm fatti, -${remaining.toFixed(1)} cm rimanenti</div>
+        </div>`;
+    } else {
+      waistHtml = `<div style="font-size:11px;color:var(--t3);margin-bottom:8px">nessun dato vita disponibile</div>`;
+    }
+
+    // Forza: confronto e1RM vs baseline
+    let forceHtml = '';
+    const isPreBaseline = new Date(TODAY + 'T00:00:00') < new Date(PHASE_CONFIG.baseline_week_end + 'T23:59:59');
+    if (isPreBaseline) {
+      forceHtml = `<div style="font-size:11px;color:var(--t3)">baseline in costruzione</div>`;
+    } else {
+      try {
+        const sessSnap = await getDocs(collection(db, 'users', uid, 'last_sessions'));
+        const refExercises = PHASE_CONFIG.reference_exercises;
+        const baselineData = {};
+        const currentData = {};
+
+        sessSnap.forEach(d => {
+          const session = d.data();
+          const sd = session.completed_date || '';
+          if (!session.exercises) return;
+          for (const ex of session.exercises) {
+            if (!refExercises.includes(ex.name)) continue;
+            let best = 0;
+            for (const s of (ex.sets || [])) {
+              if (s.done === false) continue;
+              best = Math.max(best, calcE1RM(s.weight, s.reps));
+            }
+            if (best > 0) {
+              if (sd >= PHASE_CONFIG.baseline_week_start && sd <= PHASE_CONFIG.baseline_week_end) {
+                if (best > (baselineData[ex.name] || 0)) baselineData[ex.name] = best;
+              }
+              if (!currentData[ex.name] || sd > currentData[ex.name].date) {
+                currentData[ex.name] = { date: sd, e1rm: best };
+              }
+            }
+          }
+        });
+
+        // Calcola variazione media %
+        let totalPct = 0, countEx = 0;
+        for (const name of refExercises) {
+          if (baselineData[name] && currentData[name]) {
+            const pct = ((currentData[name].e1rm - baselineData[name]) / baselineData[name]) * 100;
+            totalPct += pct;
+            countEx++;
+          }
+        }
+
+        if (countEx > 0) {
+          const avgPct = totalPct / countEx;
+          // Barra forza: scala da gate (-5%) a critico (-10%)
+          const gateThreshold = gate.force_max_drop_pct || -5;
+          const critThreshold = PHASE_CONFIG.early_exit?.force_critical_pct || -10;
+          let forceStatus = 'ok';
+          if (avgPct <= critThreshold) forceStatus = 'alert';
+          else if (avgPct <= gateThreshold) forceStatus = 'warn';
+          const sign = avgPct >= 0 ? '+' : '';
+
+          forceHtml = `
+            <div style="margin-top:8px">
+              <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--t3);margin-bottom:4px">
+                <span>Forza media: ${sign}${avgPct.toFixed(1)}%</span>
+                <span>soglia ${gateThreshold}%</span>
+              </div>
+              ${svgHorizontalBar({
+                value: Math.max(0, 100 + avgPct),
+                target: 100,
+                bandMin: 100 + critThreshold,
+                bandMax: 100 + gateThreshold,
+                color: COLORS[forceStatus] || COLORS.ok,
+              })}
+            </div>`;
+        } else {
+          forceHtml = `<div style="font-size:11px;color:var(--t3);margin-top:8px">nessun dato forza disponibile</div>`;
+        }
+      } catch (e) {
+        console.warn('buildGate forza error:', e);
+        forceHtml = `<div style="font-size:11px;color:var(--t3);margin-top:8px">errore caricamento dati forza</div>`;
+      }
+    }
+
+    // Proiezione vita: ritmo necessario vs attuale
+    let projectionHtml = '';
+    if (currentWaist != null && waistDate && waistCfg) {
+      const gateDate = new Date(gate.date + 'T00:00:00');
+      const todayDate = new Date(TODAY + 'T00:00:00');
+      const daysLeft = Math.max(1, Math.ceil((gateDate - todayDate) / 86400000));
+      const weeksLeft = daysLeft / 7;
+      const cmLeft = currentWaist - gate.waist_target;
+      const neededPerWeek = weeksLeft > 0 ? cmLeft / weeksLeft : 0;
+
+      // Ritmo attuale: calcolato dai checks disponibili
+      const sortedChecks = [...checks].filter(c => c.measurements?.waist).sort((a, b) => a.date.localeCompare(b.date));
+      let actualPerWeek = 0;
+      if (sortedChecks.length >= 2) {
+        const first = sortedChecks[0];
+        const last = sortedChecks[sortedChecks.length - 1];
+        const span = (new Date(last.date) - new Date(first.date)) / 86400000 / 7;
+        if (span > 0) {
+          actualPerWeek = (first.measurements.waist - last.measurements.waist) / span;
+        }
+      }
+
+      projectionHtml = `<div style="font-size:11px;color:var(--t3);margin-top:8px">
+        -${cmLeft.toFixed(1)} cm in ${daysLeft} giorni: servono -${neededPerWeek.toFixed(1)} cm/sett, ritmo attuale -${actualPerWeek.toFixed(1)}
+      </div>`;
+    }
+
+    box.innerHTML = `
+      <div class="w-section">CANCELLO DI FASE</div>
+      <div class="w-card">
+        ${waistHtml}
+        ${forceHtml}
+        ${projectionHtml}
+      </div>`;
+  } catch (e) {
+    console.warn('buildGate error:', e);
+  }
+}
+
+// ── Prossimo Check ─────────────────────────────────────────
+async function buildNextCheck() {
+  const box = document.getElementById('next-check-box');
+  if (!box) return;
+  const uid = getUserId();
+  if (!uid) return;
+
+  try {
+    // Query eventi calendario futuri con tipo check
+    const evSnap = await getDocs(query(
+      collection(db, 'users', uid, 'calendar_events'),
+      orderBy('data'),
+      limit(100)
+    ));
+
+    const events = [];
+    evSnap.forEach(d => {
+      const ev = d.data();
+      // Filtra eventi di tipo check con data futura o odierna
+      if (ev.data >= TODAY && ev.tipo && (ev.tipo.includes('check') || ev.tipo.includes('Check'))) {
+        events.push(ev);
+      }
+    });
+
+    if (!events.length) {
+      box.innerHTML = '';
+      return;
+    }
+
+    // Primo check futuro
+    const next = events[0];
+    const nextDate = new Date(next.data + 'T00:00:00');
+    const todayDate = new Date(TODAY + 'T00:00:00');
+    const daysUntil = Math.ceil((nextDate - todayDate) / 86400000);
+
+    // Tipo formattato
+    const tipoLabel = next.tipo === 'micro_check' ? 'micro' : 'completo';
+
+    // Formato data
+    const dateFormatted = formatDateIT(next.data);
+
+    // Completezza dati: pesate ultimi 7 giorni
+    const pad = n => String(n).padStart(2, '0');
+    const dWeek = new Date(TODAY + 'T00:00:00');
+    dWeek.setDate(dWeek.getDate() - 7);
+    const weekStr = `${dWeek.getFullYear()}-${pad(dWeek.getMonth() + 1)}-${pad(dWeek.getDate())}`;
+
+    const logsSnap = await getDocs(
+      query(collection(db, 'users', uid, 'daily_logs'), where('__name__', '>=', weekStr))
+    );
+    let weightCount = 0;
+    logsSnap.forEach(d => {
+      if (d.data().weight_kg > 0 && d.id <= TODAY) weightCount++;
+    });
+
+    // Controlla dati forza recenti
+    let forceDataRecent = false;
+    const isPreBaseline = new Date(TODAY + 'T00:00:00') < new Date(PHASE_CONFIG.baseline_week_end + 'T23:59:59');
+    if (!isPreBaseline) {
+      try {
+        const sessSnap = await getDocs(collection(db, 'users', uid, 'last_sessions'));
+        const refExercises = PHASE_CONFIG.reference_exercises;
+        // Verifica se almeno 3 esercizi di riferimento hanno dati recenti (ultimi 14gg)
+        const dRef = new Date(TODAY + 'T00:00:00');
+        dRef.setDate(dRef.getDate() - 14);
+        const refCutoff = `${dRef.getFullYear()}-${pad(dRef.getMonth() + 1)}-${pad(dRef.getDate())}`;
+        let recentCount = 0;
+        const seen = new Set();
+        sessSnap.forEach(d => {
+          const session = d.data();
+          const sd = session.completed_date || '';
+          if (sd < refCutoff || !session.exercises) return;
+          for (const ex of session.exercises) {
+            if (refExercises.includes(ex.name) && !seen.has(ex.name)) {
+              seen.add(ex.name);
+              recentCount++;
+            }
+          }
+        });
+        forceDataRecent = recentCount >= 3;
+      } catch (e) {
+        console.warn('buildNextCheck forza check error:', e);
+      }
+    }
+
+    // Indicatori completezza
+    const weightStatus = weightCount >= 5 ? 'ok' : (weightCount >= 3 ? 'warn' : 'alert');
+    const forceStatus = isPreBaseline ? 'off' : (forceDataRecent ? 'ok' : 'warn');
+
+    const completenessHtml = `
+      <div>${statusDot(weightStatus)} pesate ultimi 7gg: ${weightCount}/7</div>
+      <div>${statusDot(forceStatus)} dati forza riferimento: ${isPreBaseline ? 'pre-baseline' : (forceDataRecent ? 'aggiornati' : 'incompleti')}</div>`;
+
+    // Testo giorni rimanenti
+    const daysText = daysUntil === 0 ? 'OGGI' : (daysUntil === 1 ? 'domani' : `tra ${daysUntil} giorni`);
+
+    box.innerHTML = `
+      <div class="w-section">PROSSIMO CHECK</div>
+      <div class="w-card">
+        <div class="w-row">
+          <span>${dateFormatted}</span>
+          <span>${tipoLabel} · ${daysText}</span>
+        </div>
+        <div style="margin-top:8px">
+          ${completenessHtml}
+        </div>
+      </div>`;
+  } catch (e) {
+    console.warn('buildNextCheck error:', e);
   }
 }
 
