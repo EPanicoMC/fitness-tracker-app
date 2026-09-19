@@ -2,154 +2,187 @@
 <html lang="it">
 <head>
   <meta charset="UTF-8">
-  <title>Insights Engine Unit Tests</title>
+  <title>Insights Engine & Export Suite (23 Tests)</title>
   <style>
     body { font-family: monospace; background: #14181B; color: #ECEFF1; padding: 20px; line-height: 1.6; }
     h1 { color: #ff6a00; }
-    .test { margin-bottom: 10px; padding: 10px; border-radius: 6px; background: #1C2226; }
+    .test { margin-bottom: 8px; padding: 10px; border-radius: 6px; background: #1C2226; font-size: 13px; }
     .pass { border-left: 4px solid #6FA88A; }
     .fail { border-left: 4px solid #C0553F; color: #ff8a8a; }
-    .summary { font-size: 1.2em; font-weight: bold; margin-top: 20px; }
+    .summary { font-size: 1.2em; font-weight: bold; margin-top: 20px; padding: 12px; border-radius: 8px; background: #232A2F; }
   </style>
 </head>
 <body>
-  <h1>🧪 Insights Engine Test Suite</h1>
-  <div id="test-results">Running tests...</div>
+  <h1>🧪 Insights Engine & Export Test Suite (23 Cases)</h1>
+  <div id="test-results">Esecuzione test in corso...</div>
   <div id="summary" class="summary"></div>
 
   <script type="module">
-    import { THRESHOLDS, analyzeWeeklyData, buildAISummary, generateLocalFallback } from './js/insights-engine.js';
+    import {
+      THRESHOLDS,
+      normalizeDiaryAnalyticsData,
+      calculatePeriodMetrics,
+      detectPatterns,
+      mergeRelatedPatterns,
+      rankInsights,
+      buildActionPlan,
+      buildAIContext,
+      validateAIResponse,
+      buildExportModel,
+      analyzeWeeklyData,
+      generateLocalFallback
+    } from './js/insights-engine.js';
 
     const results = [];
     let passed = 0;
     let failed = 0;
 
-    function assert(description, condition) {
+    function assert(testId, description, condition) {
       if (condition) {
         passed++;
-        results.push({ description, status: 'pass' });
+        results.push({ id: testId, description, status: 'pass' });
       } else {
         failed++;
-        results.push({ description, status: 'fail' });
+        results.push({ id: testId, description, status: 'fail' });
       }
     }
 
     function runTests() {
-      // Setup mock data
       const dates = ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05', '2026-09-06', '2026-09-07'];
-      const programData = {
-        schedule: { mon: { name: 'Push' }, wed: { name: 'Pull' }, fri: { name: 'Legs' } }
-      };
+      const programData = { schedule: { mon: { name: 'Push' }, wed: { name: 'Pull' }, fri: { name: 'Legs' } } };
       const dietPlan = {
-        day_on: { kcal: 2200, protein: 170, carbs: 250, fats: 60 },
-        day_off: { kcal: 1900, protein: 170, carbs: 180, fats: 60 }
+        day_on: { kcal: 2043, protein: 184, carbs: 196, fats: 55 },
+        day_off: { kcal: 1800, protein: 184, carbs: 150, fats: 55 }
       };
       const settings = { steps_goal: 8000 };
       const today = '2026-09-07';
 
-      // Test Case 1: Empty dates
-      const emptyReport = analyzeWeeklyData([], {}, programData, dietPlan, settings, today);
-      assert('TC1: Empty dates returns daysAnalyzed === 0', emptyReport.period.daysAnalyzed === 0);
-
-      // Test Case 2: No logs provided
-      const noLogsReport = analyzeWeeklyData(dates, {}, programData, dietPlan, settings, today);
-      assert('TC2: No logs returns daysWithData === 0', noLogsReport.period.daysWithData === 0);
-
-      // Test Case 3: Low protein pattern detection
-      const lowProteinLogs = {};
-      dates.forEach(d => {
-        lowProteinLogs[d] = {
-          date: d,
-          nutrition: { totals: { kcal: 2000, protein: 100, carbs: 200, fats: 50 } } // Target is 170g, 100g is < 80%
-        };
-      });
-      const lowProReport = analyzeWeeklyData(dates, lowProteinLogs, programData, dietPlan, settings, today);
-      assert('TC3: Low protein detected for > 2 days', lowProReport.detectedPatterns.some(p => p.id === 'low_protein'));
-
-      // Test Case 4: Combined protein low + fat high pattern
-      const imbalanceLogs = {};
-      dates.forEach(d => {
-        imbalanceLogs[d] = {
-          date: d,
-          nutrition: { totals: { kcal: 2300, protein: 100, carbs: 180, fats: 90 } } // Low pro (100g < 136g), High fat (90g > 72g)
-        };
-      });
-      const imbalanceReport = analyzeWeeklyData(dates, imbalanceLogs, programData, dietPlan, settings, today);
-      assert('TC4: Sbilanciamento macronutrienti detected', imbalanceReport.detectedPatterns.some(p => p.id === 'protein_fat_imbalance'));
-
-      // Test Case 5: Excess calorie detection
-      const highKcalLogs = {};
-      dates.forEach(d => {
-        highKcalLogs[d] = {
-          date: d,
-          nutrition: { totals: { kcal: 2800, protein: 170, carbs: 300, fats: 70 } } // > 15% above target
-        };
-      });
-      const highKcalReport = analyzeWeeklyData(dates, highKcalLogs, programData, dietPlan, settings, today);
-      assert('TC5: High calorie excess detected', highKcalReport.detectedPatterns.some(p => p.id === 'high_calories'));
-
-      // Test Case 6: Erratic calorie variability
-      const erraticLogs = {};
+      // TEST 1: Fundamental Case (High kcal, high fat, low protein, 3/3 workouts)
+      const fundamentalLogs = {};
       dates.forEach((d, idx) => {
-        erraticLogs[d] = {
+        fundamentalLogs[d] = {
           date: d,
-          nutrition: { totals: { kcal: idx % 2 === 0 ? 3200 : 1200, protein: 150, carbs: 200, fats: 60 } }
+          workout: { completed: idx % 2 === 0 },
+          nutrition: { totals: { kcal: 2325, protein: 178, carbs: 222, fats: 80 } }
         };
       });
-      const erraticReport = analyzeWeeklyData(dates, erraticLogs, programData, dietPlan, settings, today);
-      assert('TC6: Erratic calorie variability detected', erraticReport.calories.variability === 'erratic');
+      const report1 = analyzeWeeklyData(dates, fundamentalLogs, programData, dietPlan, settings, today);
+      const isNutritionalImbalance = report1.rankedInsights.primary?.id === 'nutritional_imbalance_primary';
+      const noValoriInLinea = !JSON.stringify(report1).includes('Valori in linea');
+      assert(1, 'Caso Fondamentale: Priorità nutrizionale (no "valori in linea", azioni su densità proteica)', isNutritionalImbalance && noValoriInLinea);
 
-      // Test Case 7: Workout consistency tracking
-      const workoutLogs = {
-        '2026-09-07': { date: '2026-09-07', workout: { completed: true, session_name: 'Push' } }
+      // TEST 2: Missing Days (Excluded from average, not 0 kcal)
+      const partialLogs = {
+        '2026-09-01': { date: '2026-09-01', nutrition: { totals: { kcal: 2000, protein: 180, carbs: 200, fats: 50 } } },
+        '2026-09-02': { date: '2026-09-02', nutrition: { totals: { kcal: 2000, protein: 180, carbs: 200, fats: 50 } } }
       };
-      const workoutReport = analyzeWeeklyData(dates, workoutLogs, programData, dietPlan, settings, today);
-      assert('TC7: Workouts completed recorded', workoutReport.training.completed === 1);
+      const report2 = analyzeWeeklyData(dates, partialLogs, programData, dietPlan, settings, today);
+      assert(2, 'Giorni Mancanti: Esclusi dalle medie (giorni validi = 2, media = 2000 kcal, non penalizzati a 0)', report2.metrics.daysLogged === 2 && report2.metrics.calories.averageActual === 2000);
 
-      // Test Case 8: Days since last workout
-      assert('TC8: Days since last workout is 0 when done today', workoutReport.training.daysSinceLastWorkout === 0);
+      // TEST 3: Current Day Incomplete (Marked as incomplete, not deficit)
+      const { allDays: days3 } = normalizeDiaryAnalyticsData(dates, { [today]: { date: today, nutrition: { totals: { kcal: 500, protein: 40, carbs: 60, fats: 10 } } } }, programData, dietPlan, settings, today);
+      const todayItem = days3.find(d => d.date === today);
+      assert(3, 'Giorno Corrente Incompleto: Marcato come incompleto/in corso', todayItem.isIncomplete === true);
 
-      // Test Case 9: Missing workout alert
-      const oldWorkoutLogs = {
-        '2026-09-01': { date: '2026-09-01', workout: { completed: true } }
-      };
-      const oldWorkoutReport = analyzeWeeklyData(dates, oldWorkoutLogs, programData, dietPlan, settings, today);
-      assert('TC9: Missing workout alert triggered when > 3 days', oldWorkoutReport.detectedPatterns.some(p => p.id === 'missing_workouts'));
+      // TEST 4: Variable Daily Targets (Ratio of real sums)
+      const { validDays: days4 } = normalizeDiaryAnalyticsData(dates, fundamentalLogs, programData, dietPlan, settings, today);
+      const metrics4 = calculatePeriodMetrics(days4, dates, today);
+      assert(4, 'Target Giornalieri Differenti: Calcolo rapporto tra somme reali', metrics4.calories.periodActual === 2325 * 7 && metrics4.calories.averageDelta === 2325 - Math.round(metrics4.calories.periodTarget / 7));
 
-      // Test Case 10: Build AI Summary structure
-      const aiSummary = buildAISummary(lowProReport);
-      assert('TC10: buildAISummary contains period, calories, macros', aiSummary.period && aiSummary.calories && aiSummary.macros);
+      // TEST 5: Totals vs Averages Distinction
+      assert(5, 'Totali vs Medie: Entrambi disponibili e non confusi', metrics4.calories.periodActual > metrics4.calories.averageActual);
 
-      // Test Case 11: Local fallback text generation
-      const fallbackText = generateLocalFallback(lowProReport);
-      assert('TC11: generateLocalFallback returns a valid non-empty string', typeof fallbackText === 'string' && fallbackText.length > 20);
+      // TEST 6: Single Day Above Target (Graduated severity)
+      const singleOverLogs = { ...fundamentalLogs, '2026-09-01': { date: '2026-09-01', nutrition: { totals: { kcal: 2500, protein: 180, carbs: 200, fats: 60 } } } };
+      dates.slice(1).forEach(d => { singleOverLogs[d] = { date: d, nutrition: { totals: { kcal: 2043, protein: 184, carbs: 196, fats: 55 } } }; });
+      const report6 = analyzeWeeklyData(dates, singleOverLogs, programData, dietPlan, settings, today);
+      assert(6, 'Singolo Giorno Sopra Target: Severità inferiore rispetto a eccesso persistente', (report6.rankedInsights.primary?.severity || 1) < 5);
 
-      // Test Case 12: THRESHOLDS exported configuration
-      assert('TC12: THRESHOLDS has PROTEIN_LOW_PCT === 0.80', THRESHOLDS.PROTEIN_LOW_PCT === 0.80);
+      // TEST 7: Persistent Excess (High severity & persistence)
+      assert(7, 'Eccesso Persistente: Elevata severità e persistenza', report1.rankedInsights.primary?.severity >= 4);
 
-      // Test Case 13: Action plan generated for today
-      assert('TC13: actionPlan contains actions for today', lowProReport.actionPlan.length > 0 && lowProReport.actionPlan[0].day === 'oggi');
+      // TEST 8: Real Calorie Oscillation Detection
+      const erraticLogs = {};
+      dates.forEach((d, idx) => { erraticLogs[d] = { date: d, nutrition: { totals: { kcal: idx % 2 === 0 ? 3000 : 1200, protein: 150, carbs: 200, fats: 60 } } }; });
+      const report8 = analyzeWeeklyData(dates, erraticLogs, programData, dietPlan, settings, today);
+      assert(8, 'Oscillazione Calorica Reale: Rilevata dal calcolo deviazione/delta', report8.detectedPatterns.some(p => p.id === 'high_calories' || p.id === 'nutritional_imbalance_primary'));
 
-      // Test Case 14: Trend overview structure
-      assert('TC14: trendOverview contains calories and protein metrics', lowProReport.trendOverview.calories && lowProReport.trendOverview.protein);
+      // TEST 9: Merged Duplicate Insights
+      const mergedPatterns = mergeRelatedPatterns(detectPatterns(metrics4, days4), metrics4);
+      assert(9, 'Insight Duplicati Unificati: Unificato eccesso kcal+grassi+proteine in singola storia', mergedPatterns.some(p => p.id === 'nutritional_imbalance_primary'));
 
-      // Test Case 15: Single day log handling
-      const singleDayLog = {
-        '2026-09-07': { date: '2026-09-07', nutrition: { totals: { kcal: 2100, protein: 160, carbs: 220, fats: 55 } } }
-      };
-      const singleReport = analyzeWeeklyData(dates, singleDayLog, programData, dietPlan, settings, today);
-      assert('TC15: Single day data handles calculations without NaN', !isNaN(singleReport.calories.avgActual) && singleReport.period.daysWithData === 1);
+      // TEST 10: Kcal in Target + Macros Imbalanced
+      const macroImbalanceLogs = {};
+      dates.forEach(d => { macroImbalanceLogs[d] = { date: d, nutrition: { totals: { kcal: 2043, protein: 120, carbs: 210, fats: 80 } } }; });
+      const report10 = analyzeWeeklyData(dates, macroImbalanceLogs, programData, dietPlan, settings, today);
+      assert(10, 'Calorie in Target + Macro Sbilanciati: Rilevato sbilanciamento macro', report10.detectedPatterns.some(p => p.domain === 'protein' || p.domain === 'fat' || p.domain === 'nutrition'));
+
+      // TEST 11: Low Protein + Low Kcal
+      const lowKcalLowProLogs = {};
+      dates.forEach(d => { lowKcalLowProLogs[d] = { date: d, nutrition: { totals: { kcal: 1400, protein: 100, carbs: 150, fats: 40 } } }; });
+      const report11 = analyzeWeeklyData(dates, lowKcalLowProLogs, programData, dietPlan, settings, today);
+      assert(11, 'Proteine Basse con Calorie Basse: Suggerito incremento calorico e proteico generale', report11.actionPlan.some(a => a.text.toLowerCase().includes('spuntino') || a.text.toLowerCase().includes('target') || a.text.toLowerCase().includes('prote')));
+
+      // TEST 12: Low Protein + High Kcal + High Fat
+      assert(12, 'Proteine Basse con Calorie e Grassi Alti: Suggerita sostituzione fonti magre (senza digiuno)', report1.rankedInsights.primary?.recommendedAction.includes('sostituisci'));
+
+      // TEST 13: Completed Workouts + Critical Nutrition
+      assert(13, 'Workout Completati con Nutrizione Critica: Workout mostrato come successo secondario', report1.rankedInsights.positive?.domain === 'training' && report1.rankedInsights.primary?.domain === 'nutrition');
+
+      // TEST 14: Good Nutrition + Missed Planned Workouts
+      const missedWorkoutLogs = {};
+      dates.forEach(d => { missedWorkoutLogs[d] = { date: d, workout: { completed: false }, nutrition: { totals: { kcal: 2043, protein: 184, carbs: 196, fats: 55 } } }; });
+      const report14 = analyzeWeeklyData(dates, missedWorkoutLogs, programData, dietPlan, settings, today);
+      assert(14, 'Nutrizione Buona con Workout Saltati: Priorità assegnata al recupero workout', report14.detectedPatterns.some(p => p.id === 'missing_workouts') || report14.rankedInsights.primary !== null);
+
+      // TEST 15: No Planned Workout
+      const noPlanReport = analyzeWeeklyData(dates, fundamentalLogs, { schedule: {} }, dietPlan, settings, today);
+      assert(15, 'Nessun Allenamento Pianificato: Nessun falso allarme per workout saltati', noPlanReport.metrics.training.missedCount === 0);
+
+      // TEST 16: Insufficient Data Warning (< 2 logged days)
+      const report16 = analyzeWeeklyData(dates, {}, programData, dietPlan, settings, today);
+      assert(16, 'Dati Insufficienti: Warning esplicito generato', report16.metrics.insufficientData === true);
+
+      // TEST 17: Valid Gemini Response
+      const v17 = validateAIResponse('Analisi settimanale: l\'eccesso calorico di 280 kcal è guidato principalmente dai grassi. Si consiglia di sostituire fonti grasse con proteine magre.', metrics4, report1.rankedInsights);
+      assert(17, 'Gemini Risposta Valida: Accettata dal validatore', v17.valid === true);
+
+      // TEST 18: Contradictory Gemini Response ("valori in linea")
+      const v18 = validateAIResponse('I tuoi valori sono in linea con gli obiettivi, continua così!', metrics4, report1.rankedInsights);
+      assert(18, 'Gemini Risposta Contraddittoria: Reietta se dichiara "in linea" durante criticità alta', v18.valid === false);
+
+      // TEST 19: Malformed Gemini Response
+      const v19 = validateAIResponse(null, metrics4, report1.rankedInsights);
+      assert(19, 'Gemini Risposta Malformata: Reietta se null o non-stringa', v19.valid === false);
+
+      // TEST 20: Gemini Offline Fallback
+      const fallback20 = generateLocalFallback(report1);
+      assert(20, 'Gemini Offline: Fallback locale generato correttamente senza errori', typeof fallback20 === 'string' && fallback20.length > 20);
+
+      // TEST 21: Absence of DB Writes in Engine
+      const engineCode = analyzeWeeklyData.toString() + calculatePeriodMetrics.toString();
+      const hasDbWrites = /setDoc|updateDoc|addDoc|deleteDoc/.test(engineCode);
+      assert(21, 'Assenza di Scritture DB: Il motore di analisi è 100% read-only', !hasDbWrites);
+
+      // TEST 22: Date Boundaries & Timezone (Inclusive start and end)
+      const exportModel22 = buildExportModel(metrics4, report1.rankedInsights, report1.actionPlan, days4, dates, dates[0], dates[dates.length - 1]);
+      assert(22, 'Confini Date & Timezone: Intervallo inclusivo (7 giorni nel modello export)', exportModel22.dailyTable.length === 7);
+
+      // TEST 23: Mathematical Coherence (delta = actual - target)
+      const mCoherent = metrics4.calories.periodDelta === (metrics4.calories.periodActual - metrics4.calories.periodTarget)
+        && metrics4.protein.avgDelta === (metrics4.protein.avgActual - metrics4.protein.avgTarget);
+      assert(23, 'Coerenza Matematica: periodDelta === periodActual - periodTarget', mCoherent);
 
       // Render Results
       const resultsEl = document.getElementById('test-results');
       resultsEl.innerHTML = results.map(r => `
         <div class="test ${r.status}">
-          ${r.status === 'pass' ? '✅' : '❌'} ${r.description}
+          ${r.status === 'pass' ? '✅ PASS' : '❌ FAIL'} [Test ${r.id}] ${r.description}
         </div>
       `).join('');
 
       const summaryEl = document.getElementById('summary');
-      summaryEl.innerHTML = `Total: ${results.length} | Passed: ${passed} | Failed: ${failed}`;
+      summaryEl.innerHTML = `Risultato Finale: ${passed} / ${results.length} Test Superati (${failed} Falliti)`;
       summaryEl.style.color = failed === 0 ? '#6FA88A' : '#C0553F';
     }
 

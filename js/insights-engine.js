@@ -1,535 +1,587 @@
 import { getDayOfWeek } from './app.js';
 
 /**
- * Thresholds for deterministic pattern detection and alerts.
+ * Standard thresholds for deterministic pattern detection.
  */
 export const THRESHOLDS = {
-  KCAL_ABOVE_PCT: 1.15,       // >15% above target → flag
-  KCAL_BELOW_PCT: 0.85,       // <85% of target → flag  
-  KCAL_ERRATIC_CV: 0.20,      // coefficient of variation >20% → "erratic"
-  PROTEIN_LOW_PCT: 0.80,      // <80% protein target → alert
-  FAT_HIGH_PCT: 1.20,         // >120% fat target → flag
+  KCAL_ABOVE_PCT: 1.05,       // >5% above target → flag
+  KCAL_BELOW_PCT: 0.95,       // <5% below target → flag  
+  PROTEIN_LOW_PCT: 0.90,      // <90% protein target → alert
+  FAT_HIGH_PCT: 1.10,         // >110% fat target → flag
+  CARBS_HIGH_PCT: 1.10,       // >110% carbs target → flag
+  CARBS_LOW_PCT: 0.90,        // <90% carbs target → flag
   PATTERN_MIN_DAYS: 2,        // minimum days to detect a pattern
   WORKOUT_ALERT_DAYS: 3,      // 3+ days since last workout → alert
   DATA_INSUFFICIENT_DAYS: 2,  // <2 days with data → insufficient
-  MINOR_DEVIATION_PCT: 0.05,  // <5% deviation → not worth flagging
 };
 
 // Helper: safe division
 const safeDiv = (num, denom) => denom ? num / denom : 0;
 
-// Helper: mean
-const mean = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+/**
+ * Normalizes daily logs into a clean, structured array of valid days and metadata.
+ * Does NOT treat missing days as 0 kcal.
+ */
+export function normalizeDiaryAnalyticsData(dates, logs, programData, dietPlan, settings, todayStr) {
+  if (!dates || dates.length === 0) return { validDays: [], allDays: [] };
 
-// Helper: standard deviation
-const stdDev = (arr) => {
-  if (arr.length < 2) return 0;
-  const m = mean(arr);
-  const variance = arr.reduce((acc, val) => acc + Math.pow(val - m, 2), 0) / (arr.length - 1);
-  return Math.sqrt(variance);
-};
+  const allDays = dates.map(dateStr => {
+    const isToday = dateStr === todayStr;
+    const isFuture = dateStr > todayStr;
+    const dow = getDayOfWeek(dateStr);
 
-// Helper: coefficient of variation
-const calcCV = (arr) => {
-  const m = mean(arr);
-  return m ? stdDev(arr) / m : 0;
-};
+    // Find log entry
+    let log = null;
+    if (logs) {
+      if (Array.isArray(logs)) log = logs.find(l => l.date === dateStr) || null;
+      else log = logs[dateStr] || null;
+    }
 
-// Helper: find log for date
-const getLogForDate = (logs, date) => {
-  if (!logs) return null;
-  if (Array.isArray(logs)) return logs.find(l => l.date === date) || null;
-  return logs[date] || null;
-};
+    // Planned workout
+    const plannedSession = programData?.schedule?.[dow] || null;
+    let isTrainingDay = !!plannedSession;
+    if (log && log.is_training_day !== undefined) {
+      isTrainingDay = log.is_training_day;
+    }
 
-// Helper: determine if day is a training day
-const isTrainingDay = (date, log, programData) => {
-  if (log && log.is_training_day !== undefined) return log.is_training_day;
-  const dayOfWeek = getDayOfWeek(date);
-  return programData?.schedule?.[dayOfWeek] ? true : false;
-};
+    // Determine target nutrition
+    let target = { kcal: 0, protein: 0, carbs: 0, fats: 0 };
+    if (dietPlan) {
+      const plan = isTrainingDay ? (dietPlan.day_on || dietPlan.day_off) : (dietPlan.day_off || dietPlan.day_on);
+      if (plan) {
+        target = {
+          kcal: plan.kcal || 0,
+          protein: plan.protein || 0,
+          carbs: plan.carbs || 0,
+          fats: plan.fats || 0,
+        };
+      }
+    }
 
-// Helper: get target nutrition for a day
-const getTargetForDay = (date, log, programData, dietPlan) => {
-  if (!dietPlan) return { kcal: 0, protein: 0, carbs: 0, fats: 0 };
-  const training = isTrainingDay(date, log, programData);
-  return training ? (dietPlan.day_on || dietPlan.day_off) : (dietPlan.day_off || dietPlan.day_on);
-};
+    // Actual nutrition
+    const hasNut = log && log.nutrition && log.nutrition.totals && log.nutrition.totals.kcal > 0;
+    const nut = hasNut ? {
+      kcal: log.nutrition.totals.kcal || 0,
+      protein: log.nutrition.totals.protein || 0,
+      carbs: log.nutrition.totals.carbs || 0,
+      fats: log.nutrition.totals.fats || 0,
+    } : null;
 
-// Helper: check if a value deviates significantly
-const isSignificantDeviation = (value, target, pctAllowed = THRESHOLDS.MINOR_DEVIATION_PCT) => {
-  if (!target) return false;
-  const ratio = value / target;
-  return Math.abs(1 - ratio) > pctAllowed;
-};
+    // Workout completed
+    const workoutDone = !!(log?.workout?.completed);
+
+    // Incomplete today flag
+    const isIncomplete = isToday && (!hasNut || (log.meals_state && Object.values(log.meals_state).filter(Boolean).length < 3));
+
+    return {
+      date: dateStr,
+      isToday,
+      isFuture,
+      isLogged: hasNut,
+      isIncomplete,
+      isTrainingDay,
+      plannedSession,
+      workoutDone,
+      workoutName: log?.workout?.session_name || plannedSession?.name || null,
+      nut,
+      target,
+      log
+    };
+  });
+
+  // Valid days for historical analytics: logged days excluding incomplete today or future
+  const validDays = allDays.filter(d => d.isLogged && !d.isFuture);
+
+  return { validDays, allDays };
+}
 
 /**
- * Analyzes weekly data and returns a structured InsightReport.
- * 
- * @param {string[]} dates - Array of date strings (YYYY-MM-DD) to analyze.
- * @param {Object|Array} logs - Logs keyed by date, or array of log objects.
- * @param {Object} programData - Program schedule data.
- * @param {Object} dietPlan - Diet plan targets.
- * @param {Object} settings - User settings (e.g., steps_goal).
- * @param {string} todayString - Today's date string.
- * @returns {Object} InsightReport object.
+ * Calculates aggregate period metrics based on weighted sums of valid days only.
  */
-export function analyzeWeeklyData(dates, logs, programData, dietPlan, settings, todayString) {
-  if (!dates || dates.length === 0) return createEmptyReport();
+export function calculatePeriodMetrics(validDays, dates, todayStr) {
+  const daysLogged = validDays.length;
+  const totalDays = dates ? dates.length : 0;
 
-  const validDays = [];
-  const kcalRatios = [];
-  let daysWithData = 0;
+  if (daysLogged === 0) {
+    return {
+      daysLogged: 0,
+      totalDays,
+      insufficientData: true,
+      calories: { periodActual: 0, periodTarget: 0, periodDelta: 0, averageActual: 0, averageTarget: 0, averageDelta: 0, adherence: 0 },
+      protein: { avgActual: 0, avgTarget: 0, avgDelta: 0 },
+      fat: { avgActual: 0, avgTarget: 0, avgDelta: 0 },
+      carbs: { avgActual: 0, avgTarget: 0, avgDelta: 0 },
+      training: { plannedCount: 0, completedCount: 0, missedCount: 0, completionRate: 0, daysSinceLastWorkout: null }
+    };
+  }
 
-  let sumKcalActual = 0;
-  let sumKcalTarget = 0;
-  let daysAboveKcal = 0;
-  let daysBelowKcal = 0;
-  let daysOnTargetKcal = 0;
-  let maxExcessKcal = 0;
-  let maxDeficitKcal = 999;
+  // Energy sums
+  const periodKcalActual = validDays.reduce((acc, d) => acc + d.nut.kcal, 0);
+  const periodKcalTarget = validDays.reduce((acc, d) => acc + d.target.kcal, 0);
+  const periodKcalDelta = periodKcalActual - periodKcalTarget;
+  const avgKcalActual = periodKcalActual / daysLogged;
+  const avgKcalTarget = periodKcalTarget / daysLogged;
+  const avgKcalDelta = avgKcalActual - avgKcalTarget;
 
-  let sumProteinActual = 0, sumProteinTarget = 0, daysBelowProtein = 0, sumProteinDeficit = 0;
-  let sumCarbsActual = 0, sumCarbsTarget = 0, daysAboveCarbs = 0, daysBelowCarbs = 0;
-  let sumFatActual = 0, sumFatTarget = 0, daysAboveFat = 0, sumFatExcess = 0;
+  // Macros
+  const periodProteinActual = validDays.reduce((acc, d) => acc + d.nut.protein, 0);
+  const periodProteinTarget = validDays.reduce((acc, d) => acc + d.target.protein, 0);
+  const avgProteinActual = periodProteinActual / daysLogged;
+  const avgProteinTarget = periodProteinTarget / daysLogged;
+  const avgProteinDelta = avgProteinActual - avgProteinTarget;
 
-  let workoutsCompleted = 0;
-  let workoutsPlanned = 0;
-  let workoutsMissed = 0;
-  let workoutsRecovered = 0;
+  const periodFatActual = validDays.reduce((acc, d) => acc + d.nut.fats, 0);
+  const periodFatTarget = validDays.reduce((acc, d) => acc + d.target.fats, 0);
+  const avgFatActual = periodFatActual / daysLogged;
+  const avgFatTarget = periodFatTarget / daysLogged;
+  const avgFatDelta = avgFatActual - avgFatTarget;
+
+  const periodCarbsActual = validDays.reduce((acc, d) => acc + d.nut.carbs, 0);
+  const periodCarbsTarget = validDays.reduce((acc, d) => acc + d.target.carbs, 0);
+  const avgCarbsActual = periodCarbsActual / daysLogged;
+  const avgCarbsTarget = periodCarbsTarget / daysLogged;
+  const avgCarbsDelta = avgCarbsActual - avgCarbsTarget;
+
+  // Training metrics
+  let plannedCount = 0;
+  let completedCount = 0;
+  let missedCount = 0;
   let lastWorkoutDate = null;
 
-  // Track daily stats for pattern detection
-  dates.forEach(date => {
-    const log = getLogForDate(logs, date);
-    const target = getTargetForDay(date, log, programData, dietPlan);
-    const plannedTraining = programData?.schedule?.[getDayOfWeek(date)] ? true : false;
-    
-    if (plannedTraining) workoutsPlanned++;
-
-    // Workout tracking (even if no nutrition data)
-    let workedOut = false;
-    if (log?.workout?.completed) {
-      workedOut = true;
-      workoutsCompleted++;
-      if (!lastWorkoutDate || date > lastWorkoutDate) {
-        lastWorkoutDate = date;
-      }
-      if (!plannedTraining && log.workout.recovered) {
-        workoutsRecovered++;
-      }
-    } else if (plannedTraining && date <= todayString) {
-      workoutsMissed++;
-    }
-
-    if (!log || !log.nutrition || !log.nutrition.totals || !log.nutrition.totals.kcal) {
-      return; // No nutrition data for this day
-    }
-
-    daysWithData++;
-    const nut = log.nutrition.totals;
-    validDays.push({ date, log, target, nut });
-
-    // Kcal stats
-    sumKcalActual += nut.kcal;
-    sumKcalTarget += target.kcal;
-    
-    if (target.kcal > 0) {
-      const ratio = nut.kcal / target.kcal;
-      kcalRatios.push(ratio);
-      
-      if (ratio > THRESHOLDS.KCAL_ABOVE_PCT) daysAboveKcal++;
-      else if (ratio < THRESHOLDS.KCAL_BELOW_PCT) daysBelowKcal++;
-      else if (!isSignificantDeviation(nut.kcal, target.kcal)) daysOnTargetKcal++;
-      
-      if (ratio > maxExcessKcal) maxExcessKcal = ratio;
-      if (ratio < maxDeficitKcal) maxDeficitKcal = ratio;
-    }
-
-    // Protein stats
-    sumProteinActual += (nut.protein || 0);
-    sumProteinTarget += (target.protein || 0);
-    if (target.protein > 0) {
-      if ((nut.protein || 0) < target.protein * THRESHOLDS.PROTEIN_LOW_PCT) {
-        daysBelowProtein++;
-        sumProteinDeficit += (target.protein - (nut.protein || 0));
-      }
-    }
-
-    // Carbs stats
-    sumCarbsActual += (nut.carbs || 0);
-    sumCarbsTarget += (target.carbs || 0);
-    if (target.carbs > 0) {
-      if ((nut.carbs || 0) > target.carbs * 1.1) daysAboveCarbs++;
-      if ((nut.carbs || 0) < target.carbs * 0.9) daysBelowCarbs++;
-    }
-
-    // Fat stats
-    sumFatActual += (nut.fats || 0);
-    sumFatTarget += (target.fats || 0);
-    if (target.fats > 0) {
-      if ((nut.fats || 0) > target.fats * THRESHOLDS.FAT_HIGH_PCT) {
-        daysAboveFat++;
-        sumFatExcess += ((nut.fats || 0) - target.fats);
-      }
+  validDays.forEach(d => {
+    if (d.isTrainingDay) plannedCount++;
+    if (d.workoutDone) {
+      completedCount++;
+      if (!lastWorkoutDate || d.date > lastWorkoutDate) lastWorkoutDate = d.date;
+    } else if (d.isTrainingDay && d.date <= todayStr) {
+      missedCount++;
     }
   });
 
-  if (maxDeficitKcal === 999) maxDeficitKcal = 0;
-
-  // Calculated Averages
-  const avgKcalActual = safeDiv(sumKcalActual, daysWithData);
-  const avgKcalTarget = safeDiv(sumKcalTarget, daysWithData);
-  
-  const cvKcal = calcCV(kcalRatios);
-  let variability = 'stable';
-  if (cvKcal > THRESHOLDS.KCAL_ERRATIC_CV) variability = 'erratic';
-  else if (cvKcal > 0.10) variability = 'moderate';
-
-  // Workout consistency
-  const daysSinceLastWorkout = lastWorkoutDate 
-    ? Math.floor((new Date(todayString) - new Date(lastWorkoutDate)) / (1000 * 60 * 60 * 24))
+  const daysSinceLastWorkout = lastWorkoutDate
+    ? Math.floor((new Date(todayStr) - new Date(lastWorkoutDate)) / (1000 * 60 * 60 * 24))
     : null;
 
-  let consistency = 'fair';
-  if (workoutsCompleted >= workoutsPlanned && workoutsPlanned > 0) consistency = 'excellent';
-  else if (workoutsMissed === 0) consistency = 'good';
-  else if (workoutsMissed > 1) consistency = 'poor';
-
-  const report = {
-    period: { start: dates[0], end: dates[dates.length - 1], daysAnalyzed: dates.length, daysWithData },
-    calories: {
-      avgActual: avgKcalActual,
-      avgTarget: avgKcalTarget,
-      daysAbove: daysAboveKcal,
-      daysBelow: daysBelowKcal,
-      daysOnTarget: daysOnTargetKcal,
-      variability,
-      trend: (avgKcalActual > avgKcalTarget * 1.05) ? 'worsening' : 'stable',
-      maxExcess: maxExcessKcal,
-      maxDeficit: maxDeficitKcal,
-    },
-    macros: {
-      protein: {
-        avg: safeDiv(sumProteinActual, daysWithData),
-        target: safeDiv(sumProteinTarget, daysWithData),
-        daysBelow80pct: daysBelowProtein,
-        avgDeficitG: safeDiv(sumProteinDeficit, daysBelowProtein),
-        trend: 'stable'
-      },
-      carbs: {
-        avg: safeDiv(sumCarbsActual, daysWithData),
-        target: safeDiv(sumCarbsTarget, daysWithData),
-        daysAbove: daysAboveCarbs,
-        daysBelow: daysBelowCarbs,
-        trend: 'stable'
-      },
-      fat: {
-        avg: safeDiv(sumFatActual, daysWithData),
-        target: safeDiv(sumFatTarget, daysWithData),
-        daysAbove120pct: daysAboveFat,
-        avgExcessG: safeDiv(sumFatExcess, daysAboveFat),
-        trend: 'stable'
-      }
-    },
-    training: {
-      completed: workoutsCompleted,
-      planned: workoutsPlanned,
-      missed: workoutsMissed,
-      recovered: workoutsRecovered,
-      daysSinceLastWorkout,
-      consistency
-    },
-    detectedPatterns: [],
-    focusInsights: [],
-    actionPlan: [],
-    trendOverview: {}
-  };
-
-  generatePatterns(report, validDays);
-  generateTrendOverview(report, daysWithData, dates.length);
-  generateActionPlan(report);
-
-  // Focus insights: take top 3 alerts/warnings
-  report.focusInsights = [...report.detectedPatterns]
-    .sort((a, b) => b.severity - a.severity)
-    .slice(0, 3)
-    .map((insight, index) => ({ ...insight, priority: index + 1 }));
-
-  return report;
-}
-
-/**
- * Helper to generate empty report if no data
- */
-function createEmptyReport() {
   return {
-    period: { start: null, end: null, daysAnalyzed: 0, daysWithData: 0 },
-    calories: { avgActual: 0, avgTarget: 0, daysAbove: 0, daysBelow: 0, daysOnTarget: 0, variability: 'stable', trend: 'stable', maxExcess: 0, maxDeficit: 0 },
-    macros: {
-      protein: { avg: 0, target: 0, daysBelow80pct: 0, avgDeficitG: 0, trend: 'stable' },
-      carbs: { avg: 0, target: 0, daysAbove: 0, daysBelow: 0, trend: 'stable' },
-      fat: { avg: 0, target: 0, daysAbove120pct: 0, avgExcessG: 0, trend: 'stable' }
-    },
-    training: { completed: 0, planned: 0, missed: 0, recovered: 0, daysSinceLastWorkout: null, consistency: 'fair' },
-    detectedPatterns: [], focusInsights: [], actionPlan: [], trendOverview: {}
-  };
-}
-
-/**
- * Generate specific patterns based on thresholds and report data
- */
-function generatePatterns(report, validDays) {
-  const { calories, macros, training } = report;
-
-  if (calories.daysAbove >= THRESHOLDS.PATTERN_MIN_DAYS) {
-    report.detectedPatterns.push({
-      id: 'high_calories',
-      type: 'warning',
-      severity: 3,
-      title: 'Eccesso Calorico Frequente',
-      evidence: `Hai superato il target calorico per ${calories.daysAbove} giorni.`,
-      timeframe: 'Negli ultimi giorni',
-      action: 'Cerca di ridurre le porzioni o aggiungere una sessione di cardio.',
-      explanation: 'Superare frequentemente l\'obiettivo calorico rallenta il raggiungimento del traguardo.'
-    });
-  }
-
-  if (macros.protein.daysBelow80pct >= THRESHOLDS.PATTERN_MIN_DAYS) {
-    report.detectedPatterns.push({
-      id: 'low_protein',
-      type: 'alert',
-      severity: 4,
-      title: 'Proteine Insufficienti',
-      evidence: `Assunzione di proteine sotto l'80% per ${macros.protein.daysBelow80pct} giorni.`,
-      timeframe: 'Recente',
-      action: 'Aggiungi fonti proteiche magre ai tuoi pasti.',
-      explanation: 'Le proteine sono fondamentali per il mantenimento e la crescita muscolare.'
-    });
-  }
-
-  if (macros.protein.daysBelow80pct >= 2 && macros.fat.daysAbove120pct >= 2) {
-    report.detectedPatterns.push({
-      id: 'protein_fat_imbalance',
-      type: 'alert',
-      severity: 5,
-      title: 'Sbilanciamento Macronutrienti',
-      evidence: 'Basso apporto proteico combinato con alto apporto di grassi.',
-      timeframe: 'Recente',
-      action: 'Sostituisci snack ricchi di grassi con opzioni ad alto contenuto proteico.',
-      explanation: 'Questo sbilanciamento può compromettere la composizione corporea.'
-    });
-  }
-
-  if (calories.variability === 'erratic') {
-    report.detectedPatterns.push({
-      id: 'erratic_calories',
-      type: 'warning',
-      severity: 3,
-      title: 'Oscillazioni Caloriche',
-      evidence: 'Forte variabilità nell\'apporto calorico quotidiano.',
-      timeframe: 'Questa settimana',
-      action: 'Cerca di mantenere un apporto calorico più costante.',
-      explanation: 'Un apporto incostante rende difficile tracciare i progressi reali.'
-    });
-  }
-
-  if (training.daysSinceLastWorkout !== null && training.daysSinceLastWorkout >= THRESHOLDS.WORKOUT_ALERT_DAYS) {
-    report.detectedPatterns.push({
-      id: 'missing_workouts',
-      type: 'alert',
-      severity: 4,
-      title: 'Assenza di Allenamenti',
-      evidence: `Nessun allenamento da ${training.daysSinceLastWorkout} giorni.`,
-      timeframe: 'Attuale',
-      action: 'Pianifica un allenamento il prima possibile per riprendere il ritmo.',
-      explanation: 'La costanza è il fattore più importante per ottenere risultati.'
-    });
-  }
-
-  if (training.completed > 0 && training.consistency === 'excellent') {
-    report.detectedPatterns.push({
-      id: 'consistent_training',
-      type: 'positive',
-      severity: 1,
-      title: 'Ottima Costanza',
-      evidence: 'Hai completato tutti gli allenamenti previsti.',
-      timeframe: 'Questa settimana',
-      action: 'Continua così!',
-      explanation: 'Stai mantenendo una regolarità eccellente.'
-    });
-  }
-}
-
-/**
- * Populates the trendOverview object with formatted Italian summaries
- */
-function generateTrendOverview(report, daysWithData, totalDays) {
-  const c = report.calories;
-  const p = report.macros.protein;
-  const f = report.macros.fat;
-  const cb = report.macros.carbs;
-
-  report.trendOverview = {
+    daysLogged,
+    totalDays,
+    insufficientData: daysLogged < THRESHOLDS.DATA_INSUFFICIENT_DAYS,
     calories: {
-      label: 'Calorie',
-      value: Math.round(c.avgActual),
-      target: Math.round(c.avgTarget),
-      pct: c.avgTarget ? Math.round((c.avgActual / c.avgTarget) * 100) : 0,
-      status: c.avgActual > c.avgTarget * 1.05 ? 'warning' : c.avgActual < c.avgTarget * 0.95 ? 'alert' : 'ok',
-      detail: `${c.daysOnTarget} giorni in target`
+      periodActual: periodKcalActual,
+      periodTarget: periodKcalTarget,
+      periodDelta: periodKcalDelta,
+      averageActual: Math.round(avgKcalActual),
+      averageTarget: Math.round(avgKcalTarget),
+      averageDelta: Math.round(avgKcalDelta),
+      adherence: safeDiv(periodKcalActual, periodKcalTarget)
     },
     protein: {
-      label: 'Proteine',
-      value: Math.round(p.avg),
-      target: Math.round(p.target),
-      pct: p.target ? Math.round((p.avg / p.target) * 100) : 0,
-      status: p.avg < p.target * 0.9 ? 'alert' : 'ok',
-      detail: `Media ${Math.round(p.avg)}g / giorno`
+      avgActual: Math.round(avgProteinActual),
+      avgTarget: Math.round(avgProteinTarget),
+      avgDelta: Math.round(avgProteinDelta)
     },
     fat: {
-      label: 'Grassi',
-      value: Math.round(f.avg),
-      target: Math.round(f.target),
-      pct: f.target ? Math.round((f.avg / f.target) * 100) : 0,
-      status: f.avg > f.target * 1.1 ? 'warning' : 'ok',
-      detail: `Media ${Math.round(f.avg)}g / giorno`
+      avgActual: Math.round(avgFatActual),
+      avgTarget: Math.round(avgFatTarget),
+      avgDelta: Math.round(avgFatDelta)
     },
     carbs: {
-      label: 'Carboidrati',
-      value: Math.round(cb.avg),
-      target: Math.round(cb.target),
-      pct: cb.target ? Math.round((cb.avg / cb.target) * 100) : 0,
-      status: cb.avg > cb.target * 1.1 || cb.avg < cb.target * 0.9 ? 'warning' : 'ok',
-      detail: `Media ${Math.round(cb.avg)}g / giorno`
+      avgActual: Math.round(avgCarbsActual),
+      avgTarget: Math.round(avgCarbsTarget),
+      avgDelta: Math.round(avgCarbsDelta)
     },
-    workouts: {
-      label: 'Allenamenti',
-      completed: report.training.completed,
-      planned: report.training.planned,
-      daysSinceLast: report.training.daysSinceLastWorkout,
-      status: report.training.missed > 0 ? 'warning' : 'ok',
-      detail: report.training.daysSinceLastWorkout !== null ? `${report.training.daysSinceLastWorkout} gg dall'ultimo` : 'Nessun dato'
-    },
-    consistency: {
-      label: 'Tracciamento',
-      daysLogged: daysWithData,
-      totalDays: totalDays,
-      pct: totalDays ? Math.round((daysWithData / totalDays) * 100) : 0,
-      status: daysWithData >= Math.ceil(totalDays * 0.7) ? 'ok' : 'warning'
+    training: {
+      plannedCount,
+      completedCount,
+      missedCount,
+      completionRate: safeDiv(completedCount, plannedCount),
+      daysSinceLastWorkout
     }
   };
 }
 
 /**
- * Creates short-term action plan in Italian based on the report
+ * Detects domain patterns based on calculated metrics and daily observations.
  */
-function generateActionPlan(report) {
-  const actionsToday = [];
-  
-  if (report.macros.protein.daysBelow80pct > 0) {
-    actionsToday.push({
-      text: 'Aumenta le proteine magre',
-      rationale: 'Sei stato sotto l\'obiettivo proteico di recente.'
+export function detectPatterns(metrics, validDays) {
+  const patterns = [];
+  if (metrics.insufficientData) return patterns;
+
+  const { calories, protein, fat, carbs, training, daysLogged } = metrics;
+
+  // Energy pattern
+  if (calories.averageDelta > 50) {
+    patterns.push({
+      id: 'high_calories',
+      domain: 'energy',
+      severity: calories.averageDelta > 200 ? 4 : 3,
+      persistence: daysLogged >= 3 ? 4 : 2,
+      confidence: 5,
+      actionability: 4,
+      title: 'Eccesso Calorico',
+      evidence: `Media di ${calories.averageActual} kcal/giorno (${calories.averageDelta > 0 ? '+' : ''}${calories.averageDelta} kcal rispetto al target).`,
+      actual: calories.averageActual,
+      target: calories.averageTarget,
+      delta: calories.averageDelta,
+      recommendedAction: 'Torna al target calorico previsto mantenendo le porzioni controllate.'
+    });
+  } else if (calories.averageDelta < -150) {
+    patterns.push({
+      id: 'low_calories',
+      domain: 'energy',
+      severity: 3,
+      persistence: daysLogged >= 3 ? 4 : 2,
+      confidence: 5,
+      actionability: 4,
+      title: 'Apporto Calorico Basso',
+      evidence: `Media di ${calories.averageActual} kcal/giorno (${calories.averageDelta} kcal rispetto al target).`,
+      actual: calories.averageActual,
+      target: calories.averageTarget,
+      delta: calories.averageDelta,
+      recommendedAction: 'Aggiungi uno spuntino nutriente per evitare cali energetici e sostenere il recupero.'
     });
   }
 
-  if (report.training.daysSinceLastWorkout !== null && report.training.daysSinceLastWorkout >= 2) {
-    actionsToday.push({
-      text: 'Programma un allenamento',
-      rationale: 'Sono passati alcuni giorni dalla tua ultima sessione.'
+  // Fat pattern
+  if (fat.avgDelta > 8) {
+    patterns.push({
+      id: 'high_fat',
+      domain: 'fat',
+      severity: fat.avgDelta > 20 ? 4 : 3,
+      persistence: daysLogged >= 3 ? 4 : 2,
+      confidence: 5,
+      actionability: 5,
+      title: 'Grassi Sopra Target',
+      evidence: `Grassi a ${fat.avgActual} g/giorno in media (+${fat.avgDelta} g rispetto all'obiettivo).`,
+      actual: fat.avgActual,
+      target: fat.avgTarget,
+      delta: fat.avgDelta,
+      recommendedAction: 'Riduci l\'uso di condimenti grassi e snack ad elevata densità lipidica.'
     });
   }
 
-  if (actionsToday.length > 0) {
-    report.actionPlan.push({ day: 'oggi', actions: actionsToday });
-  } else {
-    report.actionPlan.push({ day: 'oggi', actions: [{ text: 'Mantieni la costanza', rationale: 'I tuoi valori sono in linea.' }] });
+  // Protein pattern
+  if (protein.avgDelta < -5) {
+    patterns.push({
+      id: 'low_protein',
+      domain: 'protein',
+      severity: protein.avgDelta < -15 ? 4 : 3,
+      persistence: daysLogged >= 3 ? 4 : 2,
+      confidence: 5,
+      actionability: 5,
+      title: 'Proteine Sotto Target',
+      evidence: `Proteine a ${protein.avgActual} g/giorno in media (${protein.avgDelta} g rispetto all'obiettivo).`,
+      actual: protein.avgActual,
+      target: protein.avgTarget,
+      delta: protein.avgDelta,
+      recommendedAction: 'Aggiungi fonti proteiche magre ai tuoi pasti principali.'
+    });
   }
+
+  // Carbs pattern
+  if (carbs.avgDelta > 20) {
+    patterns.push({
+      id: 'high_carbs',
+      domain: 'carbs',
+      severity: 2,
+      persistence: 3,
+      confidence: 4,
+      actionability: 3,
+      title: 'Carboidrati Moderatamente Alti',
+      evidence: `Carboidrati a ${carbs.avgActual} g/giorno in media (+${carbs.avgDelta} g rispetto al target).`,
+      actual: carbs.avgActual,
+      target: carbs.avgTarget,
+      delta: carbs.avgDelta,
+      recommendedAction: 'Modera le porzioni di amidi nei giorni di riposo.'
+    });
+  }
+
+  // Training pattern (Positive)
+  if (training.completedCount > 0) {
+    patterns.push({
+      id: 'training_success',
+      domain: 'training',
+      severity: 1, // Positive secondary
+      persistence: 4,
+      confidence: 5,
+      actionability: 2,
+      title: 'Allenamenti Regolari',
+      evidence: `Completati ${training.completedCount} allenamenti nel periodo analizzato.`,
+      actual: training.completedCount,
+      target: training.plannedCount,
+      delta: training.completedCount - training.plannedCount,
+      recommendedAction: 'Mantieni questa regolarità nelle sessioni programmate.'
+    });
+  }
+
+  return patterns;
 }
 
 /**
- * Minimizes InsightReport to a summary format for external AI services.
- * 
- * @param {Object} report - The full InsightReport object.
- * @returns {Object} Minimized object for AI.
+ * Merges correlated patterns into a single unified story to prevent duplication.
  */
-export function buildAISummary(report) {
-  if (!report || !report.period) return {};
+export function mergeRelatedPatterns(patterns, metrics) {
+  if (!patterns || patterns.length === 0) return [];
+
+  const hasHighKcal = patterns.some(p => p.id === 'high_calories');
+  const hasHighFat = patterns.some(p => p.id === 'high_fat');
+  const hasLowProtein = patterns.some(p => p.id === 'low_protein');
+
+  // Unified story: High kcal + High fat + Low protein
+  if (hasHighKcal && hasHighFat && hasLowProtein) {
+    const filtered = patterns.filter(p => !['high_calories', 'high_fat', 'low_protein'].includes(p.id));
+    const merged = {
+      id: 'nutritional_imbalance_primary',
+      domain: 'nutrition',
+      severity: 5,
+      persistence: 4,
+      confidence: 5,
+      actionability: 5,
+      title: 'Alimentazione da Riequilibrare',
+      evidence: `Negli ultimi ${metrics.daysLogged} giorni registrati hai assunto in media ${metrics.calories.averageActual} kcal/giorno (+${metrics.calories.averageDelta} kcal rispetto al target). Lo scostamento è legato soprattutto ai grassi (+${metrics.fat.avgDelta} g/giorno), mentre le proteine rimangono sotto target (${metrics.protein.avgDelta} g/giorno).`,
+      explanation: 'Sostituire parte delle fonti alimentari più ricche di grassi con alternative proteiche più magre ti permette di aumentare l\'apporto proteico senza incrementare ulteriormente le calorie complessive.',
+      recommendedAction: 'Non aggiungere semplicemente cibo: mantieni il target calorico e sostituisci le fonti più grasse con opzioni proteiche magre (petto di pollo, merluzzo, albumi, yogurt greco magro).'
+    };
+    return [merged, ...filtered];
+  }
+
+  // Unified story: High kcal + High fat
+  if (hasHighKcal && hasHighFat) {
+    const filtered = patterns.filter(p => !['high_calories', 'high_fat'].includes(p.id));
+    const merged = {
+      id: 'high_kcal_fat_primary',
+      domain: 'nutrition',
+      severity: 4,
+      persistence: 4,
+      confidence: 5,
+      actionability: 4,
+      title: 'Eccesso Calorico da Grassi',
+      evidence: `Eccesso medio di ${metrics.calories.averageDelta} kcal/giorno guidato da un apporto di grassi di +${metrics.fat.avgDelta} g/giorno oltre il target.`,
+      explanation: 'I grassi hanno un\'elevata densità calorica (9 kcal/g). Una leggera riduzione dei condimenti riporta rapidamente le calorie in target.',
+      recommendedAction: 'Ripristina il target normale nei prossimi pasti controllando i condimenti, senza ricorrere a digiuni di compensazione.'
+    };
+    return [merged, ...filtered];
+  }
+
+  return patterns;
+}
+
+/**
+ * Ranks insights using formula: priorityScore = severity * persistence * confidence * actionability.
+ */
+export function rankInsights(patterns) {
+  if (!patterns || patterns.length === 0) {
+    return { primary: null, secondary: [], positive: null };
+  }
+
+  const scored = patterns.map(p => ({
+    ...p,
+    priorityScore: (p.severity || 1) * (p.persistence || 1) * (p.confidence || 1) * (p.actionability || 1)
+  })).sort((a, b) => b.priorityScore - a.priorityScore);
+
+  const primary = scored.find(p => p.severity >= 3) || scored[0];
+  const positive = scored.find(p => p.domain === 'training' || p.severity === 1) || null;
+  const secondary = scored.filter(p => p !== primary && p !== positive).slice(0, 2);
+
+  return { primary, secondary, positive };
+}
+
+/**
+ * Builds a 3-step contextual action plan.
+ */
+export function buildActionPlan(rankedInsights, metrics) {
+  const steps = [];
+
+  if (metrics.insufficientData) {
+    return [
+      { timeframe: 'Oggi', text: 'Registra i tuoi pasti ed allenamenti per sbloccare l\'analisi del coach.' }
+    ];
+  }
+
+  // Step 1: Oggi
+  if (rankedInsights.primary && rankedInsights.primary.domain === 'nutrition') {
+    steps.push({
+      timeframe: 'Oggi',
+      text: 'Torna al target calorico previsto mantenendo le porzioni bilanciate senza digiuni compensativi.'
+    });
+  } else {
+    steps.push({
+      timeframe: 'Oggi',
+      text: 'Mantieni l\'aderenza ai tuoi target nutrizionali e di allenamento.'
+    });
+  }
+
+  // Step 2: Prossimi pasti
+  if (rankedInsights.primary && rankedInsights.primary.id === 'nutritional_imbalance_primary') {
+    steps.push({
+      timeframe: 'Prossimi pasti',
+      text: 'Privilegia fonti proteiche magre (pollo, albumi, yogurt greco) e riduci l\'olio da condimento.'
+    });
+  } else if (metrics.protein.avgDelta < 0) {
+    steps.push({
+      timeframe: 'Prossimi pasti',
+      text: 'Inserisci una porzione proteica magra a pranzo e cena.'
+    });
+  } else {
+    steps.push({
+      timeframe: 'Prossimi pasti',
+      text: 'Bevi almeno 2 litri d\'acqua e consuma verdura per supportare la sazietà.'
+    });
+  }
+
+  // Step 3: Questa settimana
+  if (metrics.training.completedCount > 0) {
+    steps.push({
+      timeframe: 'Questa settimana',
+      text: `Mantieni la regolarità degli allenamenti (${metrics.training.completedCount} completati finora).`
+    });
+  } else {
+    steps.push({
+      timeframe: 'Questa settimana',
+      text: 'Pianifica le tue prossime sessioni di allenamento nel diario.'
+    });
+  }
+
+  return steps;
+}
+
+/**
+ * Builds a clean, structured context payload for Gemini AI.
+ */
+export function buildAIContext(metrics, rankedInsights, actionPlan) {
   return {
     period: {
-      start: report.period.start,
-      end: report.period.end,
-      daysWithData: report.period.daysWithData
+      daysLogged: metrics.daysLogged,
+      totalDays: metrics.totalDays,
     },
     calories: {
-      avgActual: Math.round(report.calories.avgActual),
-      avgTarget: Math.round(report.calories.avgTarget),
-      daysAbove: report.calories.daysAbove,
-      daysBelow: report.calories.daysBelow,
-      variability: report.calories.variability
+      avgActual: metrics.calories.averageActual,
+      avgTarget: metrics.calories.averageTarget,
+      avgDelta: metrics.calories.averageDelta,
     },
     macros: {
-      protein: {
-        avg: Math.round(report.macros.protein.avg),
-        target: Math.round(report.macros.protein.target),
-        daysBelow80pct: report.macros.protein.daysBelow80pct
-      },
-      carbs: {
-        avg: Math.round(report.macros.carbs.avg),
-        target: Math.round(report.macros.carbs.target)
-      },
-      fat: {
-        avg: Math.round(report.macros.fat.avg),
-        target: Math.round(report.macros.fat.target),
-        daysAbove120pct: report.macros.fat.daysAbove120pct
-      }
+      protein: metrics.protein,
+      fat: metrics.fat,
+      carbs: metrics.carbs,
     },
     training: {
-      completed: report.training.completed,
-      planned: report.training.planned,
-      missed: report.training.missed,
-      daysSinceLastWorkout: report.training.daysSinceLastWorkout
+      completedCount: metrics.training.completedCount,
+      plannedCount: metrics.training.plannedCount,
     },
-    detectedPatterns: report.detectedPatterns.map(p => ({
-      id: p.id,
-      title: p.title
+    primaryInsight: rankedInsights.primary ? {
+      title: rankedInsights.primary.title,
+      evidence: rankedInsights.primary.evidence,
+      recommendedAction: rankedInsights.primary.recommendedAction
+    } : null,
+    actionPlan: actionPlan.map(a => `${a.timeframe}: ${a.text}`)
+  };
+}
+
+/**
+ * Validates Gemini response to prevent contradictory statements.
+ */
+export function validateAIResponse(aiText, metrics, rankedInsights) {
+  if (!aiText || typeof aiText !== 'string') {
+    return { valid: false, reason: 'Testo non valido o vuoto' };
+  }
+
+  const lower = aiText.toLowerCase();
+
+  // Anti-contradiction check 1: "Valori in linea" or "tutto bene" when primary is critical
+  if (rankedInsights.primary && rankedInsights.primary.severity >= 3) {
+    if (lower.includes('valori in linea') || lower.includes('tutto bene') || lower.includes('continua così')) {
+      return { valid: false, reason: 'Incoerenza: dichiara valori in linea nonostante criticità nutrizionali' };
+    }
+  }
+
+  // Anti-contradiction check 2: Fasting or extreme compensations
+  if (lower.includes('digiuna') || lower.includes('salta i pasti') || lower.includes('taglio drastico')) {
+    return { valid: false, reason: 'Incoerenza: suggerisce compensazioni estreme non ammesse' };
+  }
+
+  return { valid: true, sanitizedReport: aiText };
+}
+
+/**
+ * Builds shared export model for PDF / CSV.
+ */
+export function buildExportModel(metrics, rankedInsights, actionPlan, validDays, dates, dateFrom, dateTo) {
+  return {
+    meta: {
+      title: 'Andamento Fitness KOVA',
+      dateFrom,
+      dateTo,
+      generatedAt: new Date().toLocaleString('it-IT'),
+      daysLogged: metrics.daysLogged,
+      totalDays: metrics.totalDays,
+    },
+    metrics,
+    insights: rankedInsights,
+    actionPlan,
+    dailyTable: validDays.map(d => ({
+      date: d.date,
+      status: d.isIncomplete ? 'In corso' : 'Completo',
+      kcalActual: d.nut.kcal,
+      kcalTarget: d.target.kcal,
+      kcalDelta: d.nut.kcal - d.target.kcal,
+      proteinActual: d.nut.protein,
+      proteinTarget: d.target.protein,
+      fatActual: d.nut.fats,
+      fatTarget: d.target.fats,
+      carbsActual: d.nut.carbs,
+      carbsTarget: d.target.carbs,
+      workout: d.workoutDone ? (d.workoutName || 'Completato') : (d.isTrainingDay ? 'Saltato' : 'Riposo')
     }))
   };
 }
 
 /**
- * Generates a local, plain Italian text fallback summary from the report.
- * Used when Gemini or external AI is unavailable.
- * 
- * @param {Object} report - The full InsightReport object.
- * @returns {string} 2-4 sentences summary in Italian.
+ * Main pure analysis entry point.
+ */
+export function analyzeWeeklyData(dates, logs, programData, dietPlan, settings, todayStr) {
+  const { validDays, allDays } = normalizeDiaryAnalyticsData(dates, logs, programData, dietPlan, settings, todayStr);
+  const metrics = calculatePeriodMetrics(validDays, dates, todayStr);
+  const rawPatterns = detectPatterns(metrics, validDays);
+  const mergedPatterns = mergeRelatedPatterns(rawPatterns, metrics);
+  const rankedInsights = rankInsights(mergedPatterns);
+  const actionPlan = buildActionPlan(rankedInsights, metrics);
+
+  return {
+    period: { start: dates[0], end: dates[dates.length - 1], daysAnalyzed: dates.length, daysWithData: metrics.daysLogged },
+    metrics,
+    allDays,
+    validDays,
+    detectedPatterns: mergedPatterns,
+    focusInsights: [
+      ...(rankedInsights.primary ? [rankedInsights.primary] : []),
+      ...rankedInsights.secondary,
+      ...(rankedInsights.positive ? [rankedInsights.positive] : [])
+    ],
+    rankedInsights,
+    actionPlan
+  };
+}
+
+/**
+ * Generates local text fallback summary when Gemini is unavailable.
  */
 export function generateLocalFallback(report) {
-  if (report.period.daysWithData === 0) {
-    return 'Dati insufficienti per generare un riepilogo. Assicurati di tracciare le tue giornate.';
+  if (!report || report.metrics?.insufficientData) {
+    return 'Dati insufficienti per generare un riepilogo. Assicurati di tracciare le tue giornate nel diario.';
   }
 
-  const sentences = [];
-  
-  // High priority issue
-  const alerts = report.focusInsights.filter(i => i.type === 'alert' || i.type === 'warning');
-  if (alerts.length > 0) {
-    sentences.push(alerts[0].evidence + ' ' + alerts[0].action);
-    if (alerts.length > 1) {
-      sentences.push(alerts[1].action);
-    }
+  const { primary, positive } = report.rankedInsights;
+  const parts = [];
+
+  if (primary) {
+    parts.push(`📌 ${primary.title}: ${primary.evidence} ${primary.recommendedAction}`);
   } else {
-    sentences.push('I tuoi macronutrienti e calorie sono generalmente in linea con gli obiettivi.');
+    parts.push('I tuoi macronutrienti e calorie sono generalmente in linea con gli obiettivi previsti.');
   }
 
-  // Positive reinforcement
-  const positives = report.focusInsights.filter(i => i.type === 'positive');
-  if (positives.length > 0) {
-    sentences.push(positives[0].title + ': ' + positives[0].evidence);
-  } else if (report.training.completed > 0) {
-    sentences.push(`Ottimo lavoro nell'aver completato ${report.training.completed} allenamenti in questo periodo.`);
+  if (positive) {
+    parts.push(`💪 ${positive.title}: ${positive.evidence}`);
   }
 
-  return sentences.join(' ');
+  return parts.join(' ');
 }

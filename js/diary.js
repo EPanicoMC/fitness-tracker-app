@@ -4,7 +4,8 @@ import {
 } from './firebase-config.js';
 import { getTodayString, getDayOfWeek, formatDateIT, formatDateShort, showToast, DAYS_IT, DAY_ORDER } from './app.js';
 import { generateWeeklyCoachReportAI, calcMacrosFromText, analyzeFoodImageAI } from './gemini.js';
-import { analyzeWeeklyData, buildAISummary, generateLocalFallback } from './insights-engine.js';
+import { analyzeWeeklyData, buildAISummary, generateLocalFallback, buildExportModel, validateAIResponse } from './insights-engine.js';
+import { generatePDF, generateCSV } from './export-engine.js';
 
 const TODAY = getTodayString();
 let currentMonth = new Date(TODAY + 'T12:00:00');
@@ -854,134 +855,352 @@ function buildWeekView() {
 
   // Analyze data with pure Insights Engine
   const report = analyzeWeeklyData(dates, allRecentLogs, programData, _dietPlanCache, settingsData, TODAY);
+  const m = report.metrics;
 
-  // 1. Render #recent-recap: Focus di Oggi Hero Card
+  // 1. Render #recent-recap: Hero "IL TUO QUADRO"
   const recapEl = document.getElementById('recent-recap');
   if (recapEl) {
-    if (report.focusInsights.length > 0) {
-      const topFocus = report.focusInsights[0];
-      const severityClass = topFocus.type === 'alert' ? 'insight-item--alert' 
-        : topFocus.type === 'warning' ? 'insight-item--warning' : 'insight-item--positive';
+    const primary = report.rankedInsights.primary;
+    const title = primary ? primary.title : 'Andamento Regolare';
+    const severityBadge = primary && primary.severity >= 3
+      ? `<span class="insight-pill" style="background:rgba(255,106,0,0.15);color:var(--accent)">ALIMENTAZIONE DA RIEQUILIBRARE</span>`
+      : `<span class="insight-pill" style="background:rgba(111,168,138,0.15);color:var(--ok)">TUTTO REGOLARE</span>`;
 
-      const otherInsights = report.focusInsights.slice(1).map(i => {
-        const c = i.type === 'alert' ? 'insight-item--alert' : i.type === 'warning' ? 'insight-item--warning' : 'insight-item--positive';
-        return `
-          <div class="insight-item ${c}">
-            <div class="insight-item-title">${i.title}</div>
-            <div class="insight-item-evidence">${i.evidence}</div>
-            <div class="insight-item-action">${i.action}</div>
-          </div>`;
-      }).join('');
+    const deltaSign = m.calories.averageDelta > 0 ? '+' : '';
+    const deltaText = `${deltaSign}${m.calories.averageDelta} kcal/giorno`;
+    const actionText = primary ? primary.recommendedAction : 'Mantieni questo ritmo costante e bilanciato!';
 
-      recapEl.innerHTML = `
-        <div class="insight-focus card">
-          <div class="insight-focus-header">
-            <span style="font-size:14px;font-weight:900;color:var(--t1)">📌 FOCUS DI OGGI</span>
-            <span class="insight-pill">7 GIORNI</span>
+    const fatSign = m.fat.avgDelta > 0 ? '+' : '';
+    const proSign = m.protein.avgDelta > 0 ? '+' : '';
+
+    recapEl.innerHTML = `
+      <div class="card insight-focus" style="margin-bottom:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <span style="font-size:11px;font-weight:800;color:var(--t2);letter-spacing:1px">📌 IL TUO QUADRO</span>
+          ${severityBadge}
+        </div>
+        <div style="font-size:18px;font-weight:900;color:var(--t1);margin-bottom:4px">${title}</div>
+        <div style="font-size:11px;color:var(--t3);margin-bottom:14px">Media giornaliera, ultimi ${m.daysLogged} giorni registrati su ${m.totalDays}</div>
+
+        <div style="background:rgba(0,0,0,0.25);border-radius:12px;padding:14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between">
+          <div>
+            <div style="font-size:20px;font-weight:900;color:${m.calories.averageDelta > 100 ? 'var(--accent)' : 'var(--t1)'}">${deltaText}</div>
+            <div style="font-size:11px;color:var(--t3)">media (${m.calories.averageActual} / ${m.calories.averageTarget} target)</div>
           </div>
-          <div class="insight-item ${severityClass}" style="margin-bottom:12px">
-            <div class="insight-item-title">${topFocus.title}</div>
-            <div class="insight-item-evidence">${topFocus.evidence}</div>
-            <div class="insight-item-action">➡️ ${topFocus.action}</div>
+          <div style="text-align:right;font-size:11px;font-weight:700;color:var(--t2)">
+            <div>Grassi: <span style="color:${m.fat.avgDelta > 5 ? 'var(--accent)' : 'var(--t1)'}">${fatSign}${m.fat.avgDelta} g/gg</span></div>
+            <div>Proteine: <span style="color:${m.protein.avgDelta < -5 ? 'var(--alert)' : 'var(--t1)'}">${proSign}${m.protein.avgDelta} g/gg</span></div>
           </div>
-          ${otherInsights}
-        </div>`;
-    } else {
-      recapEl.innerHTML = `
-        <div class="insight-focus card">
-          <div class="insight-focus-header">
-            <span style="font-size:14px;font-weight:900;color:var(--t1)">📌 FOCUS DI OGGI</span>
-            <span class="insight-pill">7 GIORNI</span>
-          </div>
-          <div class="insight-item insight-item--positive">
-            <div class="insight-item-title">Andamento Regolare</div>
-            <div class="insight-item-evidence">I tuoi dati nutrizionali ed allenamenti sono ben bilanciati.</div>
-            <div class="insight-item-action">Continua a mantenere questo ritmo costante!</div>
-          </div>
-        </div>`;
-    }
+        </div>
+
+        <div style="font-size:12px;color:var(--accent2);font-weight:600;line-height:1.4">
+          ➡️ ${actionText}
+        </div>
+      </div>`;
   }
 
-  // 2. Render #week-view: Action Plan + Trend Overview + AI Coach Card
-  const actionItemsHtml = (report.actionPlan && report.actionPlan.length > 0)
-    ? report.actionPlan.flatMap(ap => ap.actions.map(act => `
-        <div class="action-plan-item">
-          <div>
-            <div style="font-size:13px;font-weight:700;color:var(--t1)">• ${act.text}</div>
-            <div class="action-plan-rationale">${act.rationale}</div>
-          </div>
-        </div>`
-      )).join('')
-    : '<div class="action-plan-item"><div style="font-size:12px;color:var(--t2)">Nessuna azione urgente consigliata oggi.</div></div>';
+  // 2. Render 7-Day SVG Calorie Bar Chart
+  const svgWidth = 320;
+  const svgHeight = 120;
+  const barWidth = 26;
+  const gap = 16;
+  const maxKcal = Math.max(2800, ...report.allDays.map(d => (d.nut?.kcal || 0)));
 
-  const t = report.trendOverview;
-  const metricsHtml = t ? `
-    <div class="trend-overview card" style="margin-top:16px">
-      <div class="clabel" style="margin-bottom:12px"><i class="ri-line-chart-line"></i> Panoramica Trend (7 gg)</div>
-      
-      <div class="trend-metric trend-metric--${t.calories?.status || 'good'}">
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-          <span class="trend-metric-label">🔥 Calorie</span>
-          <span class="trend-metric-values">${t.calories?.value} / ${t.calories?.target} kcal</span>
+  const svgBars = report.allDays.map((d, i) => {
+    const x = 20 + i * (barWidth + gap);
+    const dayName = new Date(d.date + 'T12:00:00').toLocaleDateString('it-IT', { weekday: 'short' }).substring(0, 3);
+    const isToday = d.date === TODAY;
+
+    if (!d.isLogged) {
+      // Missing day: dashed outline, no zero bar!
+      return `
+        <g transform="translate(${x}, 0)">
+          <rect x="0" y="20" width="${barWidth}" height="70" rx="4" fill="none" stroke="rgba(255,255,255,0.1)" stroke-dasharray="3 3"/>
+          <text x="${barWidth/2}" y="55" text-anchor="middle" font-size="8" fill="var(--t3)">N/D</text>
+          <text x="${barWidth/2}" y="105" text-anchor="middle" font-size="10" font-weight="${isToday ? '800' : '500'}" fill="${isToday ? 'var(--accent)' : 'var(--t3)'}">${dayName}</text>
+        </g>`;
+    }
+
+    const kcal = d.nut.kcal;
+    const targetKcal = d.target.kcal || 2000;
+    const barHeight = Math.min(70, Math.round((kcal / maxKcal) * 70));
+    const y = 90 - barHeight;
+
+    const isOver = kcal > targetKcal * 1.05;
+    const barColor = isOver ? 'var(--accent)' : 'var(--ok)';
+
+    return `
+      <g transform="translate(${x}, 0)">
+        <rect x="0" y="${y}" width="${barWidth}" height="${barHeight}" rx="4" fill="${barColor}" opacity="0.9"/>
+        <text x="${barWidth/2}" y="${Math.max(15, y - 4)}" text-anchor="middle" font-size="8" font-weight="700" fill="var(--t2)">${kcal}</text>
+        <text x="${barWidth/2}" y="105" text-anchor="middle" font-size="10" font-weight="${isToday ? '800' : '500'}" fill="${isToday ? 'var(--accent)' : 'var(--t3)'}">${dayName}</text>
+      </g>`;
+  }).join('');
+
+  const chartHtml = `
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <span style="font-size:11px;font-weight:800;color:var(--t2);letter-spacing:1px">📊 CALORIE (ULTIMI 7 GIORNI)</span>
+        <span style="font-size:10px;color:var(--t3)">Target ~${m.calories.averageTarget} kcal</span>
+      </div>
+      <div style="width:100%;overflow-x:auto">
+        <svg viewBox="0 0 320 120" style="width:100%;max-width:400px;display:block;margin:0 auto">
+          <!-- Target reference line -->
+          <line x1="10" y1="${90 - Math.round((m.calories.averageTarget / maxKcal) * 70)}" x2="310" y2="${90 - Math.round((m.calories.averageTarget / maxKcal) * 70)}" stroke="rgba(255,255,255,0.2)" stroke-dasharray="4 4" stroke-width="1"/>
+          ${svgBars}
+        </svg>
+      </div>
+    </div>`;
+
+  // 3. Render Macro Balance Horizontal Bars
+  const pDeltaSign = m.protein.avgDelta > 0 ? '+' : '';
+  const fDeltaSign = m.fat.avgDelta > 0 ? '+' : '';
+  const cDeltaSign = m.carbs.avgDelta > 0 ? '+' : '';
+
+  const macroHtml = `
+    <div class="card" style="margin-bottom:16px">
+      <div style="font-size:11px;font-weight:800;color:var(--t2);letter-spacing:1px;margin-bottom:12px">🥩 BILANCIO MACRONUTRIENTI (MEDIA GIORNALIERA)</div>
+
+      <div style="margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;margin-bottom:4px">
+          <span>PROTEINE</span>
+          <span>${m.protein.avgActual} / ${m.protein.avgTarget} g <span style="font-size:11px;color:${m.protein.avgDelta < -5 ? 'var(--alert)' : 'var(--t3)'}">(${pDeltaSign}${m.protein.avgDelta} g)</span></span>
         </div>
-        <div class="pbb h6"><div class="pbf" style="width:${Math.min(100, t.calories?.pct || 0)}%"></div></div>
-        <div class="trend-metric-detail">${t.calories?.detail || ''}</div>
+        <div class="pbb h6"><div class="pbf" style="width:${Math.min(100, Math.round((m.protein.avgActual / (m.protein.avgTarget || 1)) * 100))}%;background:${m.protein.avgDelta < -5 ? 'var(--alert)' : 'var(--ok)'}"></div></div>
       </div>
 
-      <div class="trend-metric trend-metric--${t.protein?.status || 'good'}" style="margin-top:12px">
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-          <span class="trend-metric-label">🥩 Proteine</span>
-          <span class="trend-metric-values">${t.protein?.value} / ${t.protein?.target} g</span>
+      <div style="margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;margin-bottom:4px">
+          <span>GRASSI</span>
+          <span>${m.fat.avgActual} / ${m.fat.avgTarget} g <span style="font-size:11px;color:${m.fat.avgDelta > 5 ? 'var(--accent)' : 'var(--t3)'}">(${fDeltaSign}${m.fat.avgDelta} g)</span></span>
         </div>
-        <div class="pbb h6"><div class="pbf" style="width:${Math.min(100, t.protein?.pct || 0)}%"></div></div>
-        <div class="trend-metric-detail">${t.protein?.detail || ''}</div>
+        <div class="pbb h6"><div class="pbf" style="width:${Math.min(100, Math.round((m.fat.avgActual / (m.fat.avgTarget || 1)) * 100))}%;background:${m.fat.avgDelta > 5 ? 'var(--accent)' : 'var(--ok)'}"></div></div>
       </div>
 
-      <div class="trend-metric trend-metric--${t.fat?.status || 'good'}" style="margin-top:12px">
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-          <span class="trend-metric-label">🥑 Grassi</span>
-          <span class="trend-metric-values">${t.fat?.value} / ${t.fat?.target} g</span>
+      <div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;margin-bottom:4px">
+          <span>CARBOIDRATI</span>
+          <span>${m.carbs.avgActual} / ${m.carbs.avgTarget} g <span style="font-size:11px;color:var(--t3)">(${cDeltaSign}${m.carbs.avgDelta} g)</span></span>
         </div>
-        <div class="pbb h6"><div class="pbf" style="width:${Math.min(100, t.fat?.pct || 0)}%"></div></div>
-        <div class="trend-metric-detail">${t.fat?.detail || ''}</div>
+        <div class="pbb h6"><div class="pbf" style="width:${Math.min(100, Math.round((m.carbs.avgActual / (m.carbs.avgTarget || 1)) * 100))}%;background:var(--ok)"></div></div>
       </div>
+    </div>`;
 
-      <div class="trend-metric trend-metric--${t.carbs?.status || 'good'}" style="margin-top:12px">
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-          <span class="trend-metric-label">🌾 Carboidrati</span>
-          <span class="trend-metric-values">${t.carbs?.value} / ${t.carbs?.target} g</span>
-        </div>
-        <div class="pbb h6"><div class="pbf" style="width:${Math.min(100, t.carbs?.pct || 0)}%"></div></div>
-        <div class="trend-metric-detail">${t.carbs?.detail || ''}</div>
+  // 4. Render Action Plan
+  const actionPlanItems = report.actionPlan.map(act => `
+    <div class="action-plan-item" style="padding:6px 0">
+      <div>
+        <div style="font-size:11px;font-weight:800;color:var(--t2);text-transform:uppercase;letter-spacing:1px">${act.timeframe}</div>
+        <div style="font-size:13px;font-weight:600;color:var(--t1);margin-top:2px">${act.text}</div>
       </div>
-    </div>` : '';
+    </div>`).join('');
 
+  const actionPlanHtml = `
+    <div class="card action-plan" style="margin-bottom:16px">
+      <div style="font-size:11px;font-weight:800;color:var(--t2);letter-spacing:1px;margin-bottom:10px">📋 PIANO AZIONE CONTESTUALE</div>
+      ${actionPlanItems}
+    </div>`;
+
+  // 5. Render Secondary Successes Strip
+  const secondarySuccessHtml = `
+    <div style="display:flex;gap:8px;margin-bottom:16px">
+      <div style="flex:1;background:rgba(111,168,138,0.08);border:1px solid rgba(111,168,138,0.2);border-radius:12px;padding:10px;text-align:center;font-size:11px;font-weight:700;color:var(--ok)">
+        💪 ${m.training.completedCount}/${m.training.plannedCount} Allenamenti
+      </div>
+      <div style="flex:1;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:12px;padding:10px;text-align:center;font-size:11px;font-weight:700;color:var(--t2)">
+        📋 ${m.daysLogged}/${m.totalDays} Giorni Registrati
+      </div>
+    </div>`;
+
+  // 6. Local Fallback text & AI Coach Card
   const fallbackText = generateLocalFallback(report);
 
   el.innerHTML = `
-    <!-- Action Plan Card -->
-    <div class="action-plan card">
-      <div class="clabel" style="margin-bottom:12px"><i class="ri-checkbox-circle-line"></i> Piano Azione Prossimi Giorni</div>
-      ${actionItemsHtml}
-    </div>
+    ${chartHtml}
+    ${macroHtml}
+    ${actionPlanHtml}
+    ${secondarySuccessHtml}
 
-    <!-- Trend Metrics -->
-    ${metricsHtml}
-
-    <!-- AI Weekly Coach Card -->
-    <div class="card ai-insight" style="margin-top:16px">
+    <div class="card ai-insight">
       <div class="ai-insight-header">
         <span style="font-size:11px;font-weight:800;color:var(--accent);letter-spacing:0.5px">🤖 AI WEEKLY COACH</span>
-        <span class="insight-pill">INTELLIGENZA ARTIFICIALE</span>
+        <span class="diary-insight-pill">ANALISI AI</span>
       </div>
       <div style="font-size:12px;color:var(--t2);line-height:1.5;margin-bottom:12px">
         ${fallbackText}
       </div>
       <button class="btn btn-v btn-sm" onclick="window.generateWeeklyCoachReport()" style="width:100%;font-weight:700">
-        🧠 Genera Report AI Dettagliato
+        🧠 Genera Feedback AI Approfondito
       </button>
     </div>`;
 }
+
+// ── Export Modal Handlers ──────────────────────────────────
+let _exportDateFrom = TODAY;
+let _exportDateTo = TODAY;
+
+window.openExportModal = function() {
+  const existing = document.getElementById('export-modal-overlay');
+  if (existing) existing.remove();
+
+  // Set default dates: last 30 days
+  const dTo = new Date(TODAY + 'T12:00:00');
+  const dFrom = new Date(dTo);
+  dFrom.setDate(dTo.getDate() - 29);
+
+  _exportDateFrom = dFrom.toISOString().split('T')[0];
+  _exportDateTo = TODAY;
+
+  const modalHtml = `
+    <div class="export-modal-overlay" id="export-modal-overlay" onclick="if(event.target===this) window.closeExportModal()">
+      <div class="export-modal-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <span style="font-size:16px;font-weight:800;color:var(--t1)">📤 Esporta Andamento</span>
+          <button class="btn-icon" onclick="window.closeExportModal()">✕</button>
+        </div>
+
+        <div style="font-size:12px;color:var(--t2);margin-bottom:16px">
+          Seleziona l'intervallo per generare un report PDF o CSV completo con metriche, grafici e tabella dettagliata.
+        </div>
+
+        <!-- Presets -->
+        <div class="export-preset-btns">
+          <button class="export-preset-btn" onclick="window.setExportPreset(7)">7 Giorni</button>
+          <button class="export-preset-btn active" onclick="window.setExportPreset(30)">30 Giorni</button>
+          <button class="export-preset-btn" onclick="window.setExportPreset('month')">Mese</button>
+          <button class="export-preset-btn" onclick="window.setExportPreset(90)">3 Mesi</button>
+        </div>
+
+        <!-- Date Range Inputs -->
+        <div style="display:flex;gap:12px;margin-bottom:20px">
+          <div style="flex:1">
+            <label style="font-size:10px;font-weight:800;color:var(--t3);text-transform:uppercase">Da</label>
+            <input type="date" id="export-date-from" class="fi" value="${_exportDateFrom}" style="margin-top:4px;font-size:13px" onchange="window.onExportDateChange()">
+          </div>
+          <div style="flex:1">
+            <label style="font-size:10px;font-weight:800;color:var(--t3);text-transform:uppercase">A</label>
+            <input type="date" id="export-date-to" class="fi" value="${_exportDateTo}" style="margin-top:4px;font-size:13px" onchange="window.onExportDateChange()">
+          </div>
+        </div>
+
+        <div id="export-range-info" style="font-size:11px;color:var(--t3);margin-bottom:20px;text-align:center"></div>
+
+        <!-- Action Buttons -->
+        <div style="display:flex;gap:10px">
+          <button class="btn btn-v" onclick="window.triggerExportPDF()" style="flex:2;font-weight:700">
+            📄 Genera PDF
+          </button>
+          <button class="btn btn-ghost" onclick="window.triggerExportCSV()" style="flex:1;font-weight:700">
+            📊 CSV
+          </button>
+        </div>
+      </div>
+    </div>`;
+
+  document.body.insertAdjacentHTML('beforeend', modalHtml);
+  window.updateExportRangeInfo();
+};
+
+window.closeExportModal = function() {
+  const modal = document.getElementById('export-modal-overlay');
+  if (modal) modal.remove();
+};
+
+window.setExportPreset = function(preset) {
+  const dTo = new Date(TODAY + 'T12:00:00');
+  let dFrom = new Date(dTo);
+
+  if (preset === 'month') {
+    dFrom.setDate(1);
+  } else {
+    const days = parseInt(preset, 10) || 30;
+    dFrom.setDate(dTo.getDate() - (days - 1));
+  }
+
+  _exportDateFrom = dFrom.toISOString().split('T')[0];
+  _exportDateTo = TODAY;
+
+  document.getElementById('export-date-from').value = _exportDateFrom;
+  document.getElementById('export-date-to').value = _exportDateTo;
+
+  document.querySelectorAll('.export-preset-btn').forEach(btn => btn.classList.remove('active'));
+  window.updateExportRangeInfo();
+};
+
+window.onExportDateChange = function() {
+  _exportDateFrom = document.getElementById('export-date-from').value;
+  _exportDateTo = document.getElementById('export-date-to').value;
+  window.updateExportRangeInfo();
+};
+
+window.updateExportRangeInfo = function() {
+  const infoEl = document.getElementById('export-range-info');
+  if (!infoEl) return;
+
+  if (_exportDateFrom > _exportDateTo) {
+    infoEl.innerHTML = `<span style="color:var(--alert)">⚠️ Data di inizio posteriore alla data di fine</span>`;
+    return;
+  }
+
+  const d1 = new Date(_exportDateFrom + 'T12:00:00');
+  const d2 = new Date(_exportDateTo + 'T12:00:00');
+  const totalDays = Math.round((d2 - d1) / (1000 * 60 * 60 * 24)) + 1;
+
+  infoEl.innerHTML = `Periodo selezionato: <b>${totalDays} giorni</b> (inclusivi)`;
+};
+
+window.triggerExportPDF = async function() {
+  if (_exportDateFrom > _exportDateTo) return showToast('Intervallo date non valido', 'err');
+
+  showToast('⏳ Generazione PDF in corso...', 'info');
+
+  try {
+    const dates = [];
+    const curr = new Date(_exportDateFrom + 'T12:00:00');
+    const end = new Date(_exportDateTo + 'T12:00:00');
+
+    while (curr <= end) {
+      dates.push(curr.toISOString().split('T')[0]);
+      curr.setDate(curr.getDate() + 1);
+    }
+
+    const report = analyzeWeeklyData(dates, allRecentLogs, programData, _dietPlanCache, settingsData, TODAY);
+    const exportModel = buildExportModel(report.metrics, report.rankedInsights, report.actionPlan, report.validDays, dates, _exportDateFrom, _exportDateTo);
+
+    const filename = await generatePDF(exportModel);
+    showToast(`✅ PDF scaricato: ${filename}`);
+    window.closeExportModal();
+  } catch (e) {
+    showToast('Errore generazione PDF: ' + e.message, 'err');
+    console.error(e);
+  }
+};
+
+window.triggerExportCSV = function() {
+  if (_exportDateFrom > _exportDateTo) return showToast('Intervallo date non valido', 'err');
+
+  try {
+    const dates = [];
+    const curr = new Date(_exportDateFrom + 'T12:00:00');
+    const end = new Date(_exportDateTo + 'T12:00:00');
+
+    while (curr <= end) {
+      dates.push(curr.toISOString().split('T')[0]);
+      curr.setDate(curr.getDate() + 1);
+    }
+
+    const report = analyzeWeeklyData(dates, allRecentLogs, programData, _dietPlanCache, settingsData, TODAY);
+    const exportModel = buildExportModel(report.metrics, report.rankedInsights, report.actionPlan, report.validDays, dates, _exportDateFrom, _exportDateTo);
+
+    const filename = generateCSV(exportModel);
+    showToast(`✅ CSV scaricato: ${filename}`);
+    window.closeExportModal();
+  } catch (e) {
+    showToast('Errore generazione CSV: ' + e.message, 'err');
+    console.error(e);
+  }
+};
+
 
 
 // Naviga al giorno selezionato nella heatmap: switcha al calendario e apre il detail
@@ -1629,16 +1848,28 @@ window.generateWeeklyCoachReport = async function() {
       showToast(aiResult.error, 'err');
       return;
     }
+
+    // Validate response against local metrics to prevent contradictory advice
+    const reportObj = analyzeWeeklyData(dates, allRecentLogs, programData, _dietPlanCache, settingsData, TODAY);
+    const validation = validateAIResponse(aiResult.report, reportObj.metrics, reportObj.rankedInsights);
+
+    let finalReportText = aiResult.report;
+    if (!validation.valid) {
+      console.warn('AI Response rejected by anti-contradiction filter:', validation.reason);
+      finalReportText = `⚠️ **Nota Coach**: ${validation.reason}.\n\n` + generateLocalFallback(reportObj);
+    }
+
     // Cache the result
     try {
-      localStorage.setItem(CACHE_KEY, aiResult.report);
+      localStorage.setItem(CACHE_KEY, finalReportText);
       localStorage.setItem(CACHE_TS_KEY, Date.now().toString());
     } catch(e) { /* storage full, ignore */ }
-    showWeeklyReportModal(aiResult.report);
+    showWeeklyReportModal(finalReportText);
   } catch(e) {
     showToast('Errore generazione report', 'err');
     console.error(e);
   }
+
 };
 
 function markdownToHtml(md) {
