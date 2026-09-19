@@ -478,6 +478,17 @@ export function buildAIContext(metrics, rankedInsights, actionPlan) {
 }
 
 /**
+ * Context summary builder for AI coach prompt payload (alias / wrapper).
+ */
+export function buildAISummary(report) {
+  if (!report) return {};
+  if (report.metrics && report.rankedInsights) {
+    return buildAIContext(report.metrics, report.rankedInsights, report.actionPlan || []);
+  }
+  return report;
+}
+
+/**
  * Validates Gemini response to prevent contradictory statements.
  */
 export function validateAIResponse(aiText, metrics, rankedInsights) {
