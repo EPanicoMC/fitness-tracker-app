@@ -26,19 +26,42 @@ async function ensureJsPDFLoaded() {
  * Helper to fetch image URL and convert to DataURL (base64) for jsPDF embedding
  */
 async function fetchImageAsDataURL(url) {
-  try {
-    const res = await fetch(url, { mode: 'cors' });
-    const blob = await res.blob();
-    return new Promise((resolve) => {
+  if (!url) return null;
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'Anonymous';
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth || img.width || 300;
+        canvas.height = img.naturalHeight || img.height || 300;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        const dataURL = canvas.toDataURL('image/jpeg', 0.85);
+        resolve(dataURL);
+      } catch (e) {
+        console.warn('Canvas toDataURL failed (CORS taint):', e);
+        fetchBlob(url, resolve);
+      }
+    };
+    img.onerror = () => fetchBlob(url, resolve);
+    img.src = url;
+  });
+}
+
+function fetchBlob(url, resolve) {
+  fetch(url)
+    .then(r => r.blob())
+    .then(blob => {
       const reader = new FileReader();
       reader.onloadend = () => resolve(reader.result);
       reader.onerror = () => resolve(null);
       reader.readAsDataURL(blob);
+    })
+    .catch(err => {
+      console.warn('Blob fetch failed:', err);
+      resolve(null);
     });
-  } catch (e) {
-    console.warn('Failed to load image for PDF embedding:', url, e);
-    return null;
-  }
 }
 
 /**
@@ -50,7 +73,7 @@ export async function generatePDF(exportModel) {
   const jsPDFClass = await ensureJsPDFLoaded();
   const doc = new jsPDFClass({ unit: 'pt', format: 'a4' });
 
-  const { meta, metrics, insights, actionPlan, dailyTable, workoutSessions, exerciseProgressions, checks } = exportModel;
+  const { meta, metrics, insights, actionPlan, dailyTable, checks } = exportModel;
 
   const primaryColor = [255, 106, 0];   // #ff6a00 (Accent Orange)
   const darkHeader = [35, 42, 47];      // #232a2f
@@ -130,105 +153,12 @@ export async function generatePDF(exportModel) {
     y = doc.lastAutoTable.finalY + 20;
   }
 
-  // 3. Detailed Workout Logs (OGNI SEDUTA DEL PERIODO)
-  checkAddPage(100);
+  // 3. Check Corporei & Misure Antropometriche (con Foto)
+  checkAddPage(140);
   doc.setFontSize(13);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...textColor);
-  doc.text('3. Registro Dettagliato Sedute di Allenamento', 40, y);
-  y += 14;
-
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(...mutedColor);
-  doc.text(`Sedute completate nel periodo: ${metrics.training.completedCount} su ${metrics.training.plannedCount} pianificate.`, 40, y);
-  y += 16;
-
-  if (workoutSessions && workoutSessions.length > 0) {
-    workoutSessions.forEach((s, idx) => {
-      checkAddPage(100);
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(...primaryColor);
-      doc.text(`Seduta ${idx + 1}: ${s.sessionName} (${s.date})`, 40, y);
-
-      doc.setFontSize(8.5);
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(...mutedColor);
-      const metaLine = `Durata: ${s.durationMin ? `${s.durationMin} min` : 'N/D'}  |  Volume Totale: ${s.totalVolumeKg} kg${s.notes ? `  |  Note: ${s.notes}` : ''}`;
-      doc.text(metaLine, 40, y + 11);
-      y += 22;
-
-      if (s.exercises && s.exercises.length > 0) {
-        const exHeaders = [['Esercizio', 'Serie × Ripetizioni / Pesi / RPE', 'Carico Max', 'Volume (kg)']];
-        const exRows = s.exercises.map(ex => [
-          ex.name,
-          ex.setsDetail || '—',
-          `${ex.maxKg} kg`,
-          `${ex.volume} kg`
-        ]);
-
-        if (doc.autoTable) {
-          doc.autoTable({
-            startY: y,
-            head: exHeaders,
-            body: exRows,
-            theme: 'grid',
-            headStyles: { fillColor: darkHeader, textColor: [255, 255, 255] },
-            styles: { fontSize: 8 },
-            columnStyles: { 0: { cellWidth: 140 }, 1: { cellWidth: 230 } },
-            margin: { left: 40, right: 40 }
-          });
-          y = doc.lastAutoTable.finalY + 16;
-        }
-      }
-    });
-  } else {
-    doc.setFontSize(9);
-    doc.setTextColor(...mutedColor);
-    doc.text('Nessuna seduta di allenamento registrata nel periodo selezionato.', 40, y);
-    y += 20;
-  }
-
-  // 4. Progressioni Carichi per Esercizio
-  if (exerciseProgressions && exerciseProgressions.length > 0) {
-    checkAddPage(120);
-    doc.setFontSize(13);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...textColor);
-    doc.text('4. Progressioni Carichi per Esercizio', 40, y);
-    y += 14;
-
-    const progHeaders = [['Esercizio', 'Sedute', 'Carico Iniziale', 'Carico Max / Finale', 'Delta Peso', 'Volume Cumulato']];
-    const progRows = exerciseProgressions.map(p => [
-      p.name,
-      `${p.sessionCount}`,
-      `${p.initialLoad} kg`,
-      `${p.finalLoad} kg`,
-      `${p.deltaKg > 0 ? '+' : ''}${p.deltaKg} kg`,
-      `${p.totalVolumeInPeriod} kg`
-    ]);
-
-    if (doc.autoTable) {
-      doc.autoTable({
-        startY: y,
-        head: progHeaders,
-        body: progRows,
-        theme: 'striped',
-        headStyles: { fillColor: primaryColor, textColor: [255, 255, 255] },
-        styles: { fontSize: 8 },
-        margin: { left: 40, right: 40 }
-      });
-      y = doc.lastAutoTable.finalY + 20;
-    }
-  }
-
-  // 5. Check Corporei & Misure Antropometriche
-  checkAddPage(120);
-  doc.setFontSize(13);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...textColor);
-  doc.text('5. Check Corporei e Misure Antropometriche', 40, y);
+  doc.text('3. Check Corporei e Misure Antropometriche', 40, y);
   y += 14;
 
   if (checks && checks.length > 0) {
@@ -270,45 +200,54 @@ export async function generatePDF(exportModel) {
     checks.forEach(c => {
       if (c.photos && c.photos.length > 0) {
         c.photos.forEach(p => {
-          if (p.url) photosToLoad.push({ date: c.date, url: p.url, view: p.view });
+          if (p.url) photosToLoad.push({ date: c.date, url: p.url, view: p.view || 'foto' });
         });
       }
     });
 
     if (photosToLoad.length > 0) {
-      checkAddPage(150);
+      checkAddPage(160);
       doc.setFontSize(11);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(...primaryColor);
-      doc.text(`📸 Foto Check Corporei (${photosToLoad.length} foto nel periodo)`, 40, y);
+      doc.text(`📸 Foto Check Corporei (${photosToLoad.length} foto disponibili)`, 40, y);
       y += 15;
 
       let photoX = 40;
-      const photoWidth = 100;
-      const photoHeight = 100;
+      const photoWidth = 110;
+      const photoHeight = 110;
 
       for (const item of photosToLoad) {
         if (photoX + photoWidth > 555) {
           photoX = 40;
-          y += photoHeight + 30;
-          checkAddPage(photoHeight + 30);
+          y += photoHeight + 35;
+          checkAddPage(photoHeight + 35);
         }
 
         const dataUrl = await fetchImageAsDataURL(item.url);
         if (dataUrl) {
           try {
             doc.addImage(dataUrl, 'JPEG', photoX, y, photoWidth, photoHeight);
-            doc.setFontSize(7.5);
+            doc.setFontSize(8);
             doc.setFont('helvetica', 'normal');
             doc.setTextColor(...mutedColor);
-            doc.text(`${item.date} (${item.view})`, photoX, y + photoHeight + 10);
+            doc.text(`${item.date} (${item.view})`, photoX, y + photoHeight + 12);
           } catch (err) {
             console.warn('Failed to embed image into PDF:', err);
           }
+        } else {
+          // If image download fails, render a helpful placeholder box with link text
+          doc.setDrawColor(200, 200, 200);
+          doc.setFillColor(245, 245, 245);
+          doc.rect(photoX, y, photoWidth, photoHeight, 'FD');
+          doc.setFontSize(8);
+          doc.setTextColor(...mutedColor);
+          doc.text(`📸 ${item.date}`, photoX + 10, y + 50);
+          doc.text(`(${item.view})`, photoX + 10, y + 65);
         }
         photoX += photoWidth + 20;
       }
-      y += photoHeight + 30;
+      y += photoHeight + 35;
     }
   } else {
     doc.setFontSize(9);
@@ -317,12 +256,12 @@ export async function generatePDF(exportModel) {
     y += 20;
   }
 
-  // 6. Dettaglio Giornaliero Completo (Nutrizione e Stato)
+  // 4. Registro Giornaliero Dieta & Allenamento
   checkAddPage(140);
   doc.setFontSize(13);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...textColor);
-  doc.text('6. Registro Giornaliero Dieta & Allenamento', 40, y);
+  doc.text('4. Registro Giornaliero Dieta & Allenamento', 40, y);
   y += 14;
 
   const dailyHeaders = [['Data', 'Stato', 'Calorie (Eff/Tgt)', 'Proteine', 'Grassi', 'Carbo', 'Workout']];
