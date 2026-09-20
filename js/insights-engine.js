@@ -519,10 +519,9 @@ export function validateAIResponse(aiText, metrics, rankedInsights) {
 export function buildExportModel(metrics, rankedInsights, actionPlan, validDays, dates, dateFrom, dateTo, options = {}) {
   const checksInput = options.checks || [];
 
-  // Include ALL checks (sorted chronologically) so the coach report has the full picture.
-  // Photos from every check are valuable context for the coach.
+  // Include ONLY checks strictly within the selected date range [dateFrom, dateTo]
   const periodChecks = checksInput
-    .filter(c => c && c.date)
+    .filter(c => c && c.date && c.date >= dateFrom && c.date <= dateTo)
     .sort((a, b) => a.date.localeCompare(b.date));
 
   const extractMs = (ms, key) => {
@@ -567,6 +566,7 @@ export function buildExportModel(metrics, rankedInsights, actionPlan, validDays,
       muscleMass: c.muscle_mass || null,
       measurements: formattedMs,
       notes: c.notes || '',
+      aiAnalysis: c.ai_analysis || null,
       photos
     };
   });
@@ -583,19 +583,21 @@ export function buildExportModel(metrics, rankedInsights, actionPlan, validDays,
     metrics,
     insights: rankedInsights,
     actionPlan,
-    dailyTable: validDays.map(d => ({
+    dailyTable: (options.allDays || validDays).map(d => ({
       date: d.date,
-      status: d.isIncomplete ? 'In corso' : 'Completo',
-      kcalActual: d.nut.kcal,
-      kcalTarget: d.target.kcal,
-      kcalDelta: d.nut.kcal - d.target.kcal,
-      proteinActual: d.nut.protein,
-      proteinTarget: d.target.protein,
-      fatActual: d.nut.fats,
-      fatTarget: d.target.fats,
-      carbsActual: d.nut.carbs,
-      carbsTarget: d.target.carbs,
-      workout: d.workoutDone ? (d.workoutName || 'Completato') : (d.isTrainingDay ? 'Saltato' : 'Riposo')
+      status: d.isIncomplete ? 'In corso' : (d.isLogged ? 'Completo' : 'Non tracciato'),
+      kcalActual: d.nut?.kcal || 0,
+      kcalTarget: d.target?.kcal || 0,
+      kcalDelta: (d.nut?.kcal || 0) - (d.target?.kcal || 0),
+      proteinActual: d.nut?.protein || 0,
+      proteinTarget: d.target?.protein || 0,
+      fatActual: d.nut?.fats || 0,
+      fatTarget: d.target?.fats || 0,
+      carbsActual: d.nut?.carbs || 0,
+      carbsTarget: d.target?.carbs || 0,
+      workout: d.workoutDone ? (d.workoutName || 'Completato') : (d.isTrainingDay ? 'Saltato' : 'Riposo'),
+      weightKg: d.log?.weight_kg ?? d.log?.weight ?? null,
+      steps: d.log?.steps ?? null
     })),
     checks
   };

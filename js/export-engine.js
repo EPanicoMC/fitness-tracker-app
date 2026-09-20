@@ -200,7 +200,7 @@ export async function generatePDF(exportModel) {
       'schiena_contratto': 'Post. contr.'
     };
 
-    const checkHeaders = [['Data Check', 'Peso (kg)', 'Delta Peso', '% Grasso', '% Muscolo', 'Misure Antropometriche (cm) / Note']];
+    const checkHeaders = [['Data Check', 'Peso (kg)', 'Delta Peso', '% Grasso', '% Muscolo', 'Misure Antropometriche & Note Coach']];
     const checkRows = checks.map(c => {
       const ms = c.measurements || {};
       const msParts = [];
@@ -211,7 +211,17 @@ export async function generatePDF(exportModel) {
       if (ms.hips != null) msParts.push(`Fianchi:${ms.hips}`);
       if (ms.bicep_r_flex != null) msParts.push(`Braccio dx:${ms.bicep_r_flex}`);
       if (ms.thigh_r != null) msParts.push(`Coscia dx:${ms.thigh_r}`);
-      const msStr = msParts.length ? msParts.join(' | ') : '—';
+      const msStr = msParts.length ? msParts.join(' | ') : '';
+
+      const noteLines = [];
+      if (msStr) noteLines.push(msStr);
+      if (c.notes) noteLines.push(`📝 Note: ${c.notes}`);
+      if (c.aiAnalysis) {
+        const coachText = typeof c.aiAnalysis === 'string'
+          ? c.aiAnalysis
+          : (c.aiAnalysis.analisi?.valutazione || c.aiAnalysis.sintesi || JSON.stringify(c.aiAnalysis));
+        noteLines.push(`🤖 Note Coach: ${coachText}`);
+      }
 
       return [
         c.date,
@@ -219,7 +229,7 @@ export async function generatePDF(exportModel) {
         c.weightDelta !== null ? `${c.weightDelta > 0 ? '+' : ''}${c.weightDelta} kg` : '—',
         c.bodyFat ? `${c.bodyFat}%` : '—',
         c.muscleMass ? `${c.muscleMass}%` : '—',
-        `${msStr}${c.notes ? ` (${c.notes})` : ''}`
+        noteLines.join('\n') || '—'
       ];
     });
 
@@ -327,10 +337,12 @@ export async function generatePDF(exportModel) {
   doc.text('4. Registro Giornaliero Dieta & Allenamento', 40, y);
   y += 14;
 
-  const dailyHeaders = [['Data', 'Stato', 'Calorie (Eff/Tgt)', 'Proteine', 'Grassi', 'Carbo', 'Workout']];
+  const dailyHeaders = [['Data', 'Stato', 'Peso', 'Passi', 'Calorie (Eff/Tgt)', 'Proteine', 'Grassi', 'Carbo', 'Workout']];
   const dailyRows = dailyTable.map(d => [
     d.date,
     d.status,
+    d.weightKg ? `${d.weightKg} kg` : '—',
+    d.steps ? `${d.steps.toLocaleString('it-IT')}` : '—',
     `${d.kcalActual} / ${d.kcalTarget}`,
     `${d.proteinActual}g`,
     `${d.fatActual}g`,
@@ -345,9 +357,11 @@ export async function generatePDF(exportModel) {
       body: dailyRows,
       theme: 'grid',
       headStyles: { fillColor: darkHeader, textColor: [255, 255, 255] },
-      styles: { fontSize: 8 },
+      styles: { fontSize: 7.5 },
       margin: { left: 40, right: 40 }
     });
+    y = doc.lastAutoTable.finalY + 20;
+  }
     y = doc.lastAutoTable.finalY + 20;
   }
 
