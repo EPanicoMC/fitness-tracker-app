@@ -567,7 +567,7 @@ window.quickUploadPhotosForCheck = function(id) {
     const newPhotoUrls = [];
     for (const { file, view } of quickFormPhotos) {
       try {
-        const base64Url = await compressImageFile(file, 1200, 0.85);
+        const base64Url = await compressImageFile(file, 900, 0.70);
         let finalUrl = base64Url;
         try {
           const storRef = ref(storage, `users/${getUserId()}/checks/${c.date}_${Date.now()}_${file.name}`);
@@ -590,7 +590,8 @@ window.quickUploadPhotosForCheck = function(id) {
       document.getElementById('quick-photo-modal')?.remove();
       await loadChecks();
     } catch(err) {
-      showToast('Errore salvataggio foto', 'err');
+      console.error('Firestore save photo error:', err);
+      showToast(`Errore: ${err.message || 'Impossibile salvare le foto'}`, 'err');
       saveBtn.disabled = false;
       saveBtn.innerHTML = '💾 Salva Foto';
     }
@@ -912,7 +913,7 @@ window.openNewCheck = function() {
   });
 };
 
-function compressImageFile(file, maxDim = 1200, quality = 0.85) {
+function compressImageFile(file, maxDim = 900, quality = 0.72) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -936,7 +937,12 @@ function compressImageFile(file, maxDim = 1200, quality = 0.85) {
         ctx.fillStyle = '#FFFFFF';
         ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', quality));
+        
+        let dataUrl = canvas.toDataURL('image/jpeg', quality);
+        if (dataUrl.length > 160000 && quality > 0.5) {
+          dataUrl = canvas.toDataURL('image/jpeg', 0.55);
+        }
+        resolve(dataUrl);
       };
       img.onerror = err => reject(err);
       img.src = e.target.result;
