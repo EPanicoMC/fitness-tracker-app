@@ -362,8 +362,6 @@ export async function generatePDF(exportModel) {
     });
     y = doc.lastAutoTable.finalY + 20;
   }
-    y = doc.lastAutoTable.finalY + 20;
-  }
 
   // Save PDF
   const filename = `report-coach_${meta.dateFrom}_${meta.dateTo}.pdf`;

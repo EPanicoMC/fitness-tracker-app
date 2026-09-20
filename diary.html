@@ -17,10 +17,10 @@
 <div class="wrap">
   <div class="ph">
     <h1>📅 Diario</h1>
-    <div style="display:flex;gap:6px">
-      <button class="btn btn-ghost btn-sm" onclick="window.openExportModal()"><i class="ri-download-2-line"></i> Esporta</button>
-      <button class="btn btn-ghost btn-sm" onclick="window.showEventsPanel()">📋 Eventi</button>
-      <a href="checks.html" class="btn btn-ghost btn-sm">📸 Check</a>
+    <div class="hdr-actions">
+      <button class="hdr-btn hdr-btn-export" onclick="window.openExportModal()"><i class="ri-download-2-line"></i> Esporta</button>
+      <button class="hdr-btn hdr-btn-events" onclick="window.showEventsPanel()"><i class="ri-calendar-event-line"></i> Eventi</button>
+      <a href="checks.html" class="hdr-btn hdr-btn-checks"><i class="ri-camera-3-line"></i> Check</a>
     </div>
   </div>
 
@@ -35,8 +35,8 @@
 
   <!-- TAB SWITCHER -->
   <div class="tab-sw">
-    <button class="tab-btn" onclick="window.showTab('week')">📊 Panoramica</button>
-    <button class="tab-btn tab-active" onclick="window.showTab('cal')">🗓️ Calendario</button>
+    <button class="tab-btn" onclick="window.showTab('week')"><i class="ri-bar-chart-2-line"></i> Panoramica</button>
+    <button class="tab-btn tab-active" onclick="window.showTab('cal')"><i class="ri-calendar-line"></i> Calendario</button>
   </div>
 
   <!-- INSIGHTS VIEW (ex WEEK VIEW) -->

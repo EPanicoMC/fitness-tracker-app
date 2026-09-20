@@ -327,10 +327,109 @@ textarea.fi{resize:vertical;min-height:70px;line-height:1.5}
 /* SCREEN NOTICE */
 .screen-on{font-size:11px;color:var(--t3);text-align:center;padding:6px}
 
-/* TAB SWITCHER */
-.tab-sw{display:flex;gap:8px;margin-bottom:16px}
-.tab-btn{flex:1;padding:9px 0;border:1px solid var(--border);border-radius:var(--rs);background:rgba(255,255,255,.04);color:var(--t2);font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;font-family:'Inter',sans-serif}
-.tab-btn.tab-active{background:rgba(124,111,255,.15);border-color:var(--border2);color:var(--accent2)}
+/* HEADER ACTION BUTTONS */
+.hdr-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.hdr-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 11px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--t1);
+  font-family: 'Inter', sans-serif;
+  line-height: 1;
+}
+.hdr-btn i {
+  font-size: 14px;
+}
+.hdr-btn:hover {
+  transform: translateY(-1px);
+}
+.hdr-btn:active {
+  transform: scale(0.96);
+}
+.hdr-btn-export {
+  background: rgba(255, 106, 0, 0.12);
+  border-color: rgba(255, 106, 0, 0.35);
+  color: #ff8c3b;
+}
+.hdr-btn-export:hover {
+  background: rgba(255, 106, 0, 0.22);
+  color: #ffa15e;
+  box-shadow: 0 4px 12px rgba(255, 106, 0, 0.2);
+}
+.hdr-btn-events {
+  background: rgba(124, 111, 255, 0.12);
+  border-color: rgba(124, 111, 255, 0.35);
+  color: #a399ff;
+}
+.hdr-btn-events:hover {
+  background: rgba(124, 111, 255, 0.22);
+  color: #bfaaff;
+  box-shadow: 0 4px 12px rgba(124, 111, 255, 0.2);
+}
+.hdr-btn-checks {
+  background: rgba(28, 227, 112, 0.12);
+  border-color: rgba(28, 227, 112, 0.35);
+  color: #49f092;
+}
+.hdr-btn-checks:hover {
+  background: rgba(28, 227, 112, 0.22);
+  color: #72f7af;
+  box-shadow: 0 4px 12px rgba(28, 227, 112, 0.2);
+}
+
+/* TAB SWITCHER (Segmented Control) */
+.tab-sw {
+  display: flex;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 4px;
+  margin-bottom: 20px;
+}
+.tab-btn {
+  flex: 1;
+  padding: 10px 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--t2);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: 'Inter', sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.tab-btn i {
+  font-size: 15px;
+}
+.tab-btn:hover {
+  color: var(--t1);
+}
+.tab-btn.tab-active {
+  background: rgba(255, 106, 0, 0.14);
+  border-color: rgba(255, 106, 0, 0.4);
+  color: #ffffff;
+  font-weight: 700;
+  box-shadow: 0 2px 10px rgba(255, 106, 0, 0.18);
+}
 
 /* WEEK VIEW */
 .week-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
