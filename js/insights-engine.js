@@ -519,19 +519,11 @@ export function validateAIResponse(aiText, metrics, rankedInsights) {
 export function buildExportModel(metrics, rankedInsights, actionPlan, validDays, dates, dateFrom, dateTo, options = {}) {
   const checksInput = options.checks || [];
 
-  // Filter checks in period, or fallback to latest check if none in exact period
-  let periodChecks = checksInput
-    .filter(c => c && c.date && c.date >= dateFrom && c.date <= dateTo)
+  // Include ALL checks (sorted chronologically) so the coach report has the full picture.
+  // Photos from every check are valuable context for the coach.
+  const periodChecks = checksInput
+    .filter(c => c && c.date)
     .sort((a, b) => a.date.localeCompare(b.date));
-
-  if (periodChecks.length === 0 && checksInput.length > 0) {
-    const priorChecks = checksInput
-      .filter(c => c && c.date && c.date <= dateTo)
-      .sort((a, b) => b.date.localeCompare(a.date));
-    if (priorChecks.length > 0) {
-      periodChecks = [priorChecks[0]];
-    }
-  }
 
   const extractMs = (ms, key) => {
     if (!ms) return null;

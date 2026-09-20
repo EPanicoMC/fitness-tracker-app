@@ -23,45 +23,59 @@ async function ensureJsPDFLoaded() {
 }
 
 /**
- * Helper to fetch image URL and convert to DataURL (base64) for jsPDF embedding
+ * Converts an image URL to a base64 DataURL for jsPDF embedding.
+ * Uses fetch-first (blob → FileReader) which works reliably with Firebase Storage
+ * download URLs. Falls back to Image+Canvas for non-Firebase URLs.
  */
 async function fetchImageAsDataURL(url) {
   if (!url) return null;
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.crossOrigin = 'Anonymous';
-    img.onload = () => {
-      try {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.naturalWidth || img.width || 300;
-        canvas.height = img.naturalHeight || img.height || 300;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0);
-        const dataURL = canvas.toDataURL('image/jpeg', 0.85);
-        resolve(dataURL);
-      } catch (e) {
-        console.warn('Canvas toDataURL failed (CORS taint):', e);
-        fetchBlob(url, resolve);
-      }
-    };
-    img.onerror = () => fetchBlob(url, resolve);
-    img.src = url;
-  });
-}
 
-function fetchBlob(url, resolve) {
-  fetch(url)
-    .then(r => r.blob())
-    .then(blob => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result);
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(blob);
-    })
-    .catch(err => {
-      console.warn('Blob fetch failed:', err);
-      resolve(null);
+  // Strategy 1: fetch as blob → FileReader (works for Firebase Storage tokens)
+  try {
+    const res = await fetch(url);
+    if (res.ok) {
+      const blob = await res.blob();
+      if (blob.size > 0) {
+        const dataURL = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result);
+          reader.onerror = () => resolve(null);
+          reader.readAsDataURL(blob);
+        });
+        if (dataURL && dataURL.startsWith('data:')) return dataURL;
+      }
+    }
+  } catch (e) {
+    console.warn('Fetch blob failed for', url, e);
+  }
+
+  // Strategy 2: Image + Canvas fallback (for non-CORS or already-loaded images)
+  try {
+    const dataURL = await new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = 'Anonymous';
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth || 300;
+          canvas.height = img.naturalHeight || 300;
+          canvas.getContext('2d').drawImage(img, 0, 0);
+          resolve(canvas.toDataURL('image/jpeg', 0.85));
+        } catch (err) {
+          resolve(null);
+        }
+      };
+      img.onerror = () => resolve(null);
+      // Set a timeout in case image never loads
+      setTimeout(() => resolve(null), 8000);
+      img.src = url;
     });
+    if (dataURL && dataURL.startsWith('data:')) return dataURL;
+  } catch (e) {
+    console.warn('Canvas fallback failed for', url, e);
+  }
+
+  return null;
 }
 
 /**
@@ -212,7 +226,10 @@ export async function generatePDF(exportModel) {
     checks.forEach(c => {
       if (c.photos && c.photos.length > 0) {
         c.photos.forEach(p => {
-          if (p.url) photosToLoad.push({ date: c.date, url: p.url, view: p.view || 'frontale' });
+          // Support both old format (plain string URL) and new format ({url, view} object)
+          const photoUrl = typeof p === 'string' ? p : p?.url;
+          const photoView = typeof p === 'string' ? 'frontale' : (p?.view || 'frontale');
+          if (photoUrl) photosToLoad.push({ date: c.date, url: photoUrl, view: photoView });
         });
       }
     });
@@ -228,16 +245,22 @@ export async function generatePDF(exportModel) {
       let photoX = 40;
       const photoWidth = 110;
       const photoHeight = 110;
+      let embedCount = 0;
 
-      for (const item of photosToLoad) {
+      console.log(`[PDF Export] Starting photo embed: ${photosToLoad.length} photos to process`);
+
+      for (let i = 0; i < photosToLoad.length; i++) {
+        const item = photosToLoad[i];
         if (photoX + photoWidth > 555) {
           photoX = 40;
           y += photoHeight + 35;
           checkAddPage(photoHeight + 35);
         }
 
+        console.log(`[PDF Export] Loading photo ${i + 1}/${photosToLoad.length}: ${item.date} (${item.view})`);
         const dataUrl = await fetchImageAsDataURL(item.url);
         const poseLabel = POSE_SHORT_LABELS[item.view] || item.view;
+
         if (dataUrl) {
           try {
             doc.addImage(dataUrl, 'JPEG', photoX, y, photoWidth, photoHeight);
@@ -245,10 +268,20 @@ export async function generatePDF(exportModel) {
             doc.setFont('helvetica', 'normal');
             doc.setTextColor(...mutedColor);
             doc.text(`${item.date} (${poseLabel})`, photoX, y + photoHeight + 12);
+            embedCount++;
+            console.log(`[PDF Export] ✅ Photo ${i + 1} embedded successfully`);
           } catch (err) {
-            console.warn('Failed to embed image into PDF:', err);
+            console.warn(`[PDF Export] ❌ addImage failed for photo ${i + 1}:`, err);
+            doc.setDrawColor(200, 200, 200);
+            doc.setFillColor(245, 245, 245);
+            doc.rect(photoX, y, photoWidth, photoHeight, 'FD');
+            doc.setFontSize(8);
+            doc.setTextColor(...mutedColor);
+            doc.text(`📸 ${item.date}`, photoX + 10, y + 50);
+            doc.text(`(${poseLabel})`, photoX + 10, y + 65);
           }
         } else {
+          console.warn(`[PDF Export] ❌ fetchImageAsDataURL returned null for photo ${i + 1}: ${item.url.substring(0, 80)}...`);
           doc.setDrawColor(200, 200, 200);
           doc.setFillColor(245, 245, 245);
           doc.rect(photoX, y, photoWidth, photoHeight, 'FD');
@@ -260,6 +293,7 @@ export async function generatePDF(exportModel) {
         photoX += photoWidth + 20;
       }
       y += photoHeight + 35;
+      console.log(`[PDF Export] Photo embedding complete: ${embedCount}/${photosToLoad.length} successful`);
     }
   } else {
     doc.setFontSize(9);
