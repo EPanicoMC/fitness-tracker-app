@@ -23,14 +23,25 @@ async function ensureJsPDFLoaded() {
 }
 
 /**
- * Converts an image URL to a base64 DataURL for jsPDF embedding.
- * Uses fetch-first (blob → FileReader) which works reliably with Firebase Storage
- * download URLs. Falls back to Image+Canvas for non-Firebase URLs.
+ * Converts an image URL or Base64 string to a clean DataURL for jsPDF embedding.
+ * Handles:
+ * - Direct Base64 Data URLs (data:image/...)
+ * - Firebase Storage URLs via fetch + blob + FileReader
+ * - Format conversion to JPEG/PNG for jsPDF compatibility
+ * - Canvas fallback for CORS / non-standard images
  */
 async function fetchImageAsDataURL(url) {
   if (!url) return null;
 
-  // Strategy 1: fetch as blob → FileReader (works for Firebase Storage tokens)
+  // Case 1: Already a Base64 Data URL
+  if (typeof url === 'string' && url.startsWith('data:')) {
+    if (url.startsWith('data:image/jpeg') || url.startsWith('data:image/jpg') || url.startsWith('data:image/png')) {
+      return url;
+    }
+    return convertToJpegDataURL(url);
+  }
+
+  // Case 2: HTTP / Firebase Storage URL - Strategy A (fetch blob)
   try {
     const res = await fetch(url);
     if (res.ok) {
@@ -42,40 +53,45 @@ async function fetchImageAsDataURL(url) {
           reader.onerror = () => resolve(null);
           reader.readAsDataURL(blob);
         });
-        if (dataURL && dataURL.startsWith('data:')) return dataURL;
+        if (dataURL && (dataURL.startsWith('data:image/jpeg') || dataURL.startsWith('data:image/jpg') || dataURL.startsWith('data:image/png'))) {
+          return dataURL;
+        }
+        if (dataURL && dataURL.startsWith('data:image/')) {
+          return await convertToJpegDataURL(dataURL);
+        }
       }
     }
   } catch (e) {
-    console.warn('Fetch blob failed for', url, e);
+    console.warn('[PDF Export] Fetch blob failed for', url, e);
   }
 
-  // Strategy 2: Image + Canvas fallback (for non-CORS or already-loaded images)
-  try {
-    const dataURL = await new Promise((resolve) => {
-      const img = new Image();
-      img.crossOrigin = 'Anonymous';
-      img.onload = () => {
-        try {
-          const canvas = document.createElement('canvas');
-          canvas.width = img.naturalWidth || 300;
-          canvas.height = img.naturalHeight || 300;
-          canvas.getContext('2d').drawImage(img, 0, 0);
-          resolve(canvas.toDataURL('image/jpeg', 0.85));
-        } catch (err) {
-          resolve(null);
-        }
-      };
-      img.onerror = () => resolve(null);
-      // Set a timeout in case image never loads
-      setTimeout(() => resolve(null), 8000);
-      img.src = url;
-    });
-    if (dataURL && dataURL.startsWith('data:')) return dataURL;
-  } catch (e) {
-    console.warn('Canvas fallback failed for', url, e);
-  }
+  // Case 3: Strategy B (Image + Canvas fallback)
+  return await convertToJpegDataURL(url);
+}
 
-  return null;
+function convertToJpegDataURL(src) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth || 400;
+        canvas.height = img.naturalHeight || 400;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0);
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      } catch (err) {
+        console.warn('[PDF Export] Canvas conversion failed:', err);
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    setTimeout(() => resolve(null), 8000);
+    img.src = src;
+  });
 }
 
 /**
@@ -263,7 +279,8 @@ export async function generatePDF(exportModel) {
 
         if (dataUrl) {
           try {
-            doc.addImage(dataUrl, 'JPEG', photoX, y, photoWidth, photoHeight);
+            const imgFormat = dataUrl.startsWith('data:image/png') ? 'PNG' : 'JPEG';
+            doc.addImage(dataUrl, imgFormat, photoX, y, photoWidth, photoHeight);
             doc.setFontSize(8);
             doc.setFont('helvetica', 'normal');
             doc.setTextColor(...mutedColor);

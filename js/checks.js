@@ -473,12 +473,147 @@ function renderList() {
           }).join('')}
         </div>` : ''}
         ${c.ai_analysis ? renderAIAnalysis(c.ai_analysis) : ''}
-        <div style="display:flex;gap:8px;margin-top:10px">
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn btn-v btn-sm" style="flex:1" onclick="window.quickUploadPhotosForCheck('${c.id}')">📸 ${c.photos?.length ? 'Gestisci / Aggiungi Foto' : '＋ Carica Foto Check'}</button>
           <button class="btn btn-flat btn-sm" onclick="deleteCheck('${c.id}')">🗑️ Elimina</button>
         </div>
       </div>`;
   }).join('');
 }
+
+window.quickUploadPhotosForCheck = function(id) {
+  const c = checks.find(x => x.id === id);
+  if (!c) return;
+
+  let quickFormPhotos = [];
+
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg';
+  bg.id = 'quick-photo-modal';
+  bg.innerHTML = `
+    <div class="modal" style="max-height:85vh;overflow-y:auto">
+      <div class="modal-handle"></div>
+      <h3>📸 Foto Check ${formatDateIT(c.date)}</h3>
+      <p style="color:var(--t2);font-size:13px;margin-bottom:16px">Seleziona le foto dal tuo telefono per questo check</p>
+      
+      ${c.photos?.length ? `
+        <div style="font-size:12px;font-weight:700;color:var(--t2);margin-bottom:8px">Foto attualmente presenti (${c.photos.length}):</div>
+        <div style="display:flex;gap:8px;overflow-x:auto;margin-bottom:16px">
+          ${c.photos.map((p, pi) => `
+            <div style="display:flex;flex-direction:column;align-items:center;gap:4px;position:relative">
+              <img src="${photoUrl(p)}" style="width:70px;height:70px;object-fit:cover;border-radius:8px">
+              <span style="font-size:9px;color:var(--t3);text-transform:uppercase">${photoView(p)}</span>
+              <button onclick="window.removePhotoFromCheck('${c.id}', ${pi})" style="position:absolute;top:-4px;right:-4px;background:#ff3b30;color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:10px;cursor:pointer">✕</button>
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
+
+      <div class="fg">
+        <label class="fl">📸 Seleziona nuove foto (1-5 foto)</label>
+        <input type="file" id="qp-files" multiple accept="image/*" class="fi" style="padding:8px">
+        <div id="qp-preview" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px"></div>
+      </div>
+
+      <div class="modal-btns" style="margin-top:20px">
+        <button class="btn btn-flat" onclick="document.getElementById('quick-photo-modal').remove()">Annulla</button>
+        <button class="btn btn-v" id="qp-save-btn">💾 Salva Foto</button>
+      </div>
+    </div>`;
+  document.body.appendChild(bg);
+
+  const fileInput = document.getElementById('qp-files');
+  const prevDiv = document.getElementById('qp-preview');
+  const defaultPoses = ['frontale', 'laterale', 'schiena', 'frontale_contratto', 'schiena_contratto'];
+
+  fileInput.addEventListener('change', function() {
+    prevDiv.innerHTML = '';
+    quickFormPhotos = [];
+    Array.from(this.files).forEach((f, i) => {
+      const initialView = defaultPoses[i] || 'frontale';
+      quickFormPhotos.push({ file: f, view: initialView });
+
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:5px';
+      const img = document.createElement('img');
+      img.style.cssText = 'width:75px;height:75px;object-fit:cover;border-radius:10px';
+      img.src = URL.createObjectURL(f);
+      const sel = document.createElement('select');
+      sel.style.cssText = 'font-size:10px;background:var(--bg3);color:var(--t2);border:1px solid var(--border2);border-radius:6px;padding:3px;width:78px;text-align:center';
+      ['frontale', 'laterale', 'schiena', 'frontale_contratto', 'schiena_contratto'].forEach(v => {
+        const opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = POSE_LABELS[v] || v;
+        if (v === initialView) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      sel.addEventListener('change', () => { quickFormPhotos[i].view = sel.value; });
+      wrap.appendChild(img);
+      wrap.appendChild(sel);
+      prevDiv.appendChild(wrap);
+    });
+  });
+
+  document.getElementById('qp-save-btn').onclick = async function() {
+    if (!quickFormPhotos.length) {
+      showToast('Seleziona almeno una foto', 'err');
+      return;
+    }
+    const saveBtn = this;
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '⌛ Elaborazione & Salvataggio...';
+    showToast('📸 Elaborazione foto in alta definizione (1200px)...', 'info');
+
+    const newPhotoUrls = [];
+    for (const { file, view } of quickFormPhotos) {
+      try {
+        const base64Url = await compressImageFile(file, 1200, 0.85);
+        let finalUrl = base64Url;
+        try {
+          const storRef = ref(storage, `users/${getUserId()}/checks/${c.date}_${Date.now()}_${file.name}`);
+          await uploadBytes(storRef, file);
+          finalUrl = await getDownloadURL(storRef);
+        } catch(stErr) {
+          console.warn('Storage upload fallback to Base64:', stErr);
+        }
+        newPhotoUrls.push({ url: finalUrl, view });
+      } catch(e) {
+        console.warn('Quick photo fail:', e);
+      }
+    }
+
+    const updatedPhotos = [...(c.photos || []), ...newPhotoUrls];
+
+    try {
+      await setDoc(doc(db, 'users', getUserId(), 'checks', c.id), { photos: updatedPhotos }, { merge: true });
+      showToast('✅ Foto salvate con successo!');
+      document.getElementById('quick-photo-modal')?.remove();
+      await loadChecks();
+    } catch(err) {
+      showToast('Errore salvataggio foto', 'err');
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = '💾 Salva Foto';
+    }
+  };
+
+  bg.onclick = e => { if (e.target === bg) bg.remove(); };
+};
+
+window.removePhotoFromCheck = async function(id, index) {
+  const c = checks.find(x => x.id === id);
+  if (!c || !c.photos) return;
+  if (!confirm('Vuoi rimuovere questa foto dal check?')) return;
+  const updatedPhotos = c.photos.filter((_, pi) => pi !== index);
+  try {
+    await setDoc(doc(db, 'users', getUserId(), 'checks', id), { photos: updatedPhotos }, { merge: true });
+    showToast('Foto rimossa');
+    document.getElementById('quick-photo-modal')?.remove();
+    await loadChecks();
+    window.quickUploadPhotosForCheck(id);
+  } catch(e) {
+    showToast('Errore rimozione foto', 'err');
+  }
+};
 
 function renderAIAnalysis(raw) {
   let data;
@@ -751,8 +886,10 @@ window.openNewCheck = function() {
     const prev = document.getElementById('photo-preview');
     prev.innerHTML = '';
     formPhotos = [];
+    const defaultPoses = ['frontale', 'laterale', 'schiena', 'frontale_contratto', 'schiena_contratto'];
     Array.from(this.files).forEach((f, i) => {
-      formPhotos.push({ file: f, view: 'frontale' });
+      const initialView = defaultPoses[i] || 'frontale';
+      formPhotos.push({ file: f, view: initialView });
       const wrap = document.createElement('div');
       wrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:5px';
       const img = document.createElement('img');
@@ -764,6 +901,7 @@ window.openNewCheck = function() {
         const opt = document.createElement('option');
         opt.value = v;
         opt.textContent = POSE_LABELS[v] || v;
+        if (v === initialView) opt.selected = true;
         sel.appendChild(opt);
       });
       sel.addEventListener('change', () => { formPhotos[i].view = sel.value; });
@@ -773,6 +911,40 @@ window.openNewCheck = function() {
     });
   });
 };
+
+function compressImageFile(file, maxDim = 1200, quality = 0.85) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = err => reject(err);
+      img.src = e.target.result;
+    };
+    reader.onerror = err => reject(err);
+    reader.readAsDataURL(file);
+  });
+}
 
 window.closeCheckForm = function() {
   document.getElementById('check-form').style.display = 'none';
@@ -804,11 +976,21 @@ window.saveCheck = async function() {
   const photoUrls = [];
   for (const { file, view } of formPhotos) {
     try {
-      const storRef = ref(storage, `users/${getUserId()}/checks/${date}_${Date.now()}_${file.name}`);
-      await uploadBytes(storRef, file);
-      const url = await getDownloadURL(storRef);
-      photoUrls.push({ url, view });
-    } catch(e) { console.warn('Photo upload failed:', e); }
+      // 1. Always generate a sharp 1200px Base64 Data URL (~100KB-150KB)
+      const base64Url = await compressImageFile(file, 1200, 0.85);
+      let finalUrl = base64Url;
+
+      // 2. Try Firebase Storage as primary; if it fails (CORS, rules, billing), fallback to high-res Base64
+      try {
+        const storRef = ref(storage, `users/${getUserId()}/checks/${date}_${Date.now()}_${file.name}`);
+        await uploadBytes(storRef, file);
+        finalUrl = await getDownloadURL(storRef);
+      } catch(stErr) {
+        console.warn('Firebase Storage upload failed, using compressed Base64 Data URL:', stErr);
+      }
+
+      photoUrls.push({ url: finalUrl, view });
+    } catch(e) { console.warn('Photo processing failed:', e); }
   }
 
   const id = `check_${date.replace(/-/g,'')}`;

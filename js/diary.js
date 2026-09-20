@@ -514,7 +514,8 @@ window.showDay = async function(dateStr) {
             <span>🧈 ${Math.round(tots.fats || 0)}g${fatDiffStr}</span>
           </div>`;
       })() : '<p style="color:var(--t3);font-size:13px">Nessun dato nutrizionale</p>'}
-      ${log.steps       ? `<div style="margin-top:8px;font-size:13px;color:var(--t2)">👟 ${log.steps.toLocaleString('it-IT')} passi</div>` : ''}
+      ${log.weight_kg   ? `<div style="margin-top:8px;font-size:13px;color:var(--orange);font-weight:700">⚖️ Peso: ${log.weight_kg} kg</div>` : ''}
+      ${log.steps       ? `<div style="margin-top:${log.weight_kg ? '4px' : '8px'};font-size:13px;color:var(--t2)">👟 ${log.steps.toLocaleString('it-IT')} passi</div>` : ''}
       ${log.burned_kcal ? `<div style="font-size:13px;color:var(--t2)">🔥 ${log.burned_kcal} kcal bruciate</div>` : ''}
       ${log.daily_note  ? `<div style="margin-top:10px;font-size:13px;color:var(--t2);font-style:italic">"${log.daily_note}"</div>` : ''}
       

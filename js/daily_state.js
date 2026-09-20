@@ -2167,6 +2167,7 @@ function buildStepsCard() {
   if (!card) return;
 
   const steps = logData.steps || 0;
+  const weight = logData.weight_kg;
   const goal = appSettings?.steps_goal || 0;
   const pct = goal > 0 ? Math.min(100, Math.round(steps / goal * 100)) : 0;
 
@@ -2187,15 +2188,21 @@ function buildStepsCard() {
     ringHtml = `<i class="ri-walk-line" style="font-size:20px;color:var(--t3)"></i>`;
   }
 
-  const valHtml = steps > 0
-    ? `<span style="font-weight:700;color:#fff">${steps.toLocaleString('it-IT')}</span>${goal > 0 ? ` <span style="font-size:11px;color:var(--t3)">/ ${goal.toLocaleString('it-IT')}</span>` : ''}`
-    : `<span style="font-size:12px;color:var(--t3)">Aggiungi passi</span>`;
+  let valHtml = '';
+  if (steps > 0 || weight != null) {
+    const stepsStr = steps > 0 ? `<span style="font-weight:700;color:#fff">${steps.toLocaleString('it-IT')} passi</span>` : '';
+    const weightStr = weight != null ? `<span style="font-weight:700;color:var(--orange)">⚖️ ${weight} kg</span>` : '';
+    valHtml = [stepsStr, weightStr].filter(Boolean).join(' · ');
+  } else {
+    valHtml = `<span style="font-size:12px;color:var(--t3)">Aggiungi passi o peso di oggi</span>`;
+  }
 
   card.innerHTML = `
     <div class="pano-icon" style="width:32px;display:flex;align-items:center;justify-content:center">${ringHtml}</div>
     <div class="pano-info" style="flex:1">
-      <div class="pano-label">ATTIVIT&Agrave;</div>
+      <div class="pano-label">ATTIVIT&Agrave; &amp; PESO</div>
       <div class="pano-val">${valHtml}</div>
+      <div style="font-size:11px;color:var(--t3);margin-top:2px">Inserisci peso, passi o kcal bruciate</div>
     </div>
     <i class="ri-add-circle-line pano-arrow" style="font-size:20px"></i>`;
 
@@ -2212,6 +2219,7 @@ function refreshStepsCard() {
 window.openStepsModal = function() {
   const steps = logData.steps || '';
   const burned = logData.burned_kcal || '';
+  const weight = logData.weight_kg != null ? logData.weight_kg : '';
 
   const bg = document.createElement('div');
   bg.className = 'modal-bg';
@@ -2219,8 +2227,12 @@ window.openStepsModal = function() {
   bg.innerHTML = `
     <div class="modal">
       <div class="modal-handle"></div>
-      <h3>&#128694; Attivit&agrave; Fisica</h3>
-      <p style="color:var(--t2);font-size:13px;margin-bottom:20px">Inserisci i tuoi dati di attivit&agrave; per oggi</p>
+      <h3>🏃 Attivit&agrave; &amp; Peso Oggi</h3>
+      <p style="color:var(--t2);font-size:13px;margin-bottom:20px">Inserisci i dati di peso, passi e attivit&agrave; per oggi</p>
+      <div class="fg">
+        <label class="fl">&#9878;&#65039; Peso di oggi (kg)</label>
+        <input type="number" class="fi" id="sm-weight" placeholder="Es. 74.5" step="0.1" value="${weight}" inputmode="decimal">
+      </div>
       <div class="fg">
         <label class="fl">&#128694; Passi</label>
         <input type="number" class="fi" id="sm-steps" placeholder="Es. 8500" value="${steps}" inputmode="numeric">
@@ -2236,14 +2248,20 @@ window.openStepsModal = function() {
     </div>`;
   document.body.appendChild(bg);
   bg.onclick = e => { if (e.target === bg) bg.remove(); };
-  setTimeout(() => document.getElementById('sm-steps')?.focus(), 100);
+  setTimeout(() => document.getElementById('sm-weight')?.focus(), 100);
 };
 
 window.saveStepsModal = function() {
   const steps = parseInt(document.getElementById('sm-steps')?.value) || null;
   const burned = parseInt(document.getElementById('sm-burned')?.value) || null;
+  const weightInput = document.getElementById('sm-weight')?.value;
+  const weightVal = parseFloat(weightInput);
+  const weight = !isNaN(weightVal) && weightVal > 0 ? weightVal : null;
+
   if (steps !== null) logData.steps = steps;
   if (burned !== null) logData.burned_kcal = burned;
+  logData.weight_kg = weight;
+
   const sf = document.getElementById('steps-in');
   const kf = document.getElementById('burned-in');
   if (sf && steps !== null) sf.value = steps;
@@ -2254,7 +2272,10 @@ window.saveStepsModal = function() {
   buildStepsCard();
   buildFitScore();
   buildSmartAdvisor();
-  showToast('&#128694; Attivit\u00e0 salvata!');
+  if (typeof window.buildWeightCorridor === 'function') {
+    window.buildWeightCorridor();
+  }
+  showToast('✅ Attivit\u00e0 e peso salvati!');
 };
 
 // ── AI ─────────────────────────────────────────────────────
