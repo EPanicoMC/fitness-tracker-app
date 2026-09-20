@@ -510,10 +510,13 @@ window.quickUploadPhotosForCheck = function(id) {
       ` : ''}
 
       <div class="fg">
-        <label class="fl">📸 Seleziona nuove foto (1-5 foto)</label>
+        <label class="fl">📸 Seleziona nuove foto</label>
         <input type="file" id="qp-files" multiple accept="image/*" class="fi" style="padding:8px">
         <div id="qp-preview" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px"></div>
       </div>
+
+      <div id="qp-log" style="display:none;margin-top:12px;padding:10px;background:#111;border:1px solid #333;border-radius:8px;font-family:monospace;font-size:11px;color:#00ffcc;max-height:160px;overflow-y:auto;white-space:pre-wrap"></div>
+      <div id="qp-error-banner" style="display:none;margin-top:12px;padding:12px;background:rgba(255,59,48,0.15);border:1px solid rgba(255,59,48,0.4);border-radius:8px;font-size:12px;color:#ff6b6b;line-height:1.5"></div>
 
       <div class="modal-btns" style="margin-top:20px">
         <button class="btn btn-flat" onclick="document.getElementById('quick-photo-modal').remove()">Annulla</button>
@@ -524,7 +527,15 @@ window.quickUploadPhotosForCheck = function(id) {
 
   const fileInput = document.getElementById('qp-files');
   const prevDiv = document.getElementById('qp-preview');
+  const logDiv = document.getElementById('qp-log');
+  const errBanner = document.getElementById('qp-error-banner');
   const defaultPoses = ['frontale', 'laterale', 'schiena', 'frontale_contratto', 'schiena_contratto'];
+
+  const appendLog = (msg) => {
+    logDiv.style.display = 'block';
+    logDiv.textContent += msg + '\n';
+    logDiv.scrollTop = logDiv.scrollHeight;
+  };
 
   fileInput.addEventListener('change', function() {
     prevDiv.innerHTML = '';
@@ -562,36 +573,60 @@ window.quickUploadPhotosForCheck = function(id) {
     const saveBtn = this;
     saveBtn.disabled = true;
     saveBtn.innerHTML = '⌛ Elaborazione & Salvataggio...';
-    showToast('📸 Elaborazione foto in alta definizione (1200px)...', 'info');
+    logDiv.textContent = '';
+    errBanner.style.display = 'none';
+
+    appendLog(`➜ Inizio elaborazione per ${quickFormPhotos.length} foto...`);
 
     const newPhotoUrls = [];
-    for (const { file, view } of quickFormPhotos) {
+    for (let i = 0; i < quickFormPhotos.length; i++) {
+      const { file, view } = quickFormPhotos[i];
+      appendLog(`[${i + 1}/${quickFormPhotos.length}] Lettura ${file.name} (${Math.round(file.size / 1024)} KB)...`);
       try {
-        const base64Url = await compressImageFile(file, 900, 0.70);
+        const base64Url = await compressImageFile(file, 800, 0.70);
+        appendLog(`  ✔ Compressa OK (${Math.round(base64Url.length / 1024)} KB stringa)`);
+
         let finalUrl = base64Url;
         try {
           const storRef = ref(storage, `users/${getUserId()}/checks/${c.date}_${Date.now()}_${file.name}`);
           await uploadBytes(storRef, file);
           finalUrl = await getDownloadURL(storRef);
+          appendLog(`  ✔ Firebase Storage OK`);
         } catch(stErr) {
-          console.warn('Storage upload fallback to Base64:', stErr);
+          appendLog(`  ⚠️ Storage non disponibile (${stErr.message || stErr.code}), uso Base64 locale`);
         }
+
         newPhotoUrls.push({ url: finalUrl, view });
       } catch(e) {
-        console.warn('Quick photo fail:', e);
+        appendLog(`  ❌ ERRORE FOTO ${i + 1}: ${e.message || e}`);
+        console.error('Compress fail:', e);
       }
     }
 
+    if (newPhotoUrls.length === 0) {
+      errBanner.style.display = 'block';
+      errBanner.innerHTML = `<strong>❌ Errore elaborazione foto:</strong><br>Nessuna foto è stata elaborata correttamente. Verifica il formato delle immagini (se usi iPhone HEIC, prova a selezionare JPEG/PNG).`;
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = '💾 Salva Foto';
+      return;
+    }
+
     const updatedPhotos = [...(c.photos || []), ...newPhotoUrls];
+    appendLog(`➜ Salvataggio in Firestore (check: ${c.id}, totale foto: ${updatedPhotos.length})...`);
 
     try {
       await setDoc(doc(db, 'users', getUserId(), 'checks', c.id), { photos: updatedPhotos }, { merge: true });
+      appendLog(`✅ SALVATAGGIO RIUSCITO!`);
       showToast('✅ Foto salvate con successo!');
-      document.getElementById('quick-photo-modal')?.remove();
-      await loadChecks();
+      setTimeout(async () => {
+        document.getElementById('quick-photo-modal')?.remove();
+        await loadChecks();
+      }, 1200);
     } catch(err) {
       console.error('Firestore save photo error:', err);
-      showToast(`Errore: ${err.message || 'Impossibile salvare le foto'}`, 'err');
+      appendLog(`❌ ERRORE FIRESTORE: ${err.code || err.name || ''} - ${err.message}`);
+      errBanner.style.display = 'block';
+      errBanner.innerHTML = `<strong>❌ Errore Salvataggio Firestore:</strong><br>${err.message || err.code || err}`;
       saveBtn.disabled = false;
       saveBtn.innerHTML = '💾 Salva Foto';
     }
