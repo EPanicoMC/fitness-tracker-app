@@ -512,24 +512,35 @@ function buildDietWidgets() {
 
   // Consumo dal DOM (popolato da daily_state.js)
   const rd = id => parseInt(document.getElementById(id)?.textContent) || 0;
-  const con = { kcal: rd('recap-kcal'), protein: rd('recap-pro'), carbs: rd('recap-carb'), fats: rd('recap-fat') };
+  const satText = document.getElementById('recap-sat-fat')?.textContent || '—';
+  const hasSatData = satText !== '—';
+  const con = {
+    kcal: rd('recap-kcal'),
+    protein: rd('recap-pro'),
+    carbs: rd('recap-carb'),
+    fats: rd('recap-fat'),
+    saturatedFat: hasSatData ? parseInt(satText) || 0 : null
+  };
 
   // Target con fallback a PHASE_CONFIG
   const tK = target.kcal || PHASE_CONFIG.kcal[dayType === 'on' ? 'training' : 'rest'];
   const tP = target.protein || PHASE_CONFIG.macro[dayType === 'on' ? 'training' : 'rest'].protein;
   const tC = target.carbs || PHASE_CONFIG.macro[dayType === 'on' ? 'training' : 'rest'].carbs;
   const tF = target.fats || PHASE_CONFIG.macro[dayType === 'on' ? 'training' : 'rest'].fats;
+  const tSF = target.saturatedFat || PHASE_CONFIG.saturatedFatMax || 20;
 
   // Percentuali e residui
   const pK = tK > 0 ? con.kcal / tK : 0;
   const pP = tP > 0 ? con.protein / tP : 0;
   const pC = tC > 0 ? con.carbs / tC : 0;
   const pF = tF > 0 ? con.fats / tF : 0;
+  const pSF = tSF > 0 && hasSatData ? con.saturatedFat / tSF : 0;
 
   const rK = Math.max(0, tK - con.kcal);
   const rP = Math.max(0, Math.round(tP - con.protein));
   const rC = Math.max(0, Math.round(tC - con.carbs));
   const rF = Math.max(0, Math.round(tF - con.fats));
+  const rSF = Math.max(0, Math.round(tSF - (con.saturatedFat || 0)));
 
   // Colore barra: ok/warn/alert
   const bCol = (p, isProt) => {
@@ -567,10 +578,10 @@ function buildDietWidgets() {
       ${bar('P', pP, rP, 'g', bCol(pP, true), 12)}
       ${bar('C', pC, rC, 'g', bCol(pC), 6)}
       ${bar('G', pF, rF, 'g', bCol(pF), 6)}
+      ${hasSatData ? bar('Saturi', pSF, rSF, 'g (max ' + tSF + 'g)', pSF > 1.0 ? COLORS.alert : 'rgba(255,165,0,0.8)', 6) : ''}
       <div class="w-status">
         ${statusDot(protState)}
         <span>proteine: ${con.protein}g · banda ${PHASE_CONFIG.protein_band.min}–${PHASE_CONFIG.protein_band.max}g</span>
-      </div>
     </div>`;
 }
 

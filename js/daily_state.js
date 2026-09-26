@@ -1733,9 +1733,16 @@ function renderMacroCompare(target, actual) {
     const unit  = isKcal ? 'kcal' : 'g';
     return `<span style="color:${color};font-weight:700">${sign}${Math.round(val)}${unit}</span>`;
   }
+  let satHtml = '';
+  if (actual.saturatedFat != null || target?.saturatedFat != null) {
+    const actSat = actual.saturatedFat ?? 0;
+    const tgtSat = target?.saturatedFat ?? 0;
+    const deltaSat = actSat - tgtSat;
+    satHtml = ` &nbsp; Sat ${fmtD(deltaSat)}`;
+  }
   return `<div style="margin-top:8px;padding:8px 10px;background:rgba(255,255,255,.03);border-radius:8px;font-size:11px;color:var(--t2)">
     <span style="font-weight:700;margin-right:8px">vs piano:</span>
-    Kcal ${fmtD(deltaKcal, true)} &nbsp; Pro ${fmtD(deltaPro)} &nbsp; Carb ${fmtD(deltaCarb)} &nbsp; Fat ${fmtD(deltaFat)}
+    Kcal ${fmtD(deltaKcal, true)} &nbsp; Pro ${fmtD(deltaPro)} &nbsp; Carb ${fmtD(deltaCarb)} &nbsp; Fat ${fmtD(deltaFat)}${satHtml}
   </div>`;
 }
 
@@ -1867,7 +1874,7 @@ function buildMeals() {
         </div>
         <div class="meal-info" onclick="window.toggleExtraMealDetail(${xi})" style="cursor:pointer; flex:1">
           <div class="meal-name">${m.name} <span style="font-size:10px;color:var(--orange);font-weight:700;background:rgba(255,152,0,.15);padding:1px 5px;border-radius:4px">EXTRA</span></div>
-          <div class="meal-meta">${m.kcal} kcal · P:${m.protein}g C:${m.carbs}g F:${m.fats}g</div>
+          <div class="meal-meta">${m.kcal} kcal · P:${m.protein}g C:${m.carbs}g F:${m.fats}g${(m.saturatedFat !== null && m.saturatedFat !== undefined) ? ` <span style="font-size:10px;opacity:0.85;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:4px;white-space:nowrap">(d.c. sat ${typeof m.saturatedFat === 'number' ? m.saturatedFat.toFixed(1) : m.saturatedFat}g)</span>` : ''}</div>
         </div>
         <div class="meal-kcal" onclick="window.toggleExtraMealDetail(${xi})" style="cursor:pointer">${m.kcal}</div>
       </div>
@@ -1934,6 +1941,8 @@ function renderMealRow(m, mi, originalMeals) {
   const proteinDisplay = useOverride ? (override.protein ?? target?.protein ?? m.protein) : (target?.protein ?? m.protein);
   const carbsDisplay = useOverride ? (override.carbs ?? target?.carbs ?? m.carbs) : (target?.carbs ?? m.carbs);
   const fatsDisplay = useOverride ? (override.fats ?? target?.fats ?? m.fats) : (target?.fats ?? m.fats);
+  const satDisplay = useOverride ? (override.saturatedFat ?? target?.saturatedFat ?? m.saturatedFat) : (target?.saturatedFat ?? m.saturatedFat);
+  const satFatBadge = (satDisplay !== null && satDisplay !== undefined) ? ` <span style="font-size:10px;opacity:0.85;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:4px;white-space:nowrap">(d.c. sat ${typeof satDisplay === 'number' ? parseFloat(satDisplay).toFixed(1) : satDisplay}g)</span>` : '';
 
   const varsHtml = m.variants?.length ? `
     <div class="vars">
@@ -1970,6 +1979,7 @@ function renderMealRow(m, mi, originalMeals) {
     if (diffKcal !== 0 || diffP !== 0 || diffC !== 0 || diffF !== 0) {
       const getSign = val => val > 0 ? '+' : '';
       const getCol = val => val > 0 ? 'var(--orange)' : (val < 0 ? 'var(--green)' : 'var(--t3)');
+      const diffSat = (override.saturatedFat != null || target?.saturatedFat != null) ? ((override.saturatedFat || 0) - (target?.saturatedFat || 0)) : null;
       macroDeltasHtml = `
         <div style="font-size:10px;font-weight:700;color:var(--t2);margin-top:4px;display:flex;gap:8px;flex-wrap:wrap">
           <span style="color:var(--t3)">Δ target:</span>
@@ -1977,6 +1987,7 @@ function renderMealRow(m, mi, originalMeals) {
           <span style="color:${getCol(diffP)}">Pro: ${getSign(diffP)}${diffP.toFixed(1)}g</span>
           <span style="color:${getCol(diffC)}">Carb: ${getSign(diffC)}${diffC.toFixed(1)}g</span>
           <span style="color:${getCol(diffF)}">Fat: ${getSign(diffF)}${diffF.toFixed(1)}g</span>
+          ${diffSat !== null ? `<span style="color:${getCol(diffSat)}">Sat: ${getSign(diffSat)}${diffSat.toFixed(1)}g</span>` : ''}
         </div>
       `;
     }
@@ -1991,7 +2002,7 @@ function renderMealRow(m, mi, originalMeals) {
         ${m.time ? `<span class="meal-time">${m.time}</span>` : ''}
         <div class="meal-info">
           <div class="meal-name">${m.label || m.type}</div>
-          <div class="meal-meta">${kcalDisplay} kcal · P:${proteinDisplay}g C:${carbsDisplay}g F:${fatsDisplay}g</div>
+          <div class="meal-meta">${kcalDisplay} kcal · P:${proteinDisplay}g C:${carbsDisplay}g F:${fatsDisplay}g${satFatBadge}</div>
           ${macroDeltasHtml}
         </div>
         <div class="meal-kcal">${kcalDisplay}</div>
@@ -2073,14 +2084,16 @@ window.recalcMeal = async function(mi) {
   const box = document.getElementById(`meal-ai-${mi}`);
   if (box) {
     box.style.display = 'block';
+    const satStr = (r.saturatedFat !== null && r.saturatedFat !== undefined) ? r.saturatedFat + 'g' : '-';
     box.innerHTML = `
-      <div class="fmp">
+      <div class="fmp" style="grid-template-columns:repeat(5,1fr)">
         <div class="fmp-item"><div class="fmp-v" style="color:var(--green)">${r.kcal}</div><div class="fmp-l">Kcal</div></div>
         <div class="fmp-item"><div class="fmp-v" style="color:var(--blue)">${r.protein}g</div><div class="fmp-l">Pro</div></div>
         <div class="fmp-item"><div class="fmp-v" style="color:var(--yellow)">${r.carbs}g</div><div class="fmp-l">Carbo</div></div>
         <div class="fmp-item"><div class="fmp-v" style="color:var(--purple)">${r.fats}g</div><div class="fmp-l">Grassi</div></div>
+        <div class="fmp-item"><div class="fmp-v" style="color:var(--t2)">${satStr}</div><div class="fmp-l">Saturi</div></div>
       </div>
-      <button class="btn btn-v btn-sm" onclick="window.applyMealAI(${mi},${r.kcal},${r.protein},${r.carbs},${r.fats})" style="margin-top:8px">✅ Applica</button>`;
+      <button class="btn btn-v btn-sm" onclick="window.applyMealAI(${mi},${r.kcal},${r.protein},${r.carbs},${r.fats},${r.saturatedFat !== null && r.saturatedFat !== undefined ? r.saturatedFat : 'null'})" style="margin-top:8px">✅ Applica</button>`;
     const tgt = mealStates[mi].kcal;
     const diff = r.kcal - tgt;
     const deltaEl = document.getElementById(`meal-delta-${mi}`);
@@ -2091,12 +2104,13 @@ window.recalcMeal = async function(mi) {
   }
 };
 
-function patchMealRow(mi, kcal, protein, carbs, fats) {
+function patchMealRow(mi, kcal, protein, carbs, fats, saturatedFat) {
   if (mealStates[mi]) {
     mealStates[mi].kcal         = kcal;
     mealStates[mi].protein      = protein;
     mealStates[mi].carbs        = carbs;
     mealStates[mi].fats         = fats;
+    if (saturatedFat !== undefined) mealStates[mi].saturatedFat = saturatedFat;
     mealStates[mi].override_kcal = kcal;
     mealStates[mi].eaten        = true;
   }
@@ -2108,21 +2122,23 @@ function patchMealRow(mi, kcal, protein, carbs, fats) {
     mealEl.classList.add('eaten');
     const chk = mealEl.querySelector('.meal-chk');
     if (chk) chk.textContent = '✓';
+    const satStr = (saturatedFat !== null && saturatedFat !== undefined) ? ` <span style="font-size:10px;opacity:0.85;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:4px;white-space:nowrap">(d.c. sat ${typeof saturatedFat === 'number' ? saturatedFat.toFixed(1) : saturatedFat}g)</span>` : '';
     const meta = mealEl.querySelector('.meal-meta');
-    if (meta) meta.textContent = `${kcal} kcal · P:${protein}g C:${carbs}g F:${fats}g`;
+    if (meta) meta.innerHTML = `${kcal} kcal · P:${protein}g C:${carbs}g F:${fats}g${satStr}`;
     const kcalEl = mealEl.querySelector('.meal-kcal');
     if (kcalEl) kcalEl.textContent = kcal;
   }
 }
 
-window.applyMealAI = function(mi, kcal, protein, carbs, fats) {
+window.applyMealAI = function(mi, kcal, protein, carbs, fats, saturatedFat) {
   if (!logData.meals_overrides) logData.meals_overrides = {};
   const txt = document.getElementById(`meal-txt-${mi}`)?.value || '';
+  const satFatVal = (saturatedFat !== undefined && saturatedFat !== null && !isNaN(parseFloat(saturatedFat))) ? parseFloat(saturatedFat) : null;
   logData.meals_overrides[mi] = {
-    kcal, protein, carbs, fats, items_text: txt,
-    ai_estimate: { kcal, protein, carbs, fats }
+    kcal, protein, carbs, fats, saturatedFat: satFatVal, items_text: txt,
+    ai_estimate: { kcal, protein, carbs, fats, saturatedFat: satFatVal }
   };
-  patchMealRow(mi, kcal, protein, carbs, fats);
+  patchMealRow(mi, kcal, protein, carbs, fats, satFatVal);
   saveToLocal();
   buildNutrition();
   const box = document.getElementById(`meal-ai-${mi}`);
@@ -2327,25 +2343,31 @@ window.calcAI = async function() {
   if (!r.success) { showToast('Errore AI: ' + r.error, 'err'); return; }
   const box = document.getElementById('ai-result');
   box.className = 'ai-result show';
+  const sfVal = r.saturatedFat != null ? r.saturatedFat : null;
+  const sfStr = sfVal != null ? `${sfVal}g` : '—';
   box.innerHTML = `
     <div class="fmp">
       <div class="fmp-item"><div class="fmp-v">${r.kcal}</div><div class="fmp-l">Kcal</div></div>
       <div class="fmp-item"><div class="fmp-v">${r.protein}g</div><div class="fmp-l">Pro</div></div>
       <div class="fmp-item"><div class="fmp-v">${r.carbs}g</div><div class="fmp-l">Carbo</div></div>
       <div class="fmp-item"><div class="fmp-v">${r.fats}g</div><div class="fmp-l">Grassi</div></div>
+      <div class="fmp-item"><div class="fmp-v" style="color:var(--orange)">${sfStr}</div><div class="fmp-l">Saturi</div></div>
     </div>
-    ${r.items.map(i => `<div style="font-size:12px;color:var(--t2);margin-top:4px">• ${i.name} (${i.grams}g) → ${i.kcal}kcal</div>`).join('')}
-    <button class="btn btn-v btn-sm" onclick="window.openAddMealFromAI(${r.kcal}, ${r.protein}, ${r.carbs}, ${r.fats}, '${text.replace(/'/g, "\\'")}')" style="margin-top:12px;width:100%"><i class="ri-add-circle-fill"></i> Aggiungi come Extra</button>`;
+    ${(r.items || []).map(i => `<div style="font-size:12px;color:var(--t2);margin-top:4px">• ${i.name} (${i.grams}g) → ${i.kcal}kcal ${i.saturatedFat != null ? `<span style="color:var(--orange)">(Sat: ${i.saturatedFat}g)</span>` : ''}</div>`).join('')}
+    <button class="btn btn-v btn-sm" onclick="window.openAddMealFromAI(${r.kcal}, ${r.protein}, ${r.carbs}, ${r.fats}, ${sfVal !== null ? sfVal : 'null'}, '${text.replace(/'/g, "\\'")}')" style="margin-top:12px;width:100%"><i class="ri-add-circle-fill"></i> Aggiungi come Extra</button>`;
 };
 
-window.openAddMealFromAI = function(kcal, protein, carbs, fats, text) {
+window.openAddMealFromAI = function(kcal, protein, carbs, fats, saturatedFat, text) {
   openAddMeal();
   setTimeout(() => {
-    document.getElementById('am-ingredients').value = text;
-    document.getElementById('am-kcal').value = kcal;
-    document.getElementById('am-protein').value = protein;
-    document.getElementById('am-carbs').value = carbs;
-    document.getElementById('am-fats').value = fats;
+    if (document.getElementById('am-ingredients')) document.getElementById('am-ingredients').value = text;
+    if (document.getElementById('am-kcal')) document.getElementById('am-kcal').value = kcal;
+    if (document.getElementById('am-protein')) document.getElementById('am-protein').value = protein;
+    if (document.getElementById('am-carbs')) document.getElementById('am-carbs').value = carbs;
+    if (document.getElementById('am-fats')) document.getElementById('am-fats').value = fats;
+    if (saturatedFat != null && document.getElementById('am-sat-fat')) {
+      document.getElementById('am-sat-fat').value = saturatedFat;
+    }
   }, 100);
 };
 
@@ -2556,6 +2578,8 @@ window.saveAsTemplate = async function() {
   const protein = parseFloat(document.getElementById('am-protein')?.value) || 0;
   const carbs = document.getElementById('am-carbs')?.value ? parseFloat(document.getElementById('am-carbs').value) : 0;
   const fats = document.getElementById('am-fats')?.value ? parseFloat(document.getElementById('am-fats').value) : 0;
+  const satFatVal = document.getElementById('am-sat-fat')?.value;
+  const saturatedFat = satFatVal !== '' && satFatVal !== undefined && !isNaN(parseFloat(satFatVal)) ? Math.min(fats, Math.max(0, parseFloat(satFatVal))) : null;
   const ingredients = document.getElementById('am-ingredients')?.value?.trim() || '';
 
   if (!name) return showToast('Inserisci un nome per il template', 'err');
@@ -2565,7 +2589,7 @@ window.saveAsTemplate = async function() {
   try {
     const templateId = `template_${Date.now()}`;
     await setDoc(doc(db, 'users', getUserId(), 'meal_templates', templateId), {
-      name, kcal, protein, carbs, fats, ingredients,
+      name, kcal, protein, carbs, fats, saturatedFat, ingredients,
       created_at: new Date().toISOString()
     });
     showToast('⭐ Template salvato!');
@@ -2608,6 +2632,7 @@ window.loadMealTemplate = function(id) {
   setVal('am-protein', t.protein || 0);
   setVal('am-carbs', t.carbs || 0);
   setVal('am-fats', t.fats || 0);
+  setVal('am-sat-fat', (t.saturatedFat !== null && t.saturatedFat !== undefined) ? t.saturatedFat : '');
 };
 
 // ── Aggiungi pasto extra ───────────────────────────────────
@@ -2926,6 +2951,8 @@ window.openManualMacro = function(mealIndex) {
           <input type="number" class="fi" id="mm-carb" value="${existing.carbs || meal?.carbs || ''}" placeholder="${meal?.carbs || 0}" step="0.1"></div>
         <div class="fg"><label class="fl">Grassi (g)</label>
           <input type="number" class="fi" id="mm-fat" value="${existing.fats || meal?.fats || ''}" placeholder="${meal?.fats || 0}" step="0.1"></div>
+        <div class="fg"><label class="fl">Grassi Saturi (g)</label>
+          <input type="number" class="fi" id="mm-sat-fat" value="${existing.saturatedFat ?? meal?.saturatedFat ?? ''}" placeholder="${meal?.saturatedFat ?? ''}" step="0.1"></div>
       </div>
       <div class="fg">
         <label class="fl">Note ingredienti (opzionale)</label>
@@ -2949,13 +2976,15 @@ window.saveManualMacro = function(mealIndex) {
   const protein = parseFloat(document.getElementById('mm-pro')?.value)   || 0;
   const carbs   = parseFloat(document.getElementById('mm-carb')?.value)  || 0;
   const fats    = parseFloat(document.getElementById('mm-fat')?.value)   || 0;
+  const satFatVal = document.getElementById('mm-sat-fat')?.value;
+  const saturatedFat = satFatVal !== '' && satFatVal !== undefined && !isNaN(parseFloat(satFatVal)) ? Math.min(fats, Math.max(0, parseFloat(satFatVal))) : null;
   const note    = document.getElementById('mm-note')?.value || '';
 
   // Track AI correction if user is overriding a previous AI estimate
   const prevOverride = logData.meals_overrides?.[mealIndex];
   if (prevOverride?.ai_estimate && prevOverride.ai_estimate.kcal > 0) {
     const aiEst = prevOverride.ai_estimate;
-    const userVals = { kcal, protein, carbs, fats };
+    const userVals = { kcal, protein, carbs, fats, saturatedFat };
     // Only track if there's a meaningful difference (>5%)
     const diffPct = Math.abs(kcal - aiEst.kcal) / Math.max(aiEst.kcal, 1);
     if (diffPct > 0.05) {
@@ -2967,9 +2996,9 @@ window.saveManualMacro = function(mealIndex) {
   }
 
   if (!logData.meals_overrides) logData.meals_overrides = {};
-  logData.meals_overrides[mealIndex] = { kcal, protein, carbs, fats, items_text: note };
+  logData.meals_overrides[mealIndex] = { kcal, protein, carbs, fats, saturatedFat, items_text: note };
 
-  patchMealRow(mealIndex, kcal, protein, carbs, fats);
+  patchMealRow(mealIndex, kcal, protein, carbs, fats, saturatedFat);
   saveToLocal();
   buildNutrition();
   document.getElementById('manual-macro-modal')?.remove();
@@ -3039,6 +3068,7 @@ window.captureFoodImage = async function() {
     if (document.getElementById('am-protein')) document.getElementById('am-protein').value = r.protein;
     if (document.getElementById('am-carbs')) document.getElementById('am-carbs').value = r.carbs;
     if (document.getElementById('am-fats')) document.getElementById('am-fats').value = r.fats;
+    if (document.getElementById('am-sat-fat')) document.getElementById('am-sat-fat').value = (r.saturatedFat !== null && r.saturatedFat !== undefined) ? r.saturatedFat : '';
 
     showToast(r._source === 'barcode' ? '📦 Barcode riconosciuto!' : '🥗 Cibo scansionato con successo!');
   } catch(e) {
@@ -3110,14 +3140,16 @@ window.captureMealImage = async function(mi) {
     const box = document.getElementById(`meal-ai-${mi}`);
     if (box) {
       box.style.display = 'block';
+      const satStr = (r.saturatedFat !== null && r.saturatedFat !== undefined) ? r.saturatedFat + 'g' : '-';
       box.innerHTML = `
-        <div class="fmp">
+        <div class="fmp" style="grid-template-columns:repeat(5,1fr)">
           <div class="fmp-item"><div class="fmp-v" style="color:var(--green)">${r.kcal}</div><div class="fmp-l">Kcal</div></div>
           <div class="fmp-item"><div class="fmp-v" style="color:var(--blue)">${r.protein}g</div><div class="fmp-l">Pro</div></div>
           <div class="fmp-item"><div class="fmp-v" style="color:var(--yellow)">${r.carbs}g</div><div class="fmp-l">Carbo</div></div>
           <div class="fmp-item"><div class="fmp-v" style="color:var(--purple)">${r.fats}g</div><div class="fmp-l">Grassi</div></div>
+          <div class="fmp-item"><div class="fmp-v" style="color:var(--t2)">${satStr}</div><div class="fmp-l">Saturi</div></div>
         </div>
-        <button class="btn btn-v btn-sm" onclick="window.applyMealAI(${mi},${r.kcal},${r.protein},${r.carbs},${r.fats})" style="margin-top:8px">✅ Applica</button>`;
+        <button class="btn btn-v btn-sm" onclick="window.applyMealAI(${mi},${r.kcal},${r.protein},${r.carbs},${r.fats},${r.saturatedFat !== null && r.saturatedFat !== undefined ? r.saturatedFat : 'null'})" style="margin-top:8px">✅ Applica</button>`;
 
       const tgt = mealStates[mi].kcal;
       const diff = r.kcal - tgt;
