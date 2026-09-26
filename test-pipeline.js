@@ -91,6 +91,27 @@ assert(basePlanMeal.kcal === 600, 'Il pasto del piano base rimane invariato a 60
 assert(userOverride.kcal === 650, 'L\'override dell\'utente registra 650 kcal separatamente');
 console.log('');
 
+// 8. Test specifico del pranzo utente (pollo in gelatina, 5ml olio, pancarré, kinder joy)
+console.log('[Test 8] Pollo in scatola in gelatina Montana + 5ml olio + Pancarré');
+const cannedChicken280g = NC.scaleNutrients({ kcal: 68, protein: 13, carbs: 0.5, fats: 1.5, saturatedFat: 0.6 }, 2.8);
+assert(Math.round(cannedChicken280g.protein) === 36, '280g pollo in gelatina = ~36g proteine (NON 73g)');
+assert(Math.round(cannedChicken280g.fats) === 4, '280g pollo in gelatina = ~4g grassi');
+
+const evo5ml = NC.scaleNutrients({ kcal: 880, protein: 0, carbs: 0, fats: 100, saturatedFat: 14 }, 0.046); // 5ml = 4.6g
+assert(Math.round(evo5ml.fats) === 5, '5ml olio EVO = ~4.6g-5g grassi (NON 15-28g)');
+
+const userLunchSimulated = NC.sumNutrients([
+  cannedChicken280g,
+  evo5ml,
+  NC.scaleNutrients({ kcal: 550, protein: 8.2, carbs: 53, fats: 36, saturatedFat: 18 }, 0.10), // 10g Kinder Joy
+  NC.scaleNutrients({ kcal: 260, protein: 11, carbs: 46, fats: 4, saturatedFat: 0.8 }, 0.50), // 2 fette pancarré (50g)
+  NC.scaleNutrients({ kcal: 15, protein: 1.5, carbs: 2, fats: 0.2, saturatedFat: 0 }, 0.60)   // 60g insalata
+]);
+
+assert(userLunchSimulated.totals.protein < 46 && userLunchSimulated.totals.protein > 40, `Proteine totali pranzo = ${userLunchSimulated.totals.protein}g (corrette a ~44g, non 73g)`);
+assert(userLunchSimulated.totals.fats < 18 && userLunchSimulated.totals.fats > 12, `Grassi totali pranzo = ${userLunchSimulated.totals.fats}g (corretti a ~15g, non 28g)`);
+console.log('');
+
 console.log('════════════════════════════════════════════════════════════');
 console.log(` 📊 RISULTATI FINALI TEST SUITE: ${passed} PASSATI, ${failed} FALLITI`);
 console.log('════════════════════════════════════════════════════════════');
