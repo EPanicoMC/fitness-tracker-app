@@ -1,5 +1,10 @@
 import { db, getUserId } from './firebase-config.js';
 import { doc, getDoc, getDocs, collection, query, orderBy, limit, where } from './firebase-config.js';
+import {
+  isZeroKcalFood, createNutrients, sumNutrients, scaleNutrients,
+  computeAtwater, diagnoseAtwater, validateNutrients, roundForDisplay,
+  formatNutrient, fromLegacy, forFirestore
+} from './nutrition-core.js';
 
 let cachedKey = null;
 let busy = false;
@@ -61,68 +66,29 @@ async function callGemini(key, prompt, opts = {}) {
 }
 
 // ── Alimenti legittimamente a 0 kcal ────────────────────────
-const ZERO_KCAL_ALLOWED = ['acqua', 'water', 'caffe nero', 'caffè nero', 'te senza zucchero', 'tè senza zucchero', 'te verde', 'tè verde'];
-
 function isZeroKcalAllowed(name) {
-  const n = (name || '').toLowerCase().replace(/\s*\(\d+g?\)/g, '').trim();
-  return ZERO_KCAL_ALLOWED.some(z => n.includes(z));
+  return isZeroKcalFood(name);
 }
 
 // ── Validazione coerenza macro ↔ kcal ───────────────────────
-function validateAndFixMacros(parsed) {
-  let protein = Math.max(0, Number(parsed.protein) || 0);
-  let carbs   = Math.max(0, Number(parsed.carbs)   || 0);
-  let fats    = Math.max(0, Number(parsed.fats)    || 0);
-  let items   = parsed.items || [];
-  const declaredKcal = Math.max(0, Number(parsed.kcal) || 0);
-
-  // 0. Guardia anti-zero: se tutto è 0 ma ci sono item con nomi reali → sospetto
-  let _zeroSuspect = false;
-  if (declaredKcal === 0 && protein === 0 && carbs === 0 && fats === 0) {
-    const hasRealItems = items.some(i => i.name && !isZeroKcalAllowed(i.name));
-    if (hasRealItems) _zeroSuspect = true;
-  }
-  // Anche per singoli item: se un item ha grams > 0 e kcal = 0 e non è acqua/caffè
-  for (const item of items) {
-    if ((Number(item.grams) || 0) > 0 && (Number(item.kcal) || 0) === 0 && !isZeroKcalAllowed(item.name)) {
-      _zeroSuspect = true;
-    }
-  }
-
-  // 1. Cross-check items breakdown vs totali (se la somma items è più affidabile)
-  if (items.length > 0) {
-    const iSum = items.reduce((a, i) => ({
-      kcal: a.kcal + (Number(i.kcal) || 0),
-      protein: a.protein + (Number(i.protein) || 0),
-      carbs: a.carbs + (Number(i.carbs) || 0),
-      fats: a.fats + (Number(i.fats) || 0)
-    }), { kcal: 0, protein: 0, carbs: 0, fats: 0 });
-
-    if (iSum.kcal > 0 && Math.abs(iSum.kcal - declaredKcal) > declaredKcal * 0.15) {
-      protein = Math.max(0, iSum.protein);
-      carbs   = Math.max(0, iSum.carbs);
-      fats    = Math.max(0, iSum.fats);
-    }
-  }
-
-  // 2. Calcola kcal dalla formula canonica
-  const computedKcal = (protein * 4) + (carbs * 4) + (fats * 9);
-
-  // 3. Se differenza > 8%, usa il calcolato
-  const diff = Math.abs(computedKcal - declaredKcal);
-  const threshold = Math.max(declaredKcal, computedKcal, 1) * 0.08;
-  const corrected = diff > threshold;
-  const finalKcal = Math.round(corrected ? computedKcal : declaredKcal);
-
+export function validateNutrientResponse(parsed) {
+  const res = validateNutrients(parsed);
   return {
-    kcal: finalKcal,
-    protein: parseFloat(protein.toFixed(1)),
-    carbs: parseFloat(carbs.toFixed(1)),
-    fats: parseFloat(fats.toFixed(1)),
-    items,
-    _corrected: corrected,
-    _zeroSuspect
+    kcal: res.nutrients.kcal != null ? Math.round(res.nutrients.kcal) : 0,
+    protein: res.nutrients.protein != null ? parseFloat(res.nutrients.protein.toFixed(1)) : 0,
+    carbs: res.nutrients.carbs != null ? parseFloat(res.nutrients.carbs.toFixed(1)) : 0,
+    fats: res.nutrients.fats != null ? parseFloat(res.nutrients.fats.toFixed(1)) : 0,
+    saturatedFat: res.nutrients.saturatedFat != null ? parseFloat(res.nutrients.saturatedFat.toFixed(1)) : null,
+    items: res.items || [],
+    warnings: res.warnings,
+    errors: res.errors,
+    status: res.status,
+    _zeroSuspect: res._zeroSuspect
   };
+}
+
+function validateAndFixMacros(parsed) {
+  return validateNutrientResponse(parsed);
 }
 
 // ── Tabella riferimenti nutrizionali (per 100g) ─────────────
@@ -299,28 +265,8 @@ export async function saveAICorrection(foodName, aiValues, userValues) {
     await setDoc(ref, prev, { merge: false });
     _correctionsLoaded = false; // invalidate cache
 
-    // Auto-correct food library if user consistently corrects same food (count >= 3)
-    if (prev.count >= 3 && userValues.kcal > 0) {
-      // Assume last user correction has the most accurate per-item info
-      // We need grams to calculate per-100g; if unavailable, skip
-      const lastCorrection = prev.corrections[prev.corrections.length - 1];
-      if (lastCorrection?.user?.kcal > 0) {
-        // Try to find this food in library and update its values
-        const lib = await loadFoodLibrary();
-        const match = lib.find(f => f.name.toLowerCase().includes(foodName.toLowerCase()) ||
-                                    foodName.toLowerCase().includes(f.name.toLowerCase()));
-        if (match && match.source === 'ai_auto') {
-          // Apply average correction to library values
-          const corrFactor = 1 + (prev.avg_delta.kcal_pct / 100);
-          await saveToFoodLibrary(match.name, {
-            kcal: match.kcal_per_100g * corrFactor,
-            protein: match.protein_per_100g * (1 + (prev.avg_delta.protein_pct / 100)),
-            carbs: match.carbs_per_100g,
-            fats: match.fats_per_100g
-          });
-        }
-      }
-    }
+    await setDoc(ref, prev, { merge: false });
+    _correctionsLoaded = false; // invalidate cache
   } catch(e) {
     console.warn('saveAICorrection error:', e.message);
   }
@@ -472,12 +418,6 @@ function fuzzyMatch(inputName, library) {
   });
   if (best) return best;
 
-  // Primary word match (first word of input in library name)
-  if (words[0]?.length >= 3) {
-    best = library.find(f => normalize(f.name).includes(words[0]));
-    if (best) return best;
-  }
-
   return null;
 }
 
@@ -599,13 +539,14 @@ Regole fondamentali e VINCOLANTI:
 7. BEVANDE ALCOLICHE: l'alcol ha 7 kcal per grammo. Un calice di vino (~125ml) = ~85 kcal. Una birra (330ml) = ~140 kcal. Non restituire MAI 0 kcal per bevande alcoliche. I macro delle bevande alcoliche sono principalmente carboidrati, con proteine e grassi a 0.
 8. INTERPRETAZIONE SEMANTICA (CRITICA): Quando l'utente scrive "da Xg di proteine/carbs/grassi", "con Xg di proteine", "X proteine", sta descrivendo il CONTENUTO NUTRIZIONALE, NON il peso dell'alimento. Esempio: "acqua proteica da 14g di proteine" → 14g di PROTEINE (non 14g di peso!), quindi protein=14, kcal≥56. "barretta da 20g di proteine" → protein=20, NON 20g di peso. Usa queste informazioni esplicitamente dichiarate dall'utente come VINCOLO da rispettare nel risultato.
 9. BEVANDE PROTEICHE/INTEGRATORI: acqua proteica, shake proteici, barrette proteiche hanno i macro indicati sull'etichetta. Se l'utente specifica il contenuto proteico, USA QUEL VALORE. Esempio: "acqua proteica da 14g di proteine" = circa 60 kcal, 14g Pro, 0-2g Carb, 0g Fat.
-10. Output SOLO JSON valido, no markdown, no commenti, no spiegazioni.
+10. GRASSI SATURI: per ogni ingrediente (e nei totali), stima anche i grassi saturi (saturatedFat in grammi). Se l'alimento non contiene grassi o il dato non è noto, usa null.
+11. Output SOLO JSON valido, no markdown, no commenti, no spiegazioni.
 ${libraryHints}${correctionHints}
 
 JSON richiesto:
 {
-  "kcal": 0, "protein": 0, "carbs": 0, "fats": 0,
-  "items": [{ "name": "Alimento (XXXg o XXXml)", "grams": 0, "kcal": 0, "protein": 0, "carbs": 0, "fats": 0 }]
+  "kcal": 0, "protein": 0, "carbs": 0, "fats": 0, "saturatedFat": null,
+  "items": [{ "name": "Alimento (XXXg o XXXml)", "grams": 0, "kcal": 0, "protein": 0, "carbs": 0, "fats": 0, "saturatedFat": null }]
 }`;
 
     const res = await callGemini(key, prompt, { temperature: 0.1, maxOutputTokens: 1024 });
@@ -1046,6 +987,7 @@ async function lookupBarcode(code) {
     const pro100 = n.proteins_100g || n.proteins || 0;
     const carb100 = n.carbohydrates_100g || n.carbohydrates || 0;
     const fat100 = n.fat_100g || n.fat || 0;
+    const satFat100 = n['saturated-fat_100g'] != null ? n['saturated-fat_100g'] : (n['saturated-fat'] != null ? n['saturated-fat'] : null);
 
     // Try to extract serving size from quantity field
     let servingG = 100;
@@ -1053,6 +995,8 @@ async function lookupBarcode(code) {
     if (qtyMatch) servingG = parseInt(qtyMatch[1]);
 
     const factor = servingG / 100;
+    const satFatVal = satFat100 != null ? parseFloat((satFat100 * factor).toFixed(1)) : null;
+
     return {
       success: true,
       name: name + (qty ? ` (${qty})` : ''),
@@ -1060,10 +1004,11 @@ async function lookupBarcode(code) {
       protein: parseFloat((pro100 * factor).toFixed(1)),
       carbs: parseFloat((carb100 * factor).toFixed(1)),
       fats: parseFloat((fat100 * factor).toFixed(1)),
+      saturatedFat: satFatVal,
       ingredients: `${name} ${qty}`,
       _source: 'barcode',
       _barcode: code,
-      _per100g: { kcal: Math.round(kcal100), protein: parseFloat(pro100.toFixed(1)), carbs: parseFloat(carb100.toFixed(1)), fats: parseFloat(fat100.toFixed(1)) }
+      _per100g: { kcal: Math.round(kcal100), protein: parseFloat(pro100.toFixed(1)), carbs: parseFloat(carb100.toFixed(1)), fats: parseFloat(fat100.toFixed(1)), saturatedFat: satFat100 != null ? parseFloat(Number(satFat100).toFixed(1)) : null }
     };
   } catch(e) {
     console.warn('lookupBarcode error:', e.message);
@@ -1123,7 +1068,7 @@ Rispondi SOLO con il JSON, niente altro.`;
   }
 
   // Step 2b: Standard food analysis
-  const promptText = `Analizza l'immagine di questo cibo e stima accuratamente i macronutrienti (Proteine, Carboidrati, Grassi) e le Calorie (kcal).
+  const promptText = `Analizza l'immagine di questo cibo e stima accuratamente i macronutrienti (Proteine, Carboidrati, Grassi, Grassi Saturi) e le Calorie (kcal).
 Identifica ogni ingrediente visibile, stima le quantità in grammi e calcola i macro per ciascuno.
 
 Regole fondamentali e VINCOLANTI:
@@ -1133,14 +1078,15 @@ Regole fondamentali e VINCOLANTI:
 4. ${REFERENCE_TABLE}
 5. SANITY CHECK: ingrediente < 200g NON può avere > 900 kcal (eccezione: olio/burro/frutta secca). Proteine/100g mai > 35g.
 6. Se vedi un'ETICHETTA NUTRIZIONALE leggibile, LEGGI i valori dall'etichetta e usali.
-7. Rispondi esclusivamente con un oggetto JSON valido, no markdown.
+7. GRASSI SATURI: per ogni ingrediente (e nei totali), stima anche i grassi saturi (saturatedFat in grammi). Se il dato non è noto, usa null.
+8. Rispondi esclusivamente con un oggetto JSON valido, no markdown.
 
 Struttura JSON richiesta:
 {
   "name": "Nome sintetico del piatto",
-  "kcal": 0, "protein": 0, "carbs": 0, "fats": 0,
+  "kcal": 0, "protein": 0, "carbs": 0, "fats": 0, "saturatedFat": null,
   "ingredients": "150g riso cotto, 100g salmone grigliato, 1 cucchiaio olio EVO",
-  "items": [{ "name": "Riso cotto (150g)", "grams": 150, "kcal": 195, "protein": 4, "carbs": 43, "fats": 0.5 }]
+  "items": [{ "name": "Riso cotto (150g)", "grams": 150, "kcal": 195, "protein": 4, "carbs": 43, "fats": 0.5, "saturatedFat": null }]
 }`;
 
   const parts = [
@@ -1167,7 +1113,10 @@ Struttura JSON richiesta:
       protein: validated.protein,
       carbs: validated.carbs,
       fats: validated.fats,
-      ingredients: parsed.ingredients || ''
+      saturatedFat: validated.saturatedFat ?? null,
+      ingredients: parsed.ingredients || (validated.items || []).map(i => i.name).join(', '),
+      items: validated.items,
+      _source: 'vision'
     };
   } catch(e) {
     return { success: false, error: 'Errore parsing risposta AI.' };

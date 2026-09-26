@@ -1613,6 +1613,8 @@ window.saveRecoveredDay = async function(dateStr) {
   const protein    = parseFloat(document.getElementById('rec-pro')?.value)     || 0;
   const carbs      = parseFloat(document.getElementById('rec-carb')?.value)    || 0;
   const fats       = parseFloat(document.getElementById('rec-fat')?.value)     || 0;
+  const satFatVal  = parseFloat(document.getElementById('rec-sat-fat')?.value);
+  const saturatedFat = !isNaN(satFatVal) ? satFatVal : null;
   const steps      = parseInt(document.getElementById('rec-steps')?.value)     || null;
   const note       = document.getElementById('rec-note')?.value                || '';
   const didWorkout = document.getElementById('rec-workout')?.value             === 'yes';
@@ -1622,7 +1624,7 @@ window.saveRecoveredDay = async function(dateStr) {
     date: dateStr,
     is_training_day: didWorkout,
     steps, daily_note: note, recovered: true,
-    nutrition: { totals: { kcal, protein, carbs, fats } }
+    nutrition: { totals: { kcal, protein, carbs, fats, saturatedFat } }
   };
   if (didWorkout && sessionDay && programData?.schedule?.[sessionDay]) {
     data.workout = {
@@ -1633,9 +1635,11 @@ window.saveRecoveredDay = async function(dateStr) {
   }
 
   try {
-    await setDoc(doc(db, 'users', getUserId(), 'daily_logs', dateStr), data, { merge: false });
+    // FIX B3: use merge: true to avoid deleting meals_state, weight, sleep_hours, etc.
+    await setDoc(doc(db, 'users', getUserId(), 'daily_logs', dateStr), data, { merge: true });
     document.getElementById('recover-modal')?.remove();
-    monthLogs[dateStr] = data;
+    if (!monthLogs[dateStr]) monthLogs[dateStr] = {};
+    Object.assign(monthLogs[dateStr], data);
     renderGrid(currentMonth.getFullYear(), currentMonth.getMonth());
     document.getElementById('day-detail').style.display = 'none';
     showToast('✅ Giornata recuperata!');
@@ -1685,6 +1689,8 @@ window.openEditDay = function(dateStr) {
           <input type="number" class="fi" id="ed-carb" value="${Math.round(tots.carbs || 0)}" placeholder="0" step="0.1"></div>
         <div class="fg"><label class="fl">Grassi (g)</label>
           <input type="number" class="fi" id="ed-fat" value="${Math.round(tots.fats || 0)}" placeholder="0" step="0.1"></div>
+        <div class="fg"><label class="fl">Grassi Saturi (g)</label>
+          <input type="number" class="fi" id="ed-sat-fat" value="${tots.saturatedFat != null ? Math.round(tots.saturatedFat) : ''}" placeholder="opzionale" step="0.1"></div>
       </div>
       <div class="modal-btns">
         <button class="btn btn-flat" onclick="document.getElementById('edit-day-modal').remove()">Annulla</button>
@@ -1703,6 +1709,8 @@ window.saveEditDay = async function(dateStr) {
   const protein    = parseFloat(document.getElementById('ed-pro')?.value)   || 0;
   const carbs      = parseFloat(document.getElementById('ed-carb')?.value)  || 0;
   const fats       = parseFloat(document.getElementById('ed-fat')?.value)   || 0;
+  const satFatVal  = parseFloat(document.getElementById('ed-sat-fat')?.value);
+  const saturatedFat = !isNaN(satFatVal) ? satFatVal : null;
   const sleep      = parseFloat(document.getElementById('ed-sleep')?.value) || null;
   const drinks     = parseInt(document.getElementById('ed-drinks')?.value)  || null;
   const mealsOut   = parseInt(document.getElementById('ed-meals-out')?.value) || null;
@@ -1715,9 +1723,26 @@ window.saveEditDay = async function(dateStr) {
       sleep_hours: sleep,
       drinks: drinks,
       meals_out: mealsOut,
-      nutrition: { totals: { kcal, protein, carbs, fats } }
+      nutrition: { totals: { kcal, protein, carbs, fats, saturatedFat } }
     };
     await setDoc(doc(db, 'users', getUserId(), 'daily_logs', dateStr), payload, { merge: true });
+
+    // FIX B4: If editing today's log, sync changes to localStorage so daily_state doesn't overwrite them
+    if (typeof TODAY !== 'undefined' && dateStr === TODAY) {
+      try {
+        const rawState = localStorage.getItem('kova_today_state');
+        if (rawState) {
+          const parsedState = JSON.parse(rawState);
+          if (sleep != null) parsedState.sleep_hours = sleep;
+          if (drinks != null) parsedState.drinks = drinks;
+          if (mealsOut != null) parsedState.meals_out = mealsOut;
+          if (steps != null) parsedState.steps = steps;
+          if (burned != null) parsedState.burned_kcal = burned;
+          if (note != null) parsedState.daily_note = note;
+          localStorage.setItem('kova_today_state', JSON.stringify(parsedState));
+        }
+      } catch(e) { console.warn('LocalStorage sync error:', e); }
+    }
 
     // Aggiorna cache locale (crea se non esiste)
     if (!monthLogs[dateStr]) monthLogs[dateStr] = {};
@@ -2105,6 +2130,9 @@ window.calcAIMealForDate = async function() {
   document.getElementById('am-protein').value = r.protein;
   document.getElementById('am-carbs').value   = r.carbs;
   document.getElementById('am-fats').value    = r.fats;
+  if (r.saturatedFat != null && document.getElementById('am-sat-fat')) {
+    document.getElementById('am-sat-fat').value = r.saturatedFat;
+  }
   showToast('✅ Macro calcolati!');
 };
 
@@ -2114,26 +2142,31 @@ window.saveExtraMealForDate = async function(dateStr) {
   const protein = parseFloat(document.getElementById('am-protein')?.value) || 0;
   const carbs   = parseFloat(document.getElementById('am-carbs')?.value)   || 0;
   const fats    = parseFloat(document.getElementById('am-fats')?.value)    || 0;
+  const satFatVal = parseFloat(document.getElementById('am-sat-fat')?.value);
+  const saturatedFat = !isNaN(satFatVal) ? satFatVal : null;
   const type    = document.getElementById('am-type')?.value || 'extra';
   const ingredients = document.getElementById('am-ingredients')?.value?.trim() || '';
 
   if (!name) return showToast('Inserisci il nome del pasto', 'err');
   if (kcal === 0 && protein === 0) return showToast('Inserisci almeno le kcal', 'err');
 
-  let log = monthLogs[dateStr] || { nutrition: { totals: { kcal: 0, protein: 0, carbs: 0, fats: 0 } }, extra_meals: [] };
+  let log = monthLogs[dateStr] || { nutrition: { totals: { kcal: 0, protein: 0, carbs: 0, fats: 0, saturatedFat: null } }, extra_meals: [] };
   if (!log.extra_meals) log.extra_meals = [];
 
   log.extra_meals.push({
-    name, type, kcal, protein, carbs, fats, ingredients,
+    name, type, kcal, protein, carbs, fats, saturatedFat, ingredients,
     time: new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }),
     added_at: new Date().toISOString()
   });
 
-  const totals = log.nutrition?.totals || { kcal: 0, protein: 0, carbs: 0, fats: 0 };
+  const totals = log.nutrition?.totals || { kcal: 0, protein: 0, carbs: 0, fats: 0, saturatedFat: null };
   totals.kcal += kcal;
   totals.protein += protein;
   totals.carbs += carbs;
   totals.fats += fats;
+  if (saturatedFat != null) {
+    totals.saturatedFat = (totals.saturatedFat || 0) + saturatedFat;
+  }
 
   if (!log.nutrition) log.nutrition = {};
   log.nutrition.totals = totals;

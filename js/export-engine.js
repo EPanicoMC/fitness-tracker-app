@@ -167,6 +167,7 @@ export async function generatePDF(exportModel) {
     ['Calorie', `${metrics.calories.averageActual} kcal`, `${metrics.calories.averageTarget} kcal`, `${metrics.calories.averageDelta > 0 ? '+' : ''}${metrics.calories.averageDelta} kcal`],
     ['Proteine', `${metrics.protein.avgActual} g`, `${metrics.protein.avgTarget} g`, `${metrics.protein.avgDelta > 0 ? '+' : ''}${metrics.protein.avgDelta} g`],
     ['Grassi', `${metrics.fat.avgActual} g`, `${metrics.fat.avgTarget} g`, `${metrics.fat.avgDelta > 0 ? '+' : ''}${metrics.fat.avgDelta} g`],
+    ['di cui Saturi', metrics.saturatedFat?.avgActual != null ? `${metrics.saturatedFat.avgActual} g` : '—', '< 20g max', '—'],
     ['Carboidrati', `${metrics.carbs.avgActual} g`, `${metrics.carbs.avgTarget} g`, `${metrics.carbs.avgDelta > 0 ? '+' : ''}${metrics.carbs.avgDelta} g`],
   ];
 
@@ -252,7 +253,6 @@ export async function generatePDF(exportModel) {
     checks.forEach(c => {
       if (c.photos && c.photos.length > 0) {
         c.photos.forEach(p => {
-          // Support both old format (plain string URL) and new format ({url, view} object)
           const photoUrl = typeof p === 'string' ? p : p?.url;
           const photoView = typeof p === 'string' ? 'frontale' : (p?.view || 'frontale');
           if (photoUrl) photosToLoad.push({ date: c.date, url: photoUrl, view: photoView });
@@ -273,8 +273,6 @@ export async function generatePDF(exportModel) {
       const photoHeight = 110;
       let embedCount = 0;
 
-      console.log(`[PDF Export] Starting photo embed: ${photosToLoad.length} photos to process`);
-
       for (let i = 0; i < photosToLoad.length; i++) {
         const item = photosToLoad[i];
         if (photoX + photoWidth > 555) {
@@ -283,7 +281,6 @@ export async function generatePDF(exportModel) {
           checkAddPage(photoHeight + 35);
         }
 
-        console.log(`[PDF Export] Loading photo ${i + 1}/${photosToLoad.length}: ${item.date} (${item.view})`);
         const dataUrl = await fetchImageAsDataURL(item.url);
         const poseLabel = POSE_SHORT_LABELS[item.view] || item.view;
 
@@ -296,9 +293,7 @@ export async function generatePDF(exportModel) {
             doc.setTextColor(...mutedColor);
             doc.text(`${item.date} (${poseLabel})`, photoX, y + photoHeight + 12);
             embedCount++;
-            console.log(`[PDF Export] ✅ Photo ${i + 1} embedded successfully`);
           } catch (err) {
-            console.warn(`[PDF Export] ❌ addImage failed for photo ${i + 1}:`, err);
             doc.setDrawColor(200, 200, 200);
             doc.setFillColor(245, 245, 245);
             doc.rect(photoX, y, photoWidth, photoHeight, 'FD');
@@ -308,7 +303,6 @@ export async function generatePDF(exportModel) {
             doc.text(`(${poseLabel})`, photoX + 10, y + 65);
           }
         } else {
-          console.warn(`[PDF Export] ❌ fetchImageAsDataURL returned null for photo ${i + 1}: ${item.url.substring(0, 80)}...`);
           doc.setDrawColor(200, 200, 200);
           doc.setFillColor(245, 245, 245);
           doc.rect(photoX, y, photoWidth, photoHeight, 'FD');
@@ -320,7 +314,6 @@ export async function generatePDF(exportModel) {
         photoX += photoWidth + 20;
       }
       y += photoHeight + 35;
-      console.log(`[PDF Export] Photo embedding complete: ${embedCount}/${photosToLoad.length} successful`);
     }
   } else {
     doc.setFontSize(9);
@@ -337,7 +330,7 @@ export async function generatePDF(exportModel) {
   doc.text('4. Registro Giornaliero Dieta & Allenamento', 40, y);
   y += 14;
 
-  const dailyHeaders = [['Data', 'Stato', 'Peso', 'Passi', 'Calorie (Eff/Tgt)', 'Proteine', 'Grassi', 'Carbo', 'Workout']];
+  const dailyHeaders = [['Data', 'Stato', 'Peso', 'Passi', 'Calorie (Eff/Tgt)', 'Proteine', 'Grassi', 'Saturi', 'Carbo', 'Workout']];
   const dailyRows = dailyTable.map(d => [
     d.date,
     d.status,
@@ -346,6 +339,7 @@ export async function generatePDF(exportModel) {
     `${d.kcalActual} / ${d.kcalTarget}`,
     `${d.proteinActual}g`,
     `${d.fatActual}g`,
+    d.saturatedFatActual != null ? `${d.saturatedFatActual}g` : '—',
     `${d.carbsActual}g`,
     d.workout
   ]);
@@ -375,7 +369,7 @@ export async function generatePDF(exportModel) {
 export function generateCSV(exportModel) {
   if (!exportModel || !exportModel.dailyTable) throw new Error('Modello esportazione non valido');
 
-  const headers = ['Data', 'Stato', 'Calorie_Actual', 'Calorie_Target', 'Calorie_Delta', 'Proteine_g', 'Grassi_g', 'Carboidrati_g', 'Workout'];
+  const headers = ['Data', 'Stato', 'Calorie_Actual', 'Calorie_Target', 'Calorie_Delta', 'Proteine_g', 'Grassi_g', 'Grassi_Saturi_g', 'Carboidrati_g', 'Workout'];
   const rows = exportModel.dailyTable.map(d => [
     d.date,
     d.status,
@@ -384,6 +378,7 @@ export function generateCSV(exportModel) {
     d.kcalDelta,
     d.proteinActual,
     d.fatActual,
+    d.saturatedFatActual != null ? d.saturatedFatActual : '',
     d.carbsActual,
     `"${d.workout.replace(/"/g, '""')}"`
   ]);

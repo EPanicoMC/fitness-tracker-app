@@ -1,4 +1,4 @@
-const CACHE = 'ft-v73';
+const CACHE = 'ft-v74';
 const BASE = self.location.pathname.substring(0, self.location.pathname.lastIndexOf('/') + 1);
 const FILES = [
   '',
@@ -18,6 +18,8 @@ const FILES = [
   'js/programs.js',
   'js/diet.js',
   'js/diary.js',
+  'js/nutrition-core.js',
+  'js/migration.js',
   'js/insights-engine.js',
   'js/export-engine.js',
   'js/checks.js',

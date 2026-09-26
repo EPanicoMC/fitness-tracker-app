@@ -587,6 +587,26 @@ function buildNutrition() {
     lbl.innerHTML = `${name} <span style="color:${col};font-size:10px">(${sign}${delta}g)</span>`;
   });
 
+  const satFatEl = document.getElementById('mc-sat-fat');
+  if (satFatEl) {
+    if (tots.saturatedFat != null) {
+      const textVal = Math.round(tots.saturatedFat) + 'g';
+      const isPartial = !tots.saturatedFatComplete;
+      satFatEl.textContent = isPartial ? `≥ ${textVal}` : textVal;
+      const chip = satFatEl.closest('.mchip');
+      if (chip) {
+        const lbl = chip.querySelector('.mchip-l');
+        if (lbl) {
+          const satRef = PHASE_CONFIG?.saturatedFatMax || 20;
+          const isOver = tots.saturatedFat > satRef;
+          lbl.innerHTML = `di cui Saturi <span style="color:${isOver ? 'var(--orange)' : 'var(--t2)'};font-size:10px">(${isPartial ? 'dati inc.' : '<' + satRef + 'g max'})</span>`;
+        }
+      }
+    } else {
+      satFatEl.textContent = '—';
+    }
+  }
+
   const rem = tgt.kcal - tots.kcal;
   const deltaEl = document.getElementById('kcal-delta');
   if(deltaEl) { if (rem >= 0) {
@@ -618,6 +638,7 @@ function calcTotals() {
   const dayKey   = isTrainingDay ? 'day_on' : 'day_off';
   const planMeals = activeDiet?.[dayKey]?.meals || [];
   let kcal = 0, protein = 0, carbs = 0, fats = 0;
+  let satFatSum = 0, satFatKnown = 0, satFatTotalCount = 0;
 
   planMeals.forEach((meal, i) => {
     if (!logData.meals_state?.[i]?.eaten) return;
@@ -626,6 +647,12 @@ function calcTotals() {
     protein += ov?.protein ?? meal.protein ?? 0;
     carbs   += ov?.carbs   ?? meal.carbs   ?? 0;
     fats    += ov?.fats    ?? meal.fats    ?? 0;
+    const sf = ov?.saturatedFat ?? meal.saturatedFat;
+    satFatTotalCount++;
+    if (sf != null) {
+      satFatSum += Number(sf) || 0;
+      satFatKnown++;
+    }
   });
 
   (logData.extra_meals || []).forEach(m => {
@@ -634,13 +661,22 @@ function calcTotals() {
     protein += m.protein || 0;
     carbs   += m.carbs   || 0;
     fats    += m.fats    || 0;
+    satFatTotalCount++;
+    if (m.saturatedFat != null) {
+      satFatSum += Number(m.saturatedFat) || 0;
+      satFatKnown++;
+    }
   });
 
   return {
     kcal: Math.round(kcal),
     protein: parseFloat(protein.toFixed(1)),
     carbs: parseFloat(carbs.toFixed(1)),
-    fats: parseFloat(fats.toFixed(1))
+    fats: parseFloat(fats.toFixed(1)),
+    saturatedFat: satFatKnown > 0 ? parseFloat(satFatSum.toFixed(1)) : null,
+    saturatedFatComplete: satFatTotalCount > 0 && satFatKnown === satFatTotalCount,
+    saturatedFatKnownCount: satFatKnown,
+    saturatedFatTotalCount: satFatTotalCount
   };
 }
 
@@ -651,10 +687,12 @@ function updateNutritionTotals() {
   const recapPro = document.getElementById('recap-pro');
   const recapCarb = document.getElementById('recap-carb');
   const recapFat = document.getElementById('recap-fat');
+  const recapSatFat = document.getElementById('recap-sat-fat');
   if (recapKcal) recapKcal.textContent = Math.round(tots.kcal);
   if (recapPro) recapPro.textContent = Math.round(tots.protein) + 'g';
   if (recapCarb) recapCarb.textContent = Math.round(tots.carbs) + 'g';
   if (recapFat) recapFat.textContent = Math.round(tots.fats) + 'g';
+  if (recapSatFat) recapSatFat.textContent = tots.saturatedFat != null ? Math.round(tots.saturatedFat) + 'g' : '—';
 }
 
 // ── Striscia oggi ──────────────────────────────────────────

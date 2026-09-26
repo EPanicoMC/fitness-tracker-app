@@ -307,9 +307,14 @@ function renderMealForm(dk, mi, m) {
           <input type="number" class="fi" value="${m.carbs||''}" id="mcarb-${dk}-${mi}" style="padding:8px;text-align:center"
             oninput="formData.${dk}.meals[${mi}].carbs=+this.value"></div>
       </div>
-      <div class="fg" style="margin-top:8px"><label class="fl">Grassi (g)</label>
-        <input type="number" class="fi" value="${m.fats||''}" id="mfat-${dk}-${mi}" style="padding:8px;text-align:center;width:100px"
-          oninput="formData.${dk}.meals[${mi}].fats=+this.value"></div>
+      <div class="grid2" style="margin-top:8px">
+        <div class="fg" style="margin:0"><label class="fl">Grassi (g)</label>
+          <input type="number" class="fi" value="${m.fats||''}" id="mfat-${dk}-${mi}" style="padding:8px;text-align:center"
+            oninput="formData.${dk}.meals[${mi}].fats=+this.value;recalcTotals('${dk}')"></div>
+        <div class="fg" style="margin:0"><label class="fl">Saturi (g)</label>
+          <input type="number" class="fi" value="${m.saturatedFat ?? ''}" id="msatfat-${dk}-${mi}" placeholder="opz" style="padding:8px;text-align:center"
+            oninput="formData.${dk}.meals[${mi}].saturatedFat=this.value!==''?+this.value:null;recalcTotals('${dk}')"></div>
+      </div>
       <button class="btn btn-ghost btn-sm" onclick="aiCalcMeal('${dk}',${mi})" style="margin-top:6px">✨ Calcola da testo con AI</button>
       <div class="fg" style="margin-top:10px"><label class="fl">Varianti (una per riga: Label: Dettaglio)</label>
         <textarea class="fi" rows="3" style="font-size:12px"
@@ -318,7 +323,7 @@ function renderMealForm(dk, mi, m) {
 }
 
 window.addMeal = function(dk) {
-  formData[dk].meals.push({ type:'pranzo', label:'', time:'', items:'', kcal:0, protein:0, carbs:0, fats:0, variants:null });
+  formData[dk].meals.push({ type:'pranzo', label:'', time:'', items:'', kcal:0, protein:0, carbs:0, fats:0, saturatedFat:null, variants:null });
   reRenderMeals(dk);
 };
 
@@ -343,11 +348,17 @@ window.aiCalcMeal = async function(dk, mi) {
   formData[dk].meals[mi].protein = r.protein;
   formData[dk].meals[mi].carbs   = r.carbs;
   formData[dk].meals[mi].fats    = r.fats;
+  if (r.saturatedFat != null) {
+    formData[dk].meals[mi].saturatedFat = r.saturatedFat;
+  }
   const setVal = (id, val) => { const e = document.getElementById(id); if (e) e.value = val; };
   setVal(`mkcal-${dk}-${mi}`, r.kcal);
   setVal(`mpro-${dk}-${mi}`,  r.protein);
   setVal(`mcarb-${dk}-${mi}`, r.carbs);
   setVal(`mfat-${dk}-${mi}`,  r.fats);
+  if (r.saturatedFat != null) {
+    setVal(`msatfat-${dk}-${mi}`, r.saturatedFat);
+  }
   recalcTotals(dk);
   showToast('✅ Macro calcolati!');
 };
@@ -362,17 +373,25 @@ window.parseVariants = function(dk, mi, text) {
 
 window.recalcTotals = function(dk) {
   const meals = formData[dk].meals || [];
-  const sum = meals.reduce((a, m) => ({
-    kcal:    a.kcal    + (m.kcal||0),
-    protein: a.protein + (m.protein||0),
-    carbs:   a.carbs   + (m.carbs||0),
-    fats:    a.fats    + (m.fats||0)
-  }), { kcal:0, protein:0, carbs:0, fats:0 });
+  let satFatSum = 0, satFatKnown = 0;
+  const sum = meals.reduce((a, m) => {
+    if (m.saturatedFat != null) {
+      satFatSum += Number(m.saturatedFat) || 0;
+      satFatKnown++;
+    }
+    return {
+      kcal:    a.kcal    + (m.kcal||0),
+      protein: a.protein + (m.protein||0),
+      carbs:   a.carbs   + (m.carbs||0),
+      fats:    a.fats    + (m.fats||0)
+    };
+  }, { kcal:0, protein:0, carbs:0, fats:0 });
 
   formData[dk].kcal = Math.round(sum.kcal);
   formData[dk].protein = parseFloat(sum.protein.toFixed(1));
   formData[dk].carbs = parseFloat(sum.carbs.toFixed(1));
   formData[dk].fats = parseFloat(sum.fats.toFixed(1));
+  formData[dk].saturatedFat = satFatKnown > 0 ? parseFloat(satFatSum.toFixed(1)) : null;
 
   const kIn = document.getElementById(`${dk}-kcal-input`);
   const pIn = document.getElementById(`${dk}-pro-input`);
@@ -383,7 +402,8 @@ window.recalcTotals = function(dk) {
 
   const el = document.getElementById(`totals-${dk}`);
   if (el) {
-    el.innerHTML = `Totale pasti: ${sum.kcal} kcal · P:${sum.protein}g C:${sum.carbs}g F:${sum.fats}g`;
+    const sfStr = formData[dk].saturatedFat != null ? ` · Saturi: ${formData[dk].saturatedFat}g` : '';
+    el.innerHTML = `Totale pasti: ${sum.kcal} kcal · P:${sum.protein}g C:${sum.carbs}g F:${sum.fats}g${sfStr}`;
   }
 };
 
@@ -398,30 +418,39 @@ window.saveDiet = async function() {
   if (!nameVal) { showToast('Inserisci il nome', 'err'); return; }
   try {
     const sanitizeMeals = meals => (meals || []).map(m => ({
-      type:    m.type    || 'pranzo',
-      label:   m.label   || '',
-      time:    m.time    || '',
-      items:   m.items   || '',
-      kcal:    Number(m.kcal)    || 0,
-      protein: Number(m.protein) || 0,
-      carbs:   Number(m.carbs)   || 0,
-      fats:    Number(m.fats)    || 0,
-      variants: m.variants || null
+      type:         m.type    || 'pranzo',
+      label:        m.label   || '',
+      time:         m.time    || '',
+      items:        m.items   || '',
+      kcal:         Number(m.kcal)    || 0,
+      protein:      Number(m.protein) || 0,
+      carbs:        Number(m.carbs)   || 0,
+      fats:         Number(m.fats)    || 0,
+      saturatedFat: m.saturatedFat != null ? Number(m.saturatedFat) : null,
+      variants:     m.variants || null
     }));
     
     const sumMeals = (meals) => {
       const s = sanitizeMeals(meals);
-      const raw = s.reduce((a, m) => ({
-        kcal: a.kcal + m.kcal,
-        protein: a.protein + m.protein,
-        carbs: a.carbs + m.carbs,
-        fats: a.fats + m.fats
-      }), { kcal: 0, protein: 0, carbs: 0, fats: 0 });
+      let satFatSum = 0, satFatKnown = 0;
+      const raw = s.reduce((a, m) => {
+        if (m.saturatedFat != null) {
+          satFatSum += Number(m.saturatedFat) || 0;
+          satFatKnown++;
+        }
+        return {
+          kcal: a.kcal + m.kcal,
+          protein: a.protein + m.protein,
+          carbs: a.carbs + m.carbs,
+          fats: a.fats + m.fats
+        };
+      }, { kcal: 0, protein: 0, carbs: 0, fats: 0 });
       return {
         kcal: Math.round(raw.kcal),
         protein: parseFloat(raw.protein.toFixed(1)),
         carbs: parseFloat(raw.carbs.toFixed(1)),
-        fats: parseFloat(raw.fats.toFixed(1))
+        fats: parseFloat(raw.fats.toFixed(1)),
+        saturatedFat: satFatKnown > 0 ? parseFloat(satFatSum.toFixed(1)) : null
       };
     };
 
@@ -433,18 +462,20 @@ window.saveDiet = async function() {
       active:     editingId ? (diets.find(d => d.id === editingId)?.active || false) : false,
       updated_at: new Date().toISOString(),
       day_on: {
-        kcal:    dayOnTotals.kcal,
-        protein: dayOnTotals.protein,
-        carbs:   dayOnTotals.carbs,
-        fats:    dayOnTotals.fats,
-        meals:   sanitizeMeals(formData.day_on?.meals)
+        kcal:         dayOnTotals.kcal,
+        protein:      dayOnTotals.protein,
+        carbs:        dayOnTotals.carbs,
+        fats:         dayOnTotals.fats,
+        saturatedFat: dayOnTotals.saturatedFat,
+        meals:        sanitizeMeals(formData.day_on?.meals)
       },
       day_off: {
-        kcal:    dayOffTotals.kcal,
-        protein: dayOffTotals.protein,
-        carbs:   dayOffTotals.carbs,
-        fats:    dayOffTotals.fats,
-        meals:   sanitizeMeals(formData.day_off?.meals)
+        kcal:         dayOffTotals.kcal,
+        protein:      dayOffTotals.protein,
+        carbs:        dayOffTotals.carbs,
+        fats:         dayOffTotals.fats,
+        saturatedFat: dayOffTotals.saturatedFat,
+        meals:        sanitizeMeals(formData.day_off?.meals)
       }
     };
     console.log('Salvataggio dieta:', JSON.stringify(dataToSave).slice(0, 500));

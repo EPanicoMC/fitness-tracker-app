@@ -45,7 +45,7 @@ export function normalizeDiaryAnalyticsData(dates, logs, programData, dietPlan, 
     }
 
     // Determine target nutrition
-    let target = { kcal: 0, protein: 0, carbs: 0, fats: 0 };
+    let target = { kcal: 0, protein: 0, carbs: 0, fats: 0, saturatedFat: null };
     if (dietPlan) {
       const plan = isTrainingDay ? (dietPlan.day_on || dietPlan.day_off) : (dietPlan.day_off || dietPlan.day_on);
       if (plan) {
@@ -54,6 +54,7 @@ export function normalizeDiaryAnalyticsData(dates, logs, programData, dietPlan, 
           protein: plan.protein || 0,
           carbs: plan.carbs || 0,
           fats: plan.fats || 0,
+          saturatedFat: plan.saturatedFat ?? null,
         };
       }
     }
@@ -65,6 +66,7 @@ export function normalizeDiaryAnalyticsData(dates, logs, programData, dietPlan, 
       protein: log.nutrition.totals.protein || 0,
       carbs: log.nutrition.totals.carbs || 0,
       fats: log.nutrition.totals.fats || 0,
+      saturatedFat: log.nutrition.totals.saturatedFat ?? null,
     } : null;
 
     // Workout completed
@@ -110,6 +112,7 @@ export function calculatePeriodMetrics(validDays, dates, todayStr) {
       calories: { periodActual: 0, periodTarget: 0, periodDelta: 0, averageActual: 0, averageTarget: 0, averageDelta: 0, adherence: 0 },
       protein: { avgActual: 0, avgTarget: 0, avgDelta: 0 },
       fat: { avgActual: 0, avgTarget: 0, avgDelta: 0 },
+      saturatedFat: { avgActual: null, count: 0 },
       carbs: { avgActual: 0, avgTarget: 0, avgDelta: 0 },
       training: { plannedCount: 0, completedCount: 0, missedCount: 0, completionRate: 0, daysSinceLastWorkout: null }
     };
@@ -135,6 +138,10 @@ export function calculatePeriodMetrics(validDays, dates, todayStr) {
   const avgFatActual = periodFatActual / daysLogged;
   const avgFatTarget = periodFatTarget / daysLogged;
   const avgFatDelta = avgFatActual - avgFatTarget;
+
+  const satDays = validDays.filter(d => d.nut?.saturatedFat != null);
+  const periodSatFatActual = satDays.reduce((acc, d) => acc + d.nut.saturatedFat, 0);
+  const avgSatFatActual = satDays.length > 0 ? periodSatFatActual / satDays.length : null;
 
   const periodCarbsActual = validDays.reduce((acc, d) => acc + d.nut.carbs, 0);
   const periodCarbsTarget = validDays.reduce((acc, d) => acc + d.target.carbs, 0);
@@ -184,6 +191,10 @@ export function calculatePeriodMetrics(validDays, dates, todayStr) {
       avgActual: Math.round(avgFatActual),
       avgTarget: Math.round(avgFatTarget),
       avgDelta: Math.round(avgFatDelta)
+    },
+    saturatedFat: {
+      avgActual: avgSatFatActual != null ? Math.round(avgSatFatActual) : null,
+      count: satDays.length
     },
     carbs: {
       avgActual: Math.round(avgCarbsActual),

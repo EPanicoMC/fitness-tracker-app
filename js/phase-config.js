@@ -64,11 +64,12 @@ export const PHASE_CONFIG = {
     tolerance: 100,
   },
   macro: {
-    training: { protein: 189, carbs: 219, fats: 53 },
-    rest: { protein: 173, carbs: 139, fats: 58 },
-    avg: { protein: 182, carbs: 185, fats: 55 },
+    training: { protein: 189, carbs: 219, fats: 53, saturatedFat: 18 },
+    rest: { protein: 173, carbs: 139, fats: 58, saturatedFat: 20 },
+    avg: { protein: 182, carbs: 185, fats: 55, saturatedFat: 19 },
   },
   protein_band: { min: 170, max: 195 },
+  saturatedFatMax: 20, // WHO recommendation: <10% total energy (~20g for 1800-2100 kcal)
 
   // Soglie giornaliere
   steps_daily: 11000,

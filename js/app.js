@@ -9,6 +9,7 @@ import {
   collection,
   deleteDoc
 } from './firebase-config.js';
+import { runMigrations } from './migration.js';
 
 export function requireAuth() {
   return new Promise((resolve) => {
@@ -20,6 +21,7 @@ export function requireAuth() {
           setDoc(doc(db, 'users', emailLower), { email: emailLower }, { merge: true })
             .catch(e => console.warn('Poteva non essere possibile salvare il doc utente:', e));
         }
+        runMigrations().catch(e => console.warn('Migration error:', e));
         resolve(user);
       } else {
         const search = window.location.search;

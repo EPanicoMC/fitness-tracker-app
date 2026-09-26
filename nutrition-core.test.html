@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <title>Nutrition Core Unit Tests</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #111; color: #eee; padding: 20px; }
+    h1 { color: #ff6a00; font-size: 20px; }
+    .test-case { background: #1e1e24; border: 1px solid #333; border-radius: 8px; padding: 12px 16px; margin-bottom: 10px; }
+    .test-case.pass { border-left: 4px solid #2ecc71; }
+    .test-case.fail { border-left: 4px solid #e74c3c; }
+    .title { font-weight: bold; font-size: 14px; margin-bottom: 4px; }
+    .details { font-size: 12px; color: #aaa; font-family: monospace; white-space: pre-wrap; }
+    .summary { font-size: 16px; margin-top: 20px; font-weight: bold; }
+    .badge-pass { color: #2ecc71; font-weight: bold; }
+    .badge-fail { color: #e74c3c; font-weight: bold; }
+  </style>
+</head>
+<body>
+
+  <h1>🧪 KOVA Nutrition Core & Pipeline Test Suite</h1>
+  <div id="results"></div>
+  <div id="summary" class="summary"></div>
+
+  <script type="module">
+    import {
+      isZeroKcalFood,
+      createNutrients,
+      sumNutrients,
+      scaleNutrients,
+      computeAtwater,
+      diagnoseAtwater,
+      validateNutrients,
+      roundForDisplay,
+      formatNutrient,
+      fromLegacy,
+      forFirestore
+    } from './js/nutrition-core.js';
+
+    import { validateNutrientResponse } from './js/gemini.js';
+
+    const resultsEl = document.getElementById('results');
+    const summaryEl = document.getElementById('summary');
+    let passCount = 0;
+    let failCount = 0;
+
+    function assert(title, condition, details = '') {
+      const card = document.createElement('div');
+      card.className = `test-case ${condition ? 'pass' : 'fail'}`;
+      card.innerHTML = `
+        <div class="title">${condition ? '✅' : '❌'} ${title}</div>
+        ${details ? `<div class="details">${details}</div>` : ''}
+      `;
+      resultsEl.appendChild(card);
+      if (condition) passCount++; else failCount++;
+    }
+
+    // ── Test 1: Riso crudo vs cotto ──
+    const crudo = scaleNutrients(createNutrients({ kcal: 350, protein: 7, carbs: 78, fats: 1, saturatedFat: 0.2 }), 0.8); // 80g
+    const cotto = scaleNutrients(createNutrients({ kcal: 130, protein: 3, carbs: 28, fats: 0.3, saturatedFat: 0.1 }), 1.5); // 150g
+    assert('1. Riso crudo vs cotto values preserved', crudo.kcal === 280 && cotto.kcal === 195, `Crudo 80g: ${crudo.kcal} kcal | Cotto 150g: ${cotto.kcal} kcal`);
+
+    // ── Test 2: Known zero kcal foods ──
+    assert('2a. Water is zero kcal', isZeroKcalFood('acqua naturale') === true);
+    assert('2b. Protein water is NOT zero kcal', isZeroKcalFood('acqua proteica') === false);
+    assert('2c. Black coffee is zero kcal', isZeroKcalFood('caffè nero') === true);
+    assert('2d. Cappuccino is NOT zero kcal', isZeroKcalFood('cappuccino') === false);
+
+    // ── Test 3: Portion scaling ──
+    const e200g = scaleNutrients(createNutrients({ kcal: 155, protein: 13, carbs: 1, fats: 11, saturatedFat: 3.3 }), 2);
+    assert('3. 200g eggs scaling', e200g.kcal === 310 && e200g.protein === 26 && e200g.saturatedFat === 6.6, JSON.stringify(e200g));
+
+    // ── Test 4: Totals = sum of ingredients ──
+    const items = [
+      { kcal: 280, protein: 6, carbs: 62, fats: 0.8, saturatedFat: 0.2 },
+      { kcal: 165, protein: 31, carbs: 0, fats: 4, saturatedFat: 1.1 },
+      { kcal: 88, protein: 0, carbs: 0, fats: 10, saturatedFat: 1.4 }
+    ];
+    const summed = sumNutrients(items);
+    assert('4. Sum of ingredients matches expected total', summed.totals.kcal === 533 && summed.totals.protein === 37 && summed.totals.saturatedFat === 2.7, JSON.stringify(summed.totals));
+
+    // ── Test 5: Label kcal not overwritten by Atwater ──
+    const labelData = { kcal: 250, protein: 10, carbs: 30, fats: 8, fiber: 12 }; // Atwater without fiber would give 232, with fiber 256
+    const diag = diagnoseAtwater(labelData);
+    const valRes = validateNutrientResponse(labelData);
+    assert('5. Declared label kcal (250) preserved despite Atwater (256)', valRes.kcal === 250, `Declared: 250 vs Computed: ${diag.computed}`);
+
+    // ── Test 6: Alcohol / Fibre calculation ──
+    const wine = { kcal: 85, protein: 0, carbs: 3, fats: 0, alcohol: 10 }; // 3*4 + 10*7 = 82 kcal
+    const wineDiag = diagnoseAtwater(wine);
+    assert('6. Wine alcohol kcal accounted for in diagnostic', wineDiag.computed === 82 && wineDiag.level === 'ok', `Wine computed: ${wineDiag.computed}`);
+
+    // ── Test 7: Saturated fat <= total fats ──
+    const satCheck1 = validateNutrients({ kcal: 200, protein: 10, carbs: 10, fats: 5, saturatedFat: 4 });
+    const satCheck2 = validateNutrients({ kcal: 200, protein: 10, carbs: 10, fats: 5, saturatedFat: 8 }); // invalid: sat > fat
+    assert('7a. Valid saturatedFat <= fats accepted', satCheck1.nutrients.saturatedFat === 4 && satCheck1.errors.length === 0);
+    assert('7b. Invalid saturatedFat > fats capped with warning', satCheck2.nutrients.saturatedFat === 5 && satCheck2.warnings.length > 0, satCheck2.warnings[0]);
+
+    // ── Test 8: Missing saturated fat stays null ──
+    const missingSatItems = [
+      { kcal: 100, protein: 10, carbs: 10, fats: 2, saturatedFat: 1 },
+      { kcal: 100, protein: 10, carbs: 10, fats: 2 } // saturatedFat absent
+    ];
+    const missingSum = sumNutrients(missingSatItems);
+    assert('8. Missing saturatedFat stays tracked in completeness metadata', missingSum.meta.saturatedFat.complete === false && missingSum.meta.saturatedFat.knownCount === 1, JSON.stringify(missingSum.meta.saturatedFat));
+
+    // ── Test 9: Legacy data compatibility ──
+    const legacy = fromLegacy({ kcal: 500, protein: 30, carbs: 50, fats: 15 });
+    assert('9. Legacy data has saturatedFat: null without inventing values', legacy.saturatedFat === null && legacy.kcal === 500);
+
+    // ── Test 10: Reference food — Barilla Pasta per 100g ──
+    const barilla = createNutrients({ kcal: 359, protein: 13, carbs: 70.8, fats: 2, saturatedFat: 0.5 });
+    assert('10. Barilla pasta reference label accurate', barilla.kcal === 359 && barilla.protein === 13 && barilla.saturatedFat === 0.5);
+
+    // ── Test 11: Reference food — Fage 0% Greek Yogurt ──
+    const fage = createNutrients({ kcal: 54, protein: 10.3, carbs: 3, fats: 0, saturatedFat: 0 });
+    assert('11. Fage 0% greek yogurt reference accurate', fage.kcal === 54 && fage.saturatedFat === 0);
+
+    // ── Test 12: Reference food — Extra Virgin Olive Oil ──
+    const evoo = createNutrients({ kcal: 824, protein: 0, carbs: 0, fats: 91.6, saturatedFat: 13 });
+    assert('12. EVOO reference accurate', evoo.kcal === 824 && evoo.saturatedFat === 13);
+
+    // ── Test 13: Display rounding non-accumulative ──
+    const rawNut = { kcal: 125.4, protein: 12.345, carbs: 45.678, fats: 3.21, saturatedFat: 0.89 };
+    const rounded = roundForDisplay(rawNut);
+    assert('13. Display rounding works correctly', rounded.kcal === 125 && rounded.protein === 12.3 && rounded.saturatedFat === 0.9, JSON.stringify(rounded));
+
+    // ── Test 14: Firestore serialization strips null ──
+    const fsData = forFirestore({ kcal: 200, protein: 15, carbs: 20, fats: 5, saturatedFat: null });
+    assert('14. Firestore serialization excludes null keys', !('saturatedFat' in fsData) && fsData.kcal === 200, JSON.stringify(fsData));
+
+    // ── Test 15: Protein isolate sanity check ──
+    const wheyRes = validateNutrients({ kcal: 380, protein: 92, carbs: 1, fats: 1, saturatedFat: 0.5 }, { per100g: true });
+    assert('15. Whey isolate (92g protein/100g) accepted', wheyRes.errors.length === 0, `Errors: ${JSON.stringify(wheyRes.errors)}`);
+
+    // Summary
+    summaryEl.innerHTML = `
+      <span class="badge-pass">${passCount} Passed</span> | 
+      <span class="${failCount === 0 ? 'badge-pass' : 'badge-fail'}">${failCount} Failed</span>
+    `;
+  </script>
+</body>
+</html>
