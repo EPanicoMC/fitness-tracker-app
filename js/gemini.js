@@ -394,39 +394,6 @@ function calcDeterministic(parsedItems, library) {
   return { matched: results, unmatched };
 }
 
-// ── Double-pass AI verification ─────────────────────────────
-async function verifyMacrosAI(items, key) {
-  if (!items || items.length < 2) return null;
-  const totalKcal = items.reduce((s, i) => s + (Number(i.kcal) || 0), 0);
-  if (totalKcal < 300) return null;
-
-  const itemsText = items.map(i =>
-    `- ${i.name}: ${i.grams}g → ${i.kcal} kcal, P:${i.protein}g, C:${i.carbs}g, F:${i.fats}g`
-  ).join('\n');
-
-  const prompt = `Verifica RAPIDAMENTE questi valori nutrizionali. Per ogni ingrediente, controlla che i valori per-100g siano plausibili.
-${COOKING_RULE}
-
-${itemsText}
-
-Se trovi errori evidenti (>15% di scostamento dai valori reali), correggi SOLO quelli e ricalcola il totale.
-Se tutto è corretto, rispondi con lo stesso JSON invariato.
-IMPORTANTE: Mantieni lo STESSO ordine degli ingredienti nella risposta. Non riordinare.
-Rispondi SOLO con un JSON valido (includi SEMPRE il campo grams e name per ogni item):
-{"kcal":0,"protein":0,"carbs":0,"fats":0,"items":[{"name":"...","grams":0,"kcal":0,"protein":0,"carbs":0,"fats":0}]}`;
-
-  try {
-    const res = await callGemini(key, prompt, { temperature: 0.05, maxOutputTokens: 768 });
-    if (!res.success) return null;
-    const raw = res.text;
-    const s1 = raw.indexOf('{');
-    const s2 = raw.lastIndexOf('}');
-    if (s1 === -1 || s2 === -1) return null;
-    return JSON.parse(raw.slice(s1, s2 + 1));
-  } catch(e) {
-    return null;
-  }
-}
 
 function fixFoodTypos(text) {
   if (!text) return '';
@@ -462,65 +429,27 @@ export async function calcMacrosFromText(text) {
     const key = await getKey();
     if (!key) return { success: false, error: 'API key mancante.' };
 
-    // 1. Load food library and corrections
-    const [library, corrections] = await Promise.all([
-      loadFoodLibrary(),
-      loadCorrections()
-    ]);
-
-    // 2. Parse structured input
-    const parsedItems = parseStructuredInput(cleanedText);
-    const { matched, unmatched } = parsedItems.length > 0
-      ? calcDeterministic(parsedItems, library)
-      : { matched: [], unmatched: [] };
-
-    // 3. Build correction hints for the prompt
-    let correctionHints = '';
-    if (Object.keys(corrections).length > 0) {
-      const relevantCorrs = [];
-      for (const [foodId, data] of Object.entries(corrections)) {
-        if (text.toLowerCase().includes(data.food_name?.toLowerCase())) {
-          relevantCorrs.push(`- "${data.food_name}": l'utente ha corretto le stime AI in media di ${data.avg_delta.kcal_pct > 0 ? '+' : ''}${data.avg_delta.kcal_pct}% sulle kcal e ${data.avg_delta.protein_pct > 0 ? '+' : ''}${data.avg_delta.protein_pct}% sulle proteine. Adatta le tue stime di conseguenza.`);
-        }
-      }
-      if (relevantCorrs.length > 0) {
-        correctionHints = `\nCORREZIONI UTENTE PRECEDENTI (tieni conto!):\n${relevantCorrs.join('\n')}`;
-      }
-    }
-
-    // 4. Build library hints for the prompt
-    let libraryHints = '';
-    if (matched.length > 0) {
-      libraryHints = `\nVALORI VERIFICATI dalla food library dell'utente (usa QUESTI come riferimento prioritario, sono più precisi):\n` +
-        matched.map(m => `- ${m.name}: ${m.kcal} kcal, P:${m.protein}g, C:${m.carbs}g, F:${m.fats}g (calcolato da ${m._libraryName}: ${library.find(f => f.name === m._libraryName)?.kcal_per_100g} kcal/100g)`).join('\n');
-    }
-
-    // 5. Call AI — always, with library hints as anchors
-    const prompt = `Analizza la seguente descrizione di un pasto e stima accuratamente i macronutrienti.
-Past: "${cleanedText}"
+    // Pure AI-Native Direct Prompt — No historical bias, no fuzzy table overrides
+    const prompt = `Analizza la seguente descrizione di un pasto e stima accuratamente i macronutrienti per OGNI ingrediente.
+Pasto: "${cleanedText}"
 
 Regole fondamentali e VINCOLANTI:
-1. kcal = (Proteine * 4) + (Carboidrati * 4) + (Grassi * 9). PRIMA calcola i macro per ogni singolo ingrediente, POI sommali, POI verifica con la formula.
+1. ${GENERAL_NUTRITIONAL_GUIDELINES}
 2. ${COOKING_RULE}
-3. Porzioni standard se non specificate: piatto di pasta = 80g crudo, petto di pollo = 150g crudo, 1 cucchiaio d'olio = 10g, uovo medio = 60g, 1 frutto = 150g, bicchiere di latte = 200ml.
-3b. Porzioni bevande: 1 calice di vino = 125ml, 1 bicchiere = 200ml, 1 birra/lattina = 330ml, 1 bottiglia birra = 500ml, 1 spritz = 180ml.
-3c. Porzioni italiane: 1 fetta di pancarré = 25g, 1 fetta di pane comune = 40g, 1 cucchiaio d'olio = 10g, 1 cucchiaino = 5g, 1 cornetto/brioche = 60g, 1 fetta biscottata = 10g.
-3d. Numeri italiani: "un/uno/una" = 1, "due" = 2, "tre" = 3, "quattro" = 4, "cinque" = 5, "mezzo/mezza" = 0.5.
-4. ${GENERAL_NUTRITIONAL_GUIDELINES}
-5. SANITY CHECK: ingrediente < 200g NON può avere > 900 kcal (eccezione: olio/burro/frutta secca). Proteine/100g mai > 35g (eccezione: whey/proteine in polvere).
-6. REGOLA ZERO (CRITICA): NESSUN alimento reale ha 0 kcal (eccezioni: acqua pura, caffè nero senza zucchero). Se un ingrediente è un cibo o bevanda reale, DEVE avere kcal > 0. Se non conosci i valori esatti, STIMA comunque un valore plausibile, MAI 0.
-7. BEVANDE ALCOLICHE: l'alcol ha 7 kcal per grammo. Un calice di vino (~125ml) = ~85 kcal. Una birra (330ml) = ~140 kcal. Non restituire MAI 0 kcal per bevande alcoliche. I macro delle bevande alcoliche sono principalmente carboidrati, con proteine e grassi a 0.
-8. INTERPRETAZIONE SEMANTICA (CRITICA): Quando l'utente scrive "da Xg di proteine/carbs/grassi", "con Xg di proteine", "X proteine", sta descrivendo il CONTENUTO NUTRIZIONALE, NON il peso dell'alimento. Esempio: "acqua proteica da 14g di proteine" → 14g di PROTEINE (non 14g di peso!), quindi protein=14, kcal≥56. "barretta da 20g di proteine" → protein=20, NON 20g di peso. Usa queste informazioni esplicitamente dichiarate dall'utente come VINCOLO da rispettare nel risultato.
-9. BEVANDE PROTEICHE/INTEGRATORI: acqua proteica, shake proteici, barrette proteiche hanno i macro indicati sull'etichetta. Se l'utente specifica il contenuto proteico, USA QUEL VALORE. Esempio: "acqua proteica da 14g di proteine" = circa 60 kcal, 14g Pro, 0-2g Carb, 0g Fat.
-10. GRASSI SATURI: per ogni ingrediente (e nei totali), stima anche i grassi saturi (saturatedFat in grammi). Se l'alimento non contiene grassi o il dato non è noto, usa null.
-11. TYPO RESILIENCE: Correggi eventuali errori di battitura (es. "sacatola" -> "scatola", "pancare" -> "pancarré", "oliio" -> "olio"). Se l'alimento menziona "in scatola", "gelatina", "montana", "simmenthal", trattalo sempre come carne/pollo in gelatina da conserva (~12-14g pro, ~1.5g fat per 100g di prodotto totale).
-12. Output SOLO JSON valido, no markdown, no commenti, no spiegazioni.
-${libraryHints}${correctionHints}
+3. DENSITÀ NUTRIZIONALE E VALORI COMMERCIALI (CRITICO):
+   - Carne/pollo in scatola conservati in gelatina o brodo (es. Montana, Simmenthal): 100g di prodotto totale confezionato = ~12-14g proteine, ~1.5g grassi (~60-70 kcal). 280g in scatola = ~36g proteine, ~4.2g grassi. NON usare mai i valori del petto di pollo fresco da macelleria (23g pro/100g)!
+   - Olio EVO in ml: 1ml = 0.92g = 0.92g grassi. 5ml = ~4.6g grassi (~42-45 kcal). Rispettare rigorosamente i millilitri.
+   - Kinder Joy: 10g = ~5.5g carbo, ~3.6g grassi, ~0.8g proteine (~56 kcal).
+   - Pancarré / pane in cassetta: 1 fetta = ~25g (~65 kcal, 2.5g pro, 1g grassi, 11g carbo). 2 fette soya (~50g) = ~130 kcal, ~5.5g pro, ~2g grassi, ~23g carbo.
+   - Insalata verde: 60g = ~9 kcal, ~0.8g pro, ~1g carbo, ~0.1g grassi.
+4. NESSUN ALIMENTO REALE HA 0 KCAL (tranne acqua pura e caffè nero).
+5. Output SOLO JSON valido, senza markdown, senza commenti.
 
-JSON richiesto:
+Formato JSON richiesto:
 {
-  "kcal": 0, "protein": 0, "carbs": 0, "fats": 0, "saturatedFat": null,
-  "items": [{ "name": "Alimento (XXXg o XXXml)", "grams": 0, "kcal": 0, "protein": 0, "carbs": 0, "fats": 0, "saturatedFat": null }]
+  "items": [
+    { "name": "Nome alimento con porzione", "grams": 0, "kcal": 0, "protein": 0, "carbs": 0, "fats": 0, "saturatedFat": null }
+  ]
 }`;
 
     const res = await callGemini(key, prompt, { temperature: 0.1, maxOutputTokens: 1024 });
@@ -532,56 +461,62 @@ JSON richiesto:
     if (s1 === -1 || s2 === -1) return { success: false, error: 'Risposta AI non valida.' };
 
     let parsed = JSON.parse(raw.slice(s1, s2 + 1));
+    const rawItems = parsed.items || [];
 
-    // 6. [RIMOSSO] Non sovrascriviamo più i valori AI con quelli della food library.
-    // La library serve solo come HINT nel prompt (step 4). L'AI ha l'ultima parola.
-    // Il parser strutturato non capisce la semantica (es. "14g di proteine" ≠ "14g di un alimento")
-    // e il fuzzy match genera falsi positivi che corrompono il risultato.
+    // Recalculate deterministic exact totals from items
+    let sumKcal = 0;
+    let sumPro = 0;
+    let sumCarbs = 0;
+    let sumFats = 0;
+    let sumSatFat = 0;
+    let hasSatFat = rawItems.length > 0;
 
-    // 7. Double-pass verification solo per pasti complessi (4+ ingredienti, >500 kcal)
-    if (parsed.items?.length >= 4 && (parsed.kcal || 0) > 500) {
-      const verified = await verifyMacrosAI(parsed.items, key);
-      if (verified?.items?.length > 0) {
-        for (const verItem of verified.items) {
-          const verNorm = normalize(verItem.name || '');
-          let matchIdx = parsed.items.findIndex(orig => {
-            const origNorm = normalize(orig.name || '');
-            return origNorm === verNorm ||
-                   origNorm.includes(verNorm) ||
-                   verNorm.includes(origNorm) ||
-                   verNorm.split(/\s+/).some(w => w.length >= 4 && origNorm.includes(w));
-          });
-          if (matchIdx < 0) {
-            const verIdx = verified.items.indexOf(verItem);
-            if (verIdx < parsed.items.length) {
-              matchIdx = verIdx;
-            }
-          }
-          if (matchIdx >= 0) {
-            parsed.items[matchIdx] = {
-              grams: parsed.items[matchIdx]?.grams,
-              ...verItem
-            };
-          }
-        }
-        // Recalc totals
-        const vTotals = parsed.items.reduce((a, it) => ({
-          kcal: a.kcal + (Number(it.kcal) || 0),
-          protein: a.protein + (Number(it.protein) || 0),
-          carbs: a.carbs + (Number(it.carbs) || 0),
-          fats: a.fats + (Number(it.fats) || 0)
-        }), { kcal: 0, protein: 0, carbs: 0, fats: 0 });
-        parsed.kcal = vTotals.kcal;
-        parsed.protein = vTotals.protein;
-        parsed.carbs = vTotals.carbs;
-        parsed.fats = vTotals.fats;
+    const cleanedItems = rawItems.map(item => {
+      const k = Math.round(Number(item.kcal) || 0);
+      const p = parseFloat((Number(item.protein) || 0).toFixed(1));
+      const c = parseFloat((Number(item.carbs) || 0).toFixed(1));
+      const f = parseFloat((Number(item.fats) || 0).toFixed(1));
+      const sf = (item.saturatedFat != null && !isNaN(Number(item.saturatedFat)))
+        ? parseFloat((Number(item.saturatedFat)).toFixed(1))
+        : null;
+
+      sumKcal += k;
+      sumPro += p;
+      sumCarbs += c;
+      sumFats += f;
+      if (sf !== null) {
+        sumSatFat += sf;
+      } else {
+        hasSatFat = false;
       }
-    }
 
-    // 8. Final validation
+      return {
+        name: item.name || 'Alimento',
+        grams: Number(item.grams) || 0,
+        kcal: k,
+        protein: p,
+        carbs: c,
+        fats: f,
+        saturatedFat: sf
+      };
+    });
+
+    const totalFats = parseFloat(sumFats.toFixed(1));
+    const totalSat = hasSatFat ? parseFloat(sumSatFat.toFixed(1)) : null;
+
+    parsed = {
+      kcal: Math.round(sumKcal),
+      protein: parseFloat(sumPro.toFixed(1)),
+      carbs: parseFloat(sumCarbs.toFixed(1)),
+      fats: totalFats,
+      saturatedFat: (totalSat !== null && totalSat <= totalFats) ? totalSat : null,
+      items: cleanedItems
+    };
+
+    // Final validation
     let validated = validateAndFixMacros(parsed);
 
-    // 8b. Retry: se risultato zero-suspect, riprova UNA volta con prompt più esplicito
+    // Retry once if all zeros for real food
     if (validated._zeroSuspect) {
       const zeroItems = (validated.items || [])
         .filter(i => (Number(i.kcal) || 0) === 0 && i.name && !isZeroKcalAllowed(i.name))
@@ -589,12 +524,10 @@ JSON richiesto:
       if (zeroItems.length > 0) {
         const retryPrompt = `CORREZIONE URGENTE: la stima precedente per "${text}" ha restituito 0 kcal per: ${zeroItems.join(', ')}.
 Questo è IMPOSSIBILE — ogni alimento e bevanda reale ha calorie > 0.
-${REFERENCE_TABLE}
-Ricalcola CORRETTAMENTE i macronutrienti per il pasto completo.
-Regola: kcal = (Proteine * 4) + (Carboidrati * 4) + (Grassi * 9). L'alcol ha 7 kcal/g.
-1 calice di vino = ~85 kcal. 1 birra (330ml) = ~140 kcal. 1 banana = ~108 kcal.
+${GENERAL_NUTRITIONAL_GUIDELINES}
+Ricalcola CORRETTAMENTE i macronutrienti per ogni ingrediente del pasto.
 Rispondi SOLO con JSON valido:
-{"kcal":0,"protein":0,"carbs":0,"fats":0,"items":[{"name":"...","grams":0,"kcal":0,"protein":0,"carbs":0,"fats":0}]}`;
+{"items":[{"name":"...","grams":0,"kcal":0,"protein":0,"carbs":0,"fats":0,"saturatedFat":null}]}`;
         try {
           const retryRes = await callGemini(key, retryPrompt, { temperature: 0.1, maxOutputTokens: 1024 });
           if (retryRes.success) {
@@ -605,7 +538,6 @@ Rispondi SOLO con JSON valido:
               const retryParsed = JSON.parse(rRaw.slice(rs1, rs2 + 1));
               const retryValidated = validateAndFixMacros(retryParsed);
               if (!retryValidated._zeroSuspect && retryValidated.kcal > 0) {
-                parsed = retryParsed;
                 validated = retryValidated;
               }
             }
@@ -613,9 +545,6 @@ Rispondi SOLO con JSON valido:
         } catch(e) { /* retry fallito, usa il risultato originale */ }
       }
     }
-
-    // 9. [RIMOSSO] Auto-save disabilitato — il salvataggio automatico nella food library
-    // generava troppi falsi positivi e inquinava i risultati futuri.
 
     const finalRes = {
       success: true,
