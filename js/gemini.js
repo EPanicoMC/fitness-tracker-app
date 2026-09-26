@@ -91,56 +91,15 @@ function validateAndFixMacros(parsed) {
   return validateNutrientResponse(parsed);
 }
 
-// ── Tabella riferimenti nutrizionali (per 100g) ─────────────
-const REFERENCE_TABLE = `Valori nutrizionali di riferimento per 100g di prodotto (CRUDO se non diversamente specificato):
-   CEREALI E PANE:
-   - Pasta (cruda): ~350 kcal, 75g Carb, 10g Pro, 1g Fat → COTTA: ~130 kcal, 26g Carb, 5g Pro, 0.5g Fat
-   - Riso (crudo): ~350 kcal, 78g Carb, 7g Pro, 1g Fat → COTTO: ~130 kcal, 28g Carb, 3g Pro, 0.3g Fat
-   - Riso Basmati (crudo): ~350 kcal, 78g Carb, 8g Pro, 1g Fat
-   - Pane comune: ~260 kcal, 55g Carb, 8g Pro, 1g Fat
-   - Avena/Fiocchi d'avena: ~370 kcal, 60g Carb, 13g Pro, 7g Fat
-   - Fette biscottate: ~410 kcal, 75g Carb, 11g Pro, 7g Fat
-   PROTEINE ANIMALI ED IN SCATOLA:
-   - Petto di Pollo/Tacchino (crudo): ~110 kcal, 0g Carb, 23g Pro, 2g Fat → COTTO: ~165 kcal, 0g Carb, 31g Pro, 4g Fat
-   - Carne/Pollo in scatola in gelatina (es. Montana, Simmenthal): ~68 kcal, 0.5g Carb, 13g Pro, 1.5g Fat (la gelatina ed il brodo riducono la densità proteica per 100g di prodotto totale. 280g in gelatina = ~36g Pro, 4g Fat. NOTA: NON usare le proteine del pollo fresco!).
-   - Manzo magro (crudo): ~140 kcal, 0g Carb, 22g Pro, 5g Fat → COTTO: ~175 kcal, 0g Carb, 26g Pro, 7g Fat
-   - Tonno in scatola (sgocciolato): ~110 kcal, 0g Carb, 25g Pro, 1g Fat
-   - Uovo intero (~60g): ~65 kcal → per 100g: ~155 kcal, 1g Carb, 13g Pro, 11g Fat
-   - Albume d'uovo: ~50 kcal, 1g Carb, 11g Pro, 0g Fat
-   CEREALI E PANE:
-   - Pane comune: ~260 kcal, 55g Carb, 8g Pro, 1g Fat
-   - Pancarré / Pane in cassetta / Soia (1 fetta ~25g, 2 fette ~50g): ~130 kcal, 22g Carb, 5g Pro, 2g Fat (1 fetta = ~65 kcal, 2.5g Pro, 1g Fat)
-   - Pasta (cruda): ~350 kcal, 75g Carb, 10g Pro, 1g Fat → COTTA: ~130 kcal, 26g Carb, 5g Pro, 0.5g Fat
-   - Riso (crudo): ~350 kcal, 78g Carb, 7g Pro, 1g Fat → COTTO: ~130 kcal, 28g Carb, 3g Pro, 0.3g Fat
-   - Avena/Fiocchi d'avena: ~370 kcal, 60g Carb, 13g Pro, 7g Fat
-   - Fette biscottate: ~410 kcal, 75g Carb, 11g Pro, 7g Fat
-   LATTICINI:
-   - Latte intero: ~65 kcal, 5g Carb, 3g Pro, 4g Fat
-   - Yogurt greco 0%: ~55 kcal, 4g Carb, 10g Pro, 0g Fat
-   - Yogurt greco intero: ~95 kcal, 4g Carb, 9g Pro, 5g Fat
-   - Ricotta vaccina: ~140 kcal, 3g Carb, 11g Pro, 10g Fat
-   - Mozzarella: ~250 kcal, 1g Carb, 18g Pro, 19g Fat
-   - Parmigiano: ~390 kcal, 0g Carb, 33g Pro, 28g Fat
-   GRASSI E FRUTTA SECCA:
-   - Olio Extravergine: ~880 kcal, 0g Carb, 0g Pro, 100g Fat (1ml = 0.92g = ~9 kcal, 1g Fat. 5ml = ~4.5g Fat, ~42 kcal)
-   - Burro: ~715 kcal, 0g Carb, 1g Pro, 81g Fat
-   - Noci/Mandorle/Nocciole: ~610 kcal, 12g Carb, 20g Pro, 52g Fat
-   - Burro d'arachidi: ~590 kcal, 22g Carb, 25g Pro, 50g Fat
-   FRUTTA E VERDURA:
-   - Banana: ~90 kcal, 23g Carb, 1g Pro, 0g Fat
-   - Mela/Pera: ~52 kcal, 14g Carb, 0g Pro, 0g Fat
-   - Insalata verde/mista: ~15 kcal/100g, 2g Carb, 1g Pro, 0.2g Fat (60g = ~9 kcal)
-   - Patate (crude): ~77 kcal, 17g Carb, 2g Pro, 0g Fat → COTTE/bollite: ~85 kcal, 20g Carb, 2g Pro, 0g Fat
-   SNACK E DOLCI:
-   - Kinder Joy / snack ovetto (10g = circa 1/2 ovetto): ~55 kcal, 0.8g Pro, 5.3g Carb, 3.6g Fat (1.8g saturi)
-   - Cioccolato fondente: ~540 kcal, 50g Carb, 5g Pro, 35g Fat
-   - Biscotti secchi: ~440 kcal, 75g Carb, 7g Pro, 13g Fat
-   - Cornetto/Brioche: ~350 kcal, 45g Carb, 8g Pro, 15g Fat (1 cornetto ~60g = ~210 kcal)`;
+// ── Guida di ragionamento nutrizionale generale (Pure AI-Native) ─
+const GENERAL_NUTRITIONAL_GUIDELINES = `REGOLE DI RAGIONAMENTO NUTRIZIONALE E COMMERCIALE (PURE AI):
+1. PRODOTTI COMMERCIALI E MARCHE CONFEZIONATE: Quando l'utente cita una marca o prodotto confezionato (es. Kinder, Montana, Simmenthal, Barilla, Mulino Bianco, ecc.), applica la tua conoscenza Reale dell'etichetta nutrizionale ufficiale di quel prodotto commerciale per 100g/ml.
+2. CONSERVE IN GELATINA O IN BRODO: Per cibi in scatola conservati in gelatina/brodo (es. carne o pollo in gelatina), considera che il peso della confezione include la gelatina. La densità proteica reale per 100g di prodotto totale è ~12-14g pro e ~1.5g grassi (NON usare mai le proteine della carne fresca da macelleria).
+3. PANE E PANCARRÉ: Il pancarré / pane in cassetta ha fette da ~25g per fetta (~65 kcal, 2.5g Pro, 1g Fat, 11g Carb per fetta). Il pane comune da panificio ha fette da ~40-50g.
+4. LIQUIDI E OLII IN ML: 1ml di Olio EVO = ~0.92g = 9 kcal, 1g grassi. 5ml di olio = ~4.5g grassi (~42-45 kcal). Rispetta rigorosamente i millilitri esplicitati.
+5. STATO FISICO (CRUDO vs COTTO): Se l'utente non specifica "cotto/bollito/grigliato", usa SEMPRE i valori del prodotto CRUDO. Se specifica "cotto/bollito", applica la densità del prodotto cotto.`;
 
-const COOKING_RULE = `REGOLA COTTURA (FONDAMENTALE):
-DEFAULT = CRUDO. Se l'utente scrive una quantità in grammi SENZA specificare "cotto/bollito/lessato/al vapore", usa SEMPRE i valori del prodotto CRUDO.
-Usa i valori COTTO solo quando l'utente ESPLICITAMENTE scrive: "cotto", "bollito", "lessato", "al vapore", "grigliato" o "già cotto".
-Esempi: "80g riso" = CRUDO. "80g riso bollito" = COTTO. "150g pollo" = CRUDO. "150g pollo grigliato" = COTTO.`;
+const COOKING_RULE = `DEFAULT = CRUDO. Se l'utente scrive grammi SENZA specificare "cotto/bollito/lessato", usa i valori del prodotto CRUDO. Usa COTTO solo quando l'utente specifica "cotto", "bollito", "lessato", "al vapore", "grigliato".`;
 
 // ── Food Library Cache ──────────────────────────────────────
 let _foodLibCache = null;
@@ -524,9 +483,9 @@ Regole fondamentali e VINCOLANTI:
 2. ${COOKING_RULE}
 3. Porzioni standard se non specificate: piatto di pasta = 80g crudo, petto di pollo = 150g crudo, 1 cucchiaio d'olio = 10g, uovo medio = 60g, 1 frutto = 150g, bicchiere di latte = 200ml.
 3b. Porzioni bevande: 1 calice di vino = 125ml, 1 bicchiere = 200ml, 1 birra/lattina = 330ml, 1 bottiglia birra = 500ml, 1 spritz = 180ml.
-3c. Porzioni italiane: 1 fetta di pane = 40g, 1 cucchiaio = 10g, 1 cucchiaino = 5g, 1 cornetto/brioche = 60g, 1 fetta biscottata = 10g.
+3c. Porzioni italiane: 1 fetta di pancarré = 25g, 1 fetta di pane comune = 40g, 1 cucchiaio d'olio = 10g, 1 cucchiaino = 5g, 1 cornetto/brioche = 60g, 1 fetta biscottata = 10g.
 3d. Numeri italiani: "un/uno/una" = 1, "due" = 2, "tre" = 3, "quattro" = 4, "cinque" = 5, "mezzo/mezza" = 0.5.
-4. ${REFERENCE_TABLE}
+4. ${GENERAL_NUTRITIONAL_GUIDELINES}
 5. SANITY CHECK: ingrediente < 200g NON può avere > 900 kcal (eccezione: olio/burro/frutta secca). Proteine/100g mai > 35g (eccezione: whey/proteine in polvere).
 6. REGOLA ZERO (CRITICA): NESSUN alimento reale ha 0 kcal (eccezioni: acqua pura, caffè nero senza zucchero). Se un ingrediente è un cibo o bevanda reale, DEVE avere kcal > 0. Se non conosci i valori esatti, STIMA comunque un valore plausibile, MAI 0.
 7. BEVANDE ALCOLICHE: l'alcol ha 7 kcal per grammo. Un calice di vino (~125ml) = ~85 kcal. Una birra (330ml) = ~140 kcal. Non restituire MAI 0 kcal per bevande alcoliche. I macro delle bevande alcoliche sono principalmente carboidrati, con proteine e grassi a 0.
@@ -534,9 +493,6 @@ Regole fondamentali e VINCOLANTI:
 9. BEVANDE PROTEICHE/INTEGRATORI: acqua proteica, shake proteici, barrette proteiche hanno i macro indicati sull'etichetta. Se l'utente specifica il contenuto proteico, USA QUEL VALORE. Esempio: "acqua proteica da 14g di proteine" = circa 60 kcal, 14g Pro, 0-2g Carb, 0g Fat.
 10. GRASSI SATURI: per ogni ingrediente (e nei totali), stima anche i grassi saturi (saturatedFat in grammi). Se l'alimento non contiene grassi o il dato non è noto, usa null.
 11. Output SOLO JSON valido, no markdown, no commenti, no spiegazioni.
-12. CARNE/POLLO IN SCATOLA IN GELATINA (Simmenthal, Montana): Il peso della scatola comprende brodo e gelatina. Ha SEMPRE ~12-14g di proteine e ~1.5g di grassi per 100g di prodotto totale (gelatina compresa). NON USARE MAI 23-30g/100g per carne o pollo in scatola in gelatina! Esempio: 280g di pollo in scatola in gelatina = circa 36g proteine, 4g grassi, 190 kcal.
-13. PANCARRÉ / PANE IN CASSETTA: 1 fetta = ~25g. 2 fette = ~50g (~130 kcal, 22g Carb, 5g Pro, 2g Fat). Non sovrastimare i grassi.
-14. OLIO EVO IN ML: 1ml = 1g di grassi (9 kcal). 5ml di olio = esattamente 4.5-5g di grassi (circa 42-45 kcal). Non calcolare più di 5g di grassi per 5ml di olio.
 ${libraryHints}${correctionHints}
 
 JSON richiesto:
