@@ -428,10 +428,31 @@ Rispondi SOLO con un JSON valido (includi SEMPRE il campo grams e name per ogni 
   }
 }
 
+function fixFoodTypos(text) {
+  if (!text) return '';
+  return text
+    .replace(/\bsacatola\b/gi, 'scatola')
+    .replace(/\bscatolaa\b/gi, 'scatola')
+    .replace(/\bscatol\b/gi, 'scatola')
+    .replace(/\bpancare\b/gi, 'pancarré')
+    .replace(/\bpancarre\b/gi, 'pancarré')
+    .replace(/\bpancarrè\b/gi, 'pancarré')
+    .replace(/\boliio\b/gi, 'olio')
+    .replace(/\boljo\b/gi, 'olio')
+    .replace(/\bmozarella\b/gi, 'mozzarella')
+    .replace(/\bprociutto\b/gi, 'prosciutto')
+    .replace(/\bricota\b/gi, 'ricotta')
+    .replace(/\bbiscoti\b/gi, 'biscotti')
+    .replace(/\binzalata\b/gi, 'insalata')
+    .replace(/\binzalatica\b/gi, 'insalata')
+    .replace(/\byoghurt\b/gi, 'yogurt');
+}
+
 // ── Calcola macros da testo (ibrido: deterministico + AI) ───
 export async function calcMacrosFromText(text) {
   if (!text || !text.trim()) return { success: false, error: 'Testo vuoto.' };
-  const normKey = text.trim().toLowerCase().replace(/\s+/g, ' ');
+  const cleanedText = fixFoodTypos(text);
+  const normKey = cleanedText.trim().toLowerCase().replace(/\s+/g, ' ');
   if (_macroCache.has(normKey)) {
     return { ..._macroCache.get(normKey), _cached: true };
   }
@@ -448,7 +469,7 @@ export async function calcMacrosFromText(text) {
     ]);
 
     // 2. Parse structured input
-    const parsedItems = parseStructuredInput(text);
+    const parsedItems = parseStructuredInput(cleanedText);
     const { matched, unmatched } = parsedItems.length > 0
       ? calcDeterministic(parsedItems, library)
       : { matched: [], unmatched: [] };
@@ -476,7 +497,7 @@ export async function calcMacrosFromText(text) {
 
     // 5. Call AI — always, with library hints as anchors
     const prompt = `Analizza la seguente descrizione di un pasto e stima accuratamente i macronutrienti.
-Pasto: "${text}"
+Past: "${cleanedText}"
 
 Regole fondamentali e VINCOLANTI:
 1. kcal = (Proteine * 4) + (Carboidrati * 4) + (Grassi * 9). PRIMA calcola i macro per ogni singolo ingrediente, POI sommali, POI verifica con la formula.
@@ -492,7 +513,8 @@ Regole fondamentali e VINCOLANTI:
 8. INTERPRETAZIONE SEMANTICA (CRITICA): Quando l'utente scrive "da Xg di proteine/carbs/grassi", "con Xg di proteine", "X proteine", sta descrivendo il CONTENUTO NUTRIZIONALE, NON il peso dell'alimento. Esempio: "acqua proteica da 14g di proteine" → 14g di PROTEINE (non 14g di peso!), quindi protein=14, kcal≥56. "barretta da 20g di proteine" → protein=20, NON 20g di peso. Usa queste informazioni esplicitamente dichiarate dall'utente come VINCOLO da rispettare nel risultato.
 9. BEVANDE PROTEICHE/INTEGRATORI: acqua proteica, shake proteici, barrette proteiche hanno i macro indicati sull'etichetta. Se l'utente specifica il contenuto proteico, USA QUEL VALORE. Esempio: "acqua proteica da 14g di proteine" = circa 60 kcal, 14g Pro, 0-2g Carb, 0g Fat.
 10. GRASSI SATURI: per ogni ingrediente (e nei totali), stima anche i grassi saturi (saturatedFat in grammi). Se l'alimento non contiene grassi o il dato non è noto, usa null.
-11. Output SOLO JSON valido, no markdown, no commenti, no spiegazioni.
+11. TYPO RESILIENCE: Correggi eventuali errori di battitura (es. "sacatola" -> "scatola", "pancare" -> "pancarré", "oliio" -> "olio"). Se l'alimento menziona "in scatola", "gelatina", "montana", "simmenthal", trattalo sempre come carne/pollo in gelatina da conserva (~12-14g pro, ~1.5g fat per 100g di prodotto totale).
+12. Output SOLO JSON valido, no markdown, no commenti, no spiegazioni.
 ${libraryHints}${correctionHints}
 
 JSON richiesto:
