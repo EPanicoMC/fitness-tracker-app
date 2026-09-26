@@ -233,6 +233,12 @@ async function loadCorrections() {
   return _correctionsCache;
 }
 
+const _macroCache = new Map();
+
+export function clearMacroCache() {
+  _macroCache.clear();
+}
+
 export async function saveAICorrection(foodName, aiValues, userValues) {
   if (!foodName || !aiValues || !userValues) return;
   const normalized = foodName.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_àèéìòù]/g,'');
@@ -245,28 +251,30 @@ export async function saveAICorrection(foodName, aiValues, userValues) {
 
     prev.corrections.push({
       date: new Date().toISOString().split('T')[0],
-      ai: { kcal: aiValues.kcal, protein: aiValues.protein, carbs: aiValues.carbs, fats: aiValues.fats },
-      user: { kcal: userValues.kcal, protein: userValues.protein, carbs: userValues.carbs, fats: userValues.fats }
+      ai: { kcal: aiValues.kcal, protein: aiValues.protein, carbs: aiValues.carbs, fats: aiValues.fats, saturatedFat: aiValues.saturatedFat ?? null },
+      user: { kcal: userValues.kcal, protein: userValues.protein, carbs: userValues.carbs, fats: userValues.fats, saturatedFat: userValues.saturatedFat ?? null }
     });
     // Keep last 10 corrections max
     if (prev.corrections.length > 10) prev.corrections = prev.corrections.slice(-10);
     prev.count = prev.corrections.length;
 
-    // Calculate average delta
+    // Calculate average deltas across all macros
     const deltas = prev.corrections.map(c => ({
       kcal: c.ai.kcal > 0 ? ((c.user.kcal - c.ai.kcal) / c.ai.kcal) * 100 : 0,
-      protein: c.ai.protein > 0 ? ((c.user.protein - c.ai.protein) / c.ai.protein) * 100 : 0
+      protein: c.ai.protein > 0 ? ((c.user.protein - c.ai.protein) / c.ai.protein) * 100 : 0,
+      carbs: c.ai.carbs > 0 ? ((c.user.carbs - c.ai.carbs) / c.ai.carbs) * 100 : 0,
+      fats: c.ai.fats > 0 ? ((c.user.fats - c.ai.fats) / c.ai.fats) * 100 : 0
     }));
     prev.avg_delta = {
       kcal_pct: Math.round(deltas.reduce((s, d) => s + d.kcal, 0) / deltas.length),
-      protein_pct: Math.round(deltas.reduce((s, d) => s + d.protein, 0) / deltas.length)
+      protein_pct: Math.round(deltas.reduce((s, d) => s + d.protein, 0) / deltas.length),
+      carbs_pct: Math.round(deltas.reduce((s, d) => s + d.carbs, 0) / deltas.length),
+      fats_pct: Math.round(deltas.reduce((s, d) => s + d.fats, 0) / deltas.length)
     };
 
     await setDoc(ref, prev, { merge: false });
     _correctionsLoaded = false; // invalidate cache
-
-    await setDoc(ref, prev, { merge: false });
-    _correctionsLoaded = false; // invalidate cache
+    _macroCache.clear();
   } catch(e) {
     console.warn('saveAICorrection error:', e.message);
   }
@@ -483,6 +491,11 @@ Rispondi SOLO con un JSON valido (includi SEMPRE il campo grams e name per ogni 
 
 // ── Calcola macros da testo (ibrido: deterministico + AI) ───
 export async function calcMacrosFromText(text) {
+  if (!text || !text.trim()) return { success: false, error: 'Testo vuoto.' };
+  const normKey = text.trim().toLowerCase().replace(/\s+/g, ' ');
+  if (_macroCache.has(normKey)) {
+    return { ..._macroCache.get(normKey), _cached: true };
+  }
   if (busy) return { success: false, error: 'Calcolo in corso...' };
   busy = true;
   try {
@@ -643,10 +656,12 @@ Rispondi SOLO con JSON valido:
     // 9. [RIMOSSO] Auto-save disabilitato — il salvataggio automatico nella food library
     // generava troppi falsi positivi e inquinava i risultati futuri.
 
-    return {
+    const finalRes = {
       success: true,
       ...validated
     };
+    _macroCache.set(normKey, finalRes);
+    return finalRes;
   } catch(e) {
     console.error('calcMacrosFromText error:', e);
     return { success: false, error: 'Errore parsing risposta AI.' };

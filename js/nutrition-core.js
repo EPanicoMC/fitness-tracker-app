@@ -200,10 +200,17 @@ export function validateNutrients(raw, opts = {}) {
     }
   }
 
-  // 4. Saturated fat consistency
+  // 4. Saturated fat consistency check (do not silently clamp)
   if (n.saturatedFat != null && n.fats != null && n.saturatedFat > n.fats) {
-    warnings.push(`Grassi saturi (${n.saturatedFat}g) > grassi totali (${n.fats}g). Corretto a grassi totali.`);
-    n.saturatedFat = n.fats;
+    const itemSatSum = items.reduce((s, i) => s + (i.saturatedFat != null ? Number(i.saturatedFat) || 0 : 0), 0);
+    const hasItemSats = items.some(i => i.saturatedFat != null);
+    if (hasItemSats && itemSatSum <= n.fats) {
+      n.saturatedFat = parseFloat(itemSatSum.toFixed(1));
+      warnings.push(`Ricalcolati grassi saturi dai singoli ingredienti (${n.saturatedFat}g).`);
+    } else {
+      warnings.push(`Grassi saturi (${n.saturatedFat}g) superiori ai grassi totali (${n.fats}g). Dato segnato come non verificato.`);
+      n.saturatedFat = null;
+    }
   }
 
   // 5. Sanity checks per 100g (for library saves)

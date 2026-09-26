@@ -1958,7 +1958,9 @@ function renderMealRow(m, mi, originalMeals) {
         ${typeof m.variants[m.active_variant] === 'object' ? m.variants[m.active_variant].detail : m.variants[m.active_variant]}
        </div>` : '';
 
-  const userTxt = logData.meals_overrides?.[mi]?.items_text ?? logData.meals_overrides?.[String(mi)]?.items_text ?? m.items ?? '';
+  const userTxt = window._mealDrafts?.[mi] ?? logData.meals_overrides?.[mi]?.items_text ?? logData.meals_overrides?.[String(mi)]?.items_text ?? m.items ?? '';
+  const savedTxt = logData.meals_overrides?.[mi]?.items_text ?? logData.meals_overrides?.[String(mi)]?.items_text ?? m.items ?? '';
+  const isStale = userTxt.trim() !== savedTxt.trim();
 
   let deltaBadge = '';
   let macroDeltasHtml = '';
@@ -2008,13 +2010,12 @@ function renderMealRow(m, mi, originalMeals) {
         <div class="meal-kcal">${kcalDisplay}</div>
       </div>
       <div class="meal-detail" id="mdtl-${mi}" style="display:none">
-        <p style="font-size:13px;color:var(--t2);line-height:1.6;margin-bottom:8px">${userTxt}</p>
         ${varsHtml}
         ${selVariantDetail}
         ${macroCompareBox}
         <div style="margin-top:12px">
-          <label class="fl"><i class="ri-edit-2-line"></i> Ingredienti (modifica)</label>
-          <textarea id="meal-txt-${mi}" class="fi" rows="2" style="font-size:13px">${userTxt}</textarea>
+          <label class="fl" style="display:flex;justify-content:space-between;align-items:center"><span><i class="ri-edit-2-line"></i> Ingredienti</span><span id="meal-stale-${mi}" style="display:${isStale ? 'inline-block' : 'none'};font-size:11px;color:var(--orange);font-weight:700">⚠️ Da ricalcolare</span></label>
+          <textarea id="meal-txt-${mi}" class="fi" rows="2" style="font-size:13px" oninput="window.onMealTextEdit(${mi})">${userTxt}</textarea>
           <div style="display:flex;gap:8px;margin-top:8px">
             <button class="btn btn-ghost btn-sm" onclick="window.recalcMeal(${mi})" style="flex:1">✨ Ricalcola con AI</button>
             <button class="btn btn-ghost btn-sm" onclick="window.startMealCamera(${mi})" style="flex:1">📸 Scansiona Cibo</button>
@@ -2065,21 +2066,51 @@ window.toggleMealDetail = function(mi) {
   }
 };
 
+window.onMealTextEdit = function(mi) {
+  const txt = document.getElementById(`meal-txt-${mi}`)?.value || '';
+  if (!window._mealDrafts) window._mealDrafts = {};
+  window._mealDrafts[mi] = txt;
+  const savedTxt = logData.meals_overrides?.[mi]?.items_text ?? logData.meals_overrides?.[String(mi)]?.items_text ?? mealStates[mi]?.items ?? '';
+  const staleEl = document.getElementById(`meal-stale-${mi}`);
+  if (staleEl) {
+    staleEl.style.display = txt.trim() !== savedTxt.trim() ? 'inline-block' : 'none';
+  }
+};
+
 window.selectVariant = function(mi, vi) {
   mealStates[mi].active_variant = mealStates[mi].active_variant === vi ? null : vi;
   if (!logData.meals_state) logData.meals_state = {};
   logData.meals_state[mi] = { eaten: mealStates[mi].eaten, variant: mealStates[mi].active_variant };
+  
+  const selVar = mealStates[mi].active_variant != null ? mealStates[mi].variants?.[mealStates[mi].active_variant] : null;
+  if (selVar) {
+    const varText = typeof selVar === 'object' ? (selVar.detail || selVar.label) : selVar;
+    if (varText) {
+      if (!window._mealDrafts) window._mealDrafts = {};
+      window._mealDrafts[mi] = varText;
+    }
+  } else {
+    if (window._mealDrafts) delete window._mealDrafts[mi];
+  }
+
   saveToLocal();
   buildMeals();
 };
 
+let _lastRecalcToken = {};
+
 window.recalcMeal = async function(mi) {
+  const token = Date.now();
+  _lastRecalcToken[mi] = token;
+
   const txt = document.getElementById(`meal-txt-${mi}`)?.value.trim();
-  if (!txt) return;
+  if (!txt) return showToast('Inserisci gli ingredienti', 'err');
   const btn = document.querySelector(`#mdtl-${mi} .btn-ghost`);
   if (btn) { btn.innerHTML = `<i class="ri-loader-4-line ri-spin"></i>...`; btn.disabled = true; }
   const r = await calcMacrosFromText(txt);
   if (btn) { btn.innerHTML = `<i class="ri-magic-line"></i> Ricalcola con AI`; btn.disabled = false; }
+  if (_lastRecalcToken[mi] !== token) return; // Ignore stale async response
+
   if (!r.success) { showToast('Errore AI: ' + r.error, 'err'); return; }
   const box = document.getElementById(`meal-ai-${mi}`);
   if (box) {
@@ -2138,6 +2169,11 @@ window.applyMealAI = function(mi, kcal, protein, carbs, fats, saturatedFat) {
     kcal, protein, carbs, fats, saturatedFat: satFatVal, items_text: txt,
     ai_estimate: { kcal, protein, carbs, fats, saturatedFat: satFatVal }
   };
+  
+  if (window._mealDrafts) delete window._mealDrafts[mi];
+  const staleEl = document.getElementById(`meal-stale-${mi}`);
+  if (staleEl) staleEl.style.display = 'none';
+
   patchMealRow(mi, kcal, protein, carbs, fats, satFatVal);
   saveToLocal();
   buildNutrition();
