@@ -2015,25 +2015,7 @@ function renderMealRow(m, mi, originalMeals) {
         ${macroCompareBox}
         <div style="margin-top:12px">
           <label class="fl" style="display:flex;justify-content:space-between;align-items:center"><span><i class="ri-edit-2-line"></i> Ingredienti</span><span id="meal-stale-${mi}" style="display:${isStale ? 'inline-block' : 'none'};font-size:11px;color:var(--orange);font-weight:700">⚠️ Da ricalcolare</span></label>
-          <textarea id="meal-txt-${mi}" class="fi" rows="2" style="font-size:13px" oninput="window.onMealTextEdit(${mi})">${userTxt}</textarea>
-          <div style="display:flex;gap:8px;margin-top:8px">
-            <button class="btn btn-ghost btn-sm" onclick="window.recalcMeal(${mi})" style="flex:1">✨ Ricalcola con AI</button>
-            <button class="btn btn-ghost btn-sm" onclick="window.startMealCamera(${mi})" style="flex:1">📸 Scansiona Cibo</button>
-          </div>
-          
-          <div id="meal-camera-container-${mi}" style="display:none;margin-top:8px;flex-direction:column;gap:8px;align-items:center">
-            <video id="meal-video-${mi}" autoplay playsinline style="width:100%;max-width:320px;border-radius:12px;background:#000"></video>
-            <div style="display:flex;gap:8px;width:100%;max-width:320px">
-              <button class="btn btn-flat btn-sm" onclick="window.stopMealCamera(${mi})" style="flex:1">Annulla</button>
-              <button class="btn btn-v btn-sm" onclick="window.captureMealImage(${mi})" style="flex:1">📸 Scatta e Analizza</button>
-            </div>
-            <canvas id="meal-canvas-${mi}" style="display:none"></canvas>
-          </div>
-
           <div id="meal-ai-${mi}" style="display:none;margin-top:8px"></div>
-          <div style="margin-top:8px">
-            <button class="btn btn-ghost btn-sm" onclick="window.openManualMacro(${mi})"><i class="ri-pencil-line"></i> Inserisci manuale</button>
-          </div>
         </div>
         <div class="meal-delta" id="meal-delta-${mi}"></div>
       </div>
@@ -3210,14 +3192,16 @@ window.openAddMealWithCamera = function() {
   }, 250);
 };
 
-// ── Photo Scanner Flow (multi-step, AI-powered) ────────────
+// ── Photo Scanner Flow (multi-step, AI-powered, multi-item) ────────────
 let _scannerItems = [];
-let _scannerStream = null;
 let _currentScanResult = null;
+let _scannerStream = null;
+let _scannerTargetMealIndex = 'extra';
 
 window.openPhotoScannerFlow = function() {
   _scannerItems = [];
   _currentScanResult = null;
+  _scannerTargetMealIndex = 'extra';
   _renderScannerStep('camera');
 };
 
@@ -3270,6 +3254,21 @@ function _renderTotalBar() {
     </div>`;
 }
 
+function _renderTargetMealPicker() {
+  const meals = window.mealStates || [];
+  const options = [
+    `<option value="extra" ${_scannerTargetMealIndex === 'extra' ? 'selected' : ''}>➕ Pasto Extra</option>`,
+    ...meals.map((m, mi) => `<option value="${mi}" ${_scannerTargetMealIndex == mi ? 'selected' : ''}>🍽️ ${m.label || m.type || ('Pasto ' + (mi+1))}</option>`)
+  ];
+  return `
+    <div style="margin-bottom:12px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:12px;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <span style="font-size:12px;font-weight:700;color:var(--t2)">📍 Destinazione pasto:</span>
+      <select id="scanner-target-select" onchange="window._scannerTargetMealIndex=this.value" style="background:var(--bg);color:var(--t1);border:1px solid rgba(124,111,255,0.4);border-radius:8px;padding:5px 8px;font-size:12px;font-weight:700;cursor:pointer">
+        ${options.join('')}
+      </select>
+    </div>`;
+}
+
 function _renderScannerStep(step, data) {
   let modal = document.getElementById('photo-scanner-modal');
   if (!modal) {
@@ -3280,10 +3279,11 @@ function _renderScannerStep(step, data) {
   }
 
   const totalBar = _renderTotalBar();
+  const targetPicker = _renderTargetMealPicker();
   const footerBtns = _scannerItems.length > 0 ? `
     <div class="scanner-footer">
       <button class="btn btn-flat btn-sm" onclick="window.scannerReset()">🗑️ Ricomincia</button>
-      <button class="btn btn-g btn-sm" onclick="window.scannerSave()">💾 Salva (${_scannerItems.length})</button>
+      <button class="btn btn-g btn-sm" onclick="window.scannerSave()">💾 Salva Pasto (${_scannerItems.length})</button>
     </div>` : '';
 
   if (step === 'camera') {
@@ -3291,11 +3291,21 @@ function _renderScannerStep(step, data) {
       <div class="modal scanner-modal">
         <div class="modal-handle"></div>
         <div class="scanner-header">
-          <h3>📸 Foto Scanner</h3>
+          <h3>📸 Foto Scanner AI</h3>
           <button class="btn-icon" onclick="window.closeScannerFlow()">✕</button>
         </div>
         ${totalBar}
+        ${targetPicker}
         <div class="scanner-body">
+          <div id="scanner-manual-container" style="display:none;margin-bottom:14px;background:rgba(124,111,255,0.06);border:1px solid var(--accent);border-radius:14px;padding:14px">
+            <div style="font-size:13px;font-weight:700;color:var(--t1);margin-bottom:6px">✍️ Aggiungi alimento a mano</div>
+            <input type="text" id="scanner-manual-text" class="fi" placeholder="Es: 2 uova sode, 1 mela 150g, 100g riso" style="margin-bottom:10px;font-size:14px" onkeyup="if(event.key==='Enter')window.scannerSubmitManualInput()">
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-flat btn-sm" onclick="document.getElementById('scanner-manual-container').style.display='none'" style="flex:1">Annulla</button>
+              <button class="btn btn-v btn-sm" onclick="window.scannerSubmitManualInput()" style="flex:1">🤖 Calcola con AI</button>
+            </div>
+          </div>
+
           <div id="scanner-camera-area" class="scanner-camera-area">
             <video id="scanner-video" autoplay playsinline></video>
           </div>
@@ -3304,6 +3314,9 @@ function _renderScannerStep(step, data) {
               📁 Galleria
               <input type="file" accept="image/*" capture="environment" onchange="window.scannerUpload(event)" style="display:none">
             </label>
+            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('scanner-manual-container').style.display='block';document.getElementById('scanner-manual-text').focus()" style="font-size:13px">
+              ✍️ A mano
+            </button>
             <button class="btn btn-v scanner-capture-btn" onclick="window.scannerCapture()">
               📸 Scatta
             </button>
@@ -3323,7 +3336,6 @@ function _renderScannerStep(step, data) {
     const estGrams = (r.items || []).reduce((s, i) => s + (i.grams || 0), 0) || 100;
     _currentScanResult._estGrams = estGrams;
     _currentScanResult._scaleFactor = 1;
-    // Store original base values for live scaling
     _currentScanResult._base = {
       kcal: r.kcal, protein: r.protein, carbs: r.carbs,
       fats: r.fats, saturatedFat: r.saturatedFat
@@ -3336,13 +3348,14 @@ function _renderScannerStep(step, data) {
       <div class="modal scanner-modal">
         <div class="modal-handle"></div>
         <div class="scanner-header">
-          <h3>📸 Risultato</h3>
+          <h3>📸 Risultato Riconosciuto</h3>
           <button class="btn-icon" onclick="window.closeScannerFlow()">✕</button>
         </div>
         ${totalBar}
+        ${targetPicker}
         <div class="scanner-body">
           <div class="scanner-result-card">
-            <div class="scanner-result-badge">${r._source === 'barcode' ? '📦 Barcode riconosciuto' : '🤖 Riconosciuto da AI'}</div>
+            <div class="scanner-result-badge">${r._source === 'barcode' ? '📦 Barcode riconosciuto' : (r._source === 'text' ? '✍️ Inserimento manuale AI' : '🤖 Riconosciuto da AI')}</div>
             <div class="scanner-result-name">${r.name || 'Alimento'}</div>
             ${r.ingredients ? `<div class="scanner-result-ingredients">${r.ingredients}</div>` : ''}
 
@@ -3386,7 +3399,7 @@ function _renderScannerStep(step, data) {
       <div class="scanner-item-card">
         <div style="flex:1;min-width:0">
           <div class="scanner-item-name">${item.name}</div>
-          <div class="scanner-item-macros">${Math.round(item.kcal)} kcal · P:${Math.round(item.protein)}g C:${Math.round(item.carbs)}g G:${Math.round(item.fats)}g</div>
+          <div class="scanner-item-macros">${Math.round(item.kcal)} kcal · P:${Math.round(item.protein)}g C:${Math.round(item.carbs)}g G:${Math.round(item.fats)}g${item.saturatedFat != null ? ` · Sat:${Math.round(item.saturatedFat)}g` : ''}</div>
         </div>
         <button class="btn-del" onclick="window.scannerRemoveItem(${i})" style="font-size:16px;flex-shrink:0">✕</button>
       </div>`).join('');
@@ -3399,11 +3412,12 @@ function _renderScannerStep(step, data) {
           <button class="btn-icon" onclick="window.closeScannerFlow()">✕</button>
         </div>
         ${totalBar}
+        ${targetPicker}
         <div class="scanner-body">
           ${itemsHtml}
           <div class="scanner-summary-actions">
             <button class="btn btn-ghost" onclick="window._renderScannerStep('camera')" style="flex:1">
-              ➕ Aggiungi Altro
+              📸 Scansiona Altro
             </button>
             <button class="btn btn-v" onclick="window.scannerSave()" style="flex:1">
               💾 Salva Pasto
@@ -3418,6 +3432,44 @@ function _renderScannerStep(step, data) {
 }
 window._renderScannerStep = _renderScannerStep;
 
+// ── Scanner: manual text item ──────────────────────
+window.scannerSubmitManualInput = async function() {
+  const input = document.getElementById('scanner-manual-text');
+  const text = input?.value?.trim();
+  if (!text) {
+    showToast('Inserisci la descrizione del cibo', 'err');
+    return;
+  }
+  _stopScannerCamera();
+
+  const area = document.getElementById('scanner-camera-area');
+  if (area) {
+    area.innerHTML = `
+      <div class="scanner-analyzing">
+        <div class="scanner-spinner"></div>
+        <div class="scanner-analyzing-text">AI sta calcolando...</div>
+        <div class="scanner-analyzing-sub">Analizzo "${text}"</div>
+      </div>`;
+  }
+
+  try {
+    const r = await calcMacrosFromText(text);
+    if (!r || !r.success) {
+      showToast(r?.error || 'Errore calcolo AI', 'err');
+      _renderScannerStep('camera');
+      return;
+    }
+    r._source = 'text';
+    r.name = r.parsed_name || text;
+    showToast('🤖 Cibo calcolato da AI!');
+    _renderScannerStep('result', r);
+  } catch(e) {
+    showToast('Errore nel calcolo AI', 'err');
+    console.error('Manual input error:', e);
+    _renderScannerStep('camera');
+  }
+};
+
 // ── Scanner: capture photo ─────────────────────────
 window.scannerCapture = async function() {
   const video = document.getElementById('scanner-video');
@@ -3430,7 +3482,6 @@ window.scannerCapture = async function() {
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
   _stopScannerCamera();
 
-  // Show analyzing state inline
   const area = document.getElementById('scanner-camera-area');
   if (area) {
     area.innerHTML = `
@@ -3500,14 +3551,13 @@ window.scannerUpload = async function(event) {
   }
 };
 
-// ── Scanner: live grams scaling (no button needed) ─
+// ── Scanner: live grams scaling ────────────────────
 window.scannerScaleGrams = function(newGrams) {
   if (!_currentScanResult?._base || !_currentScanResult._estGrams) return;
   const g = Math.max(1, parseInt(newGrams) || 1);
   const factor = g / _currentScanResult._estGrams;
   const b = _currentScanResult._base;
 
-  // Scale macros proportionally
   _currentScanResult.kcal = Math.round(b.kcal * factor);
   _currentScanResult.protein = parseFloat((b.protein * factor).toFixed(1));
   _currentScanResult.carbs = parseFloat((b.carbs * factor).toFixed(1));
@@ -3516,7 +3566,6 @@ window.scannerScaleGrams = function(newGrams) {
     _currentScanResult.saturatedFat = parseFloat((b.saturatedFat * factor).toFixed(1));
   }
 
-  // Update DOM live
   const el = (id, val) => { const e = document.getElementById(id); if (e) e.textContent = val; };
   el('sr-kcal', _currentScanResult.kcal);
   el('sr-pro', _currentScanResult.protein + 'g');
@@ -3524,7 +3573,6 @@ window.scannerScaleGrams = function(newGrams) {
   el('sr-fat', _currentScanResult.fats + 'g');
   if (b.saturatedFat != null) el('sr-sat', _currentScanResult.saturatedFat + 'g');
 
-  // Sync label and inputs
   const label = document.getElementById('scanner-grams-label');
   if (label) label.textContent = `~${g}g`;
   const slider = document.getElementById('scanner-grams-slider');
@@ -3585,37 +3633,56 @@ window.scannerSave = function() {
   const mealName = names.length === 1 ? names[0] : names.join(' + ');
   const ingredients = _scannerItems.map(i => i.ingredients || i.name).filter(Boolean).join(', ');
   const hasSat = _scannerItems.some(i => i.saturatedFat != null);
+  const totalSat = hasSat ? parseFloat(totals.saturatedFat.toFixed(1)) : null;
 
-  // Push using existing extra_meals infrastructure (same as saveExtraMeal)
-  if (!logData.extra_meals) logData.extra_meals = [];
-  logData.extra_meals.push({
-    name: mealName,
-    type: 'extra',
-    kcal: Math.round(totals.kcal),
-    protein: parseFloat(totals.protein.toFixed(1)),
-    carbs: parseFloat(totals.carbs.toFixed(1)),
-    fats: parseFloat(totals.fats.toFixed(1)),
-    saturatedFat: hasSat ? parseFloat(totals.saturatedFat.toFixed(1)) : null,
-    ingredients,
-    time: new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }),
-    added_at: new Date().toISOString(),
-    eaten: true,
-    _source: 'photo_scanner',
-    _items: _scannerItems.map(i => ({ ...i }))
-  });
+  const target = _scannerTargetMealIndex;
 
-  // Re-use existing state management pipeline
+  if (target === 'extra') {
+    if (!logData.extra_meals) logData.extra_meals = [];
+    logData.extra_meals.push({
+      name: mealName,
+      type: 'extra',
+      kcal: Math.round(totals.kcal),
+      protein: parseFloat(totals.protein.toFixed(1)),
+      carbs: parseFloat(totals.carbs.toFixed(1)),
+      fats: parseFloat(totals.fats.toFixed(1)),
+      saturatedFat: totalSat,
+      ingredients,
+      time: new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }),
+      added_at: new Date().toISOString(),
+      eaten: true,
+      _source: 'photo_scanner',
+      _items: _scannerItems.map(i => ({ ...i }))
+    });
+    showToast(`✅ Pasto Extra salvato! (${_scannerItems.length} alimenti)`);
+  } else {
+    const mi = parseInt(target);
+    if (!isNaN(mi) && mi >= 0) {
+      if (!logData.meals_overrides) logData.meals_overrides = {};
+      logData.meals_overrides[mi] = {
+        kcal: Math.round(totals.kcal),
+        protein: parseFloat(totals.protein.toFixed(1)),
+        carbs: parseFloat(totals.carbs.toFixed(1)),
+        fats: parseFloat(totals.fats.toFixed(1)),
+        saturatedFat: totalSat,
+        items_text: ingredients || mealName
+      };
+      patchMealRow(mi, Math.round(totals.kcal), parseFloat(totals.protein.toFixed(1)), parseFloat(totals.carbs.toFixed(1)), parseFloat(totals.fats.toFixed(1)), totalSat);
+      const mealLabel = mealStates?.[mi]?.label || mealStates?.[mi]?.type || `Pasto ${mi+1}`;
+      showToast(`✅ ${mealLabel} aggiornato! Pasto segnato ✓`);
+    }
+  }
+
   updateNutritionTotals();
   saveToLocal();
 
-  // Close scanner
   _stopScannerCamera();
   document.getElementById('photo-scanner-modal')?.remove();
 
-  showToast(`✅ Pasto salvato! (${_scannerItems.length} aliment${_scannerItems.length > 1 ? 'i' : 'o'})`);
   _scannerItems = [];
   _currentScanResult = null;
   buildMeals();
+  if (typeof buildFitScore === 'function') buildFitScore();
 };
 
 
