@@ -1,4 +1,4 @@
-const CACHE = 'ft-v82';
+const CACHE = 'ft-v83';
 const BASE = self.location.pathname.substring(0, self.location.pathname.lastIndexOf('/') + 1);
 const FILES = [
   '',

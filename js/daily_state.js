@@ -3207,6 +3207,10 @@ window.openPhotoScannerFlow = function() {
   _renderScannerStep('camera');
 };
 
+window._setScannerTarget = function(val) {
+  _scannerTargetMealIndex = val;
+};
+
 function _stopScannerCamera() {
   if (_scannerStream) {
     _scannerStream.getTracks().forEach(t => t.stop());
@@ -3257,7 +3261,7 @@ function _renderTotalBar() {
 }
 
 function _renderTargetMealPicker() {
-  const meals = window.mealStates || [];
+  const meals = mealStates || [];
   const options = [
     `<option value="extra" ${_scannerTargetMealIndex === 'extra' ? 'selected' : ''}>➕ Pasto Extra</option>`,
     ...meals.map((m, mi) => `<option value="${mi}" ${_scannerTargetMealIndex == mi ? 'selected' : ''}>🍽️ ${m.label || m.type || ('Pasto ' + (mi+1))}</option>`)
@@ -3265,7 +3269,7 @@ function _renderTargetMealPicker() {
   return `
     <div style="margin-bottom:12px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:12px;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;gap:8px">
       <span style="font-size:12px;font-weight:700;color:var(--t2)">📍 Destinazione pasto:</span>
-      <select id="scanner-target-select" onchange="window._scannerTargetMealIndex=this.value" style="background:var(--bg);color:var(--t1);border:1px solid rgba(124,111,255,0.4);border-radius:8px;padding:5px 8px;font-size:12px;font-weight:700;cursor:pointer">
+      <select id="scanner-target-select" onchange="window._setScannerTarget(this.value)" style="background:var(--bg);color:var(--t1);border:1px solid rgba(124,111,255,0.4);border-radius:8px;padding:5px 8px;font-size:12px;font-weight:700;cursor:pointer">
         ${options.join('')}
       </select>
     </div>`;
@@ -3314,7 +3318,7 @@ function _renderScannerStep(step, data) {
           <div class="scanner-camera-actions" id="scanner-cam-actions">
             <label class="btn btn-ghost btn-sm scanner-upload-btn">
               📁 Galleria
-              <input type="file" accept="image/*" capture="environment" onchange="window.scannerUpload(event)" style="display:none">
+              <input type="file" accept="image/*" onchange="window.scannerUpload(event)" style="display:none">
             </label>
             <button class="btn btn-ghost btn-sm" onclick="document.getElementById('scanner-manual-container').style.display='block';document.getElementById('scanner-manual-text').focus()" style="font-size:13px">
               ✍️ A mano
@@ -3476,7 +3480,11 @@ window.scannerSubmitManualInput = async function() {
 window.scannerCapture = async function() {
   const video = document.getElementById('scanner-video');
   const canvas = document.getElementById('scanner-canvas');
-  if (!video || !canvas || !_scannerStream) return;
+  if (!video || !canvas) { showToast('Fotocamera non pronta', 'err'); return; }
+  if (!_scannerStream) {
+    showToast('Permesso fotocamera non disponibile. Usa "📁 Galleria" per caricare una foto.', 'err');
+    return;
+  }
 
   const ctx = canvas.getContext('2d');
   canvas.width = video.videoWidth || 640;
@@ -3507,7 +3515,7 @@ window.scannerCapture = async function() {
     showToast(r._source === 'barcode' ? '📦 Barcode riconosciuto!' : '🤖 Prodotto identificato!');
     _renderScannerStep('result', r);
   } catch(e) {
-    showToast('Errore durante la scansione', 'err');
+    showToast('Errore durante la scansione: ' + (e.message || 'errore sconosciuto'), 'err');
     console.error('Scanner capture error:', e);
     _renderScannerStep('camera');
   }
@@ -3547,7 +3555,7 @@ window.scannerUpload = async function(event) {
     showToast(r._source === 'barcode' ? '📦 Barcode riconosciuto!' : '🤖 Prodotto identificato!');
     _renderScannerStep('result', r);
   } catch(e) {
-    showToast('Errore durante la scansione', 'err');
+    showToast('Errore durante la scansione: ' + (e.message || 'errore sconosciuto'), 'err');
     console.error('Scanner upload error:', e);
     _renderScannerStep('camera');
   }
