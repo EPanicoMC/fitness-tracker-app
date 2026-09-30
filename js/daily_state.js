@@ -3210,7 +3210,415 @@ window.openAddMealWithCamera = function() {
   }, 250);
 };
 
-// ── Smart Advisor ──────────────────────────────
+// ── Photo Scanner Flow (multi-step, AI-powered) ────────────
+let _scannerItems = [];
+let _scannerStream = null;
+let _currentScanResult = null;
+
+window.openPhotoScannerFlow = function() {
+  _scannerItems = [];
+  _currentScanResult = null;
+  _renderScannerStep('camera');
+};
+
+function _stopScannerCamera() {
+  if (_scannerStream) {
+    _scannerStream.getTracks().forEach(t => t.stop());
+    _scannerStream = null;
+  }
+}
+
+async function _startScannerCamera() {
+  const video = document.getElementById('scanner-video');
+  if (!video) return;
+  try {
+    _stopScannerCamera();
+    _scannerStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment' }, audio: false
+    });
+    video.srcObject = _scannerStream;
+  } catch(e) {
+    showToast('Impossibile accedere alla fotocamera', 'err');
+    console.error('Camera error:', e);
+  }
+}
+
+function _getScannerTotals() {
+  return _scannerItems.reduce((a, i) => ({
+    kcal: a.kcal + (i.kcal || 0),
+    protein: a.protein + (i.protein || 0),
+    carbs: a.carbs + (i.carbs || 0),
+    fats: a.fats + (i.fats || 0),
+    saturatedFat: a.saturatedFat + (i.saturatedFat || 0)
+  }), { kcal: 0, protein: 0, carbs: 0, fats: 0, saturatedFat: 0 });
+}
+
+function _renderTotalBar() {
+  if (_scannerItems.length === 0) return '';
+  const t = _getScannerTotals();
+  const hasSat = _scannerItems.some(i => i.saturatedFat != null);
+  return `
+    <div class="scanner-total-bar">
+      <div class="scanner-total-label">${_scannerItems.length} aliment${_scannerItems.length > 1 ? 'i' : 'o'} aggiunt${_scannerItems.length > 1 ? 'i' : 'o'}</div>
+      <div class="scanner-total-macros">
+        <span class="stm-kcal">${Math.round(t.kcal)} kcal</span>
+        <span>P: ${Math.round(t.protein)}g</span>
+        <span>C: ${Math.round(t.carbs)}g</span>
+        <span>F: ${Math.round(t.fats)}g</span>
+        ${hasSat ? `<span>Sat: ${Math.round(t.saturatedFat)}g</span>` : ''}
+      </div>
+    </div>`;
+}
+
+function _renderScannerStep(step, data) {
+  let modal = document.getElementById('photo-scanner-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.className = 'modal-bg';
+    modal.id = 'photo-scanner-modal';
+    document.body.appendChild(modal);
+  }
+
+  const totalBar = _renderTotalBar();
+  const footerBtns = _scannerItems.length > 0 ? `
+    <div class="scanner-footer">
+      <button class="btn btn-flat btn-sm" onclick="window.scannerReset()">🗑️ Ricomincia</button>
+      <button class="btn btn-g btn-sm" onclick="window.scannerSave()">💾 Salva (${_scannerItems.length})</button>
+    </div>` : '';
+
+  if (step === 'camera') {
+    modal.innerHTML = `
+      <div class="modal scanner-modal">
+        <div class="modal-handle"></div>
+        <div class="scanner-header">
+          <h3>📸 Foto Scanner</h3>
+          <button class="btn-icon" onclick="window.closeScannerFlow()">✕</button>
+        </div>
+        ${totalBar}
+        <div class="scanner-body">
+          <div id="scanner-camera-area" class="scanner-camera-area">
+            <video id="scanner-video" autoplay playsinline></video>
+          </div>
+          <div class="scanner-camera-actions" id="scanner-cam-actions">
+            <label class="btn btn-ghost btn-sm scanner-upload-btn">
+              📁 Galleria
+              <input type="file" accept="image/*" capture="environment" onchange="window.scannerUpload(event)" style="display:none">
+            </label>
+            <button class="btn btn-v scanner-capture-btn" onclick="window.scannerCapture()">
+              📸 Scatta
+            </button>
+          </div>
+          <canvas id="scanner-canvas" style="display:none"></canvas>
+        </div>
+        ${footerBtns}
+      </div>`;
+    setTimeout(() => _startScannerCamera(), 100);
+  }
+
+  else if (step === 'result') {
+    const r = data;
+    _currentScanResult = { ...r };
+
+    // Calculate estimated total grams from items array
+    const estGrams = (r.items || []).reduce((s, i) => s + (i.grams || 0), 0) || 100;
+    _currentScanResult._estGrams = estGrams;
+    _currentScanResult._scaleFactor = 1;
+    // Store original base values for live scaling
+    _currentScanResult._base = {
+      kcal: r.kcal, protein: r.protein, carbs: r.carbs,
+      fats: r.fats, saturatedFat: r.saturatedFat
+    };
+
+    const satChip = r.saturatedFat != null
+      ? `<div class="srm-item"><div class="srm-v" id="sr-sat">${r.saturatedFat}g</div><div class="srm-l">Saturi</div></div>` : '';
+
+    modal.innerHTML = `
+      <div class="modal scanner-modal">
+        <div class="modal-handle"></div>
+        <div class="scanner-header">
+          <h3>📸 Risultato</h3>
+          <button class="btn-icon" onclick="window.closeScannerFlow()">✕</button>
+        </div>
+        ${totalBar}
+        <div class="scanner-body">
+          <div class="scanner-result-card">
+            <div class="scanner-result-badge">${r._source === 'barcode' ? '📦 Barcode riconosciuto' : '🤖 Riconosciuto da AI'}</div>
+            <div class="scanner-result-name">${r.name || 'Alimento'}</div>
+            ${r.ingredients ? `<div class="scanner-result-ingredients">${r.ingredients}</div>` : ''}
+
+            <div class="scanner-grams-section" style="margin-bottom:14px">
+              <div class="scanner-grams-header">
+                <span>Porzione: <b id="scanner-grams-label">~${estGrams}g</b></span>
+                <span style="font-size:11px;color:var(--t3)">trascina per aggiustare</span>
+              </div>
+              <div class="scanner-grams-edit" style="display:flex">
+                <input type="range" id="scanner-grams-slider" min="10" max="${Math.max(500, estGrams * 3)}" value="${estGrams}"
+                  oninput="window.scannerScaleGrams(this.value)">
+                <input type="number" class="fi" id="scanner-grams-input" value="${estGrams}" min="1"
+                  oninput="window.scannerScaleGrams(this.value);document.getElementById('scanner-grams-slider').value=this.value"
+                  style="width:70px;text-align:center;font-weight:700;padding:6px">
+                <span style="color:var(--t3);font-size:13px">g</span>
+              </div>
+            </div>
+
+            <div class="scanner-result-macros" id="scanner-macros-display">
+              <div class="srm-item srm-kcal"><div class="srm-v" id="sr-kcal">${r.kcal}</div><div class="srm-l">Kcal</div></div>
+              <div class="srm-item"><div class="srm-v" id="sr-pro">${r.protein}g</div><div class="srm-l">Pro</div></div>
+              <div class="srm-item"><div class="srm-v" id="sr-carb">${r.carbs}g</div><div class="srm-l">Carbo</div></div>
+              <div class="srm-item"><div class="srm-v" id="sr-fat">${r.fats}g</div><div class="srm-l">Grassi</div></div>
+              ${satChip}
+            </div>
+          </div>
+
+          <button class="btn btn-v scanner-confirm-btn" onclick="window.scannerAddItem()">
+            ✅ Aggiungi${_scannerItems.length > 0 ? ' al pasto' : ''}
+          </button>
+          <button class="btn btn-ghost btn-sm" onclick="window._renderScannerStep('camera')" style="margin-top:6px;width:100%">
+            📸 Non è giusto, riprova
+          </button>
+        </div>
+        ${footerBtns}
+      </div>`;
+  }
+
+  else if (step === 'summary') {
+    const itemsHtml = _scannerItems.map((item, i) => `
+      <div class="scanner-item-card">
+        <div style="flex:1;min-width:0">
+          <div class="scanner-item-name">${item.name}</div>
+          <div class="scanner-item-macros">${Math.round(item.kcal)} kcal · P:${Math.round(item.protein)}g C:${Math.round(item.carbs)}g G:${Math.round(item.fats)}g</div>
+        </div>
+        <button class="btn-del" onclick="window.scannerRemoveItem(${i})" style="font-size:16px;flex-shrink:0">✕</button>
+      </div>`).join('');
+
+    modal.innerHTML = `
+      <div class="modal scanner-modal">
+        <div class="modal-handle"></div>
+        <div class="scanner-header">
+          <h3>📋 Riepilogo Pasto</h3>
+          <button class="btn-icon" onclick="window.closeScannerFlow()">✕</button>
+        </div>
+        ${totalBar}
+        <div class="scanner-body">
+          ${itemsHtml}
+          <div class="scanner-summary-actions">
+            <button class="btn btn-ghost" onclick="window._renderScannerStep('camera')" style="flex:1">
+              ➕ Aggiungi Altro
+            </button>
+            <button class="btn btn-v" onclick="window.scannerSave()" style="flex:1">
+              💾 Salva Pasto
+            </button>
+          </div>
+          <button class="btn btn-flat btn-sm" onclick="window.scannerReset()" style="margin-top:10px;width:100%;opacity:0.5;font-size:12px">
+            🗑️ Ricomincia da zero
+          </button>
+        </div>
+      </div>`;
+  }
+}
+window._renderScannerStep = _renderScannerStep;
+
+// ── Scanner: capture photo ─────────────────────────
+window.scannerCapture = async function() {
+  const video = document.getElementById('scanner-video');
+  const canvas = document.getElementById('scanner-canvas');
+  if (!video || !canvas || !_scannerStream) return;
+
+  const ctx = canvas.getContext('2d');
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  _stopScannerCamera();
+
+  // Show analyzing state inline
+  const area = document.getElementById('scanner-camera-area');
+  if (area) {
+    area.innerHTML = `
+      <div class="scanner-analyzing">
+        <div class="scanner-spinner"></div>
+        <div class="scanner-analyzing-text">AI sta analizzando...</div>
+        <div class="scanner-analyzing-sub">Identifico il prodotto e calcolo i macro</div>
+      </div>`;
+  }
+  const actions = document.getElementById('scanner-cam-actions');
+  if (actions) actions.style.display = 'none';
+
+  try {
+    const base64 = canvas.toDataURL('image/jpeg').split(',')[1];
+    const r = await analyzeFoodImageAI(base64, 'image/jpeg');
+    if (!r.success) {
+      showToast(r.error || 'Errore analisi immagine', 'err');
+      _renderScannerStep('camera');
+      return;
+    }
+    showToast(r._source === 'barcode' ? '📦 Barcode riconosciuto!' : '🤖 Prodotto identificato!');
+    _renderScannerStep('result', r);
+  } catch(e) {
+    showToast('Errore durante la scansione', 'err');
+    console.error('Scanner capture error:', e);
+    _renderScannerStep('camera');
+  }
+};
+
+// ── Scanner: upload from gallery ───────────────────
+window.scannerUpload = async function(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  _stopScannerCamera();
+
+  const area = document.getElementById('scanner-camera-area');
+  if (area) {
+    area.innerHTML = `
+      <div class="scanner-analyzing">
+        <div class="scanner-spinner"></div>
+        <div class="scanner-analyzing-text">AI sta analizzando...</div>
+        <div class="scanner-analyzing-sub">Analizzo l'immagine caricata</div>
+      </div>`;
+  }
+  const actions = document.getElementById('scanner-cam-actions');
+  if (actions) actions.style.display = 'none';
+
+  try {
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    const r = await analyzeFoodImageAI(base64, file.type || 'image/jpeg');
+    if (!r.success) {
+      showToast(r.error || 'Errore analisi', 'err');
+      _renderScannerStep('camera');
+      return;
+    }
+    showToast(r._source === 'barcode' ? '📦 Barcode riconosciuto!' : '🤖 Prodotto identificato!');
+    _renderScannerStep('result', r);
+  } catch(e) {
+    showToast('Errore durante la scansione', 'err');
+    console.error('Scanner upload error:', e);
+    _renderScannerStep('camera');
+  }
+};
+
+// ── Scanner: live grams scaling (no button needed) ─
+window.scannerScaleGrams = function(newGrams) {
+  if (!_currentScanResult?._base || !_currentScanResult._estGrams) return;
+  const g = Math.max(1, parseInt(newGrams) || 1);
+  const factor = g / _currentScanResult._estGrams;
+  const b = _currentScanResult._base;
+
+  // Scale macros proportionally
+  _currentScanResult.kcal = Math.round(b.kcal * factor);
+  _currentScanResult.protein = parseFloat((b.protein * factor).toFixed(1));
+  _currentScanResult.carbs = parseFloat((b.carbs * factor).toFixed(1));
+  _currentScanResult.fats = parseFloat((b.fats * factor).toFixed(1));
+  if (b.saturatedFat != null) {
+    _currentScanResult.saturatedFat = parseFloat((b.saturatedFat * factor).toFixed(1));
+  }
+
+  // Update DOM live
+  const el = (id, val) => { const e = document.getElementById(id); if (e) e.textContent = val; };
+  el('sr-kcal', _currentScanResult.kcal);
+  el('sr-pro', _currentScanResult.protein + 'g');
+  el('sr-carb', _currentScanResult.carbs + 'g');
+  el('sr-fat', _currentScanResult.fats + 'g');
+  if (b.saturatedFat != null) el('sr-sat', _currentScanResult.saturatedFat + 'g');
+
+  // Sync label and inputs
+  const label = document.getElementById('scanner-grams-label');
+  if (label) label.textContent = `~${g}g`;
+  const slider = document.getElementById('scanner-grams-slider');
+  const input = document.getElementById('scanner-grams-input');
+  if (slider && document.activeElement !== slider) slider.value = g;
+  if (input && document.activeElement !== input) input.value = g;
+};
+
+// ── Scanner: add item to accumulator ───────────────
+window.scannerAddItem = function() {
+  if (!_currentScanResult) return;
+  _scannerItems.push({
+    name: _currentScanResult.name || 'Alimento',
+    kcal: _currentScanResult.kcal || 0,
+    protein: _currentScanResult.protein || 0,
+    carbs: _currentScanResult.carbs || 0,
+    fats: _currentScanResult.fats || 0,
+    saturatedFat: _currentScanResult.saturatedFat ?? null,
+    ingredients: _currentScanResult.ingredients || ''
+  });
+  _currentScanResult = null;
+  showToast(`✅ Aggiunto! (${_scannerItems.length} element${_scannerItems.length > 1 ? 'i' : 'o'})`);
+  _renderScannerStep('summary');
+};
+
+// ── Scanner: remove item ───────────────────────────
+window.scannerRemoveItem = function(idx) {
+  _scannerItems.splice(idx, 1);
+  _scannerItems.length === 0 ? _renderScannerStep('camera') : _renderScannerStep('summary');
+};
+
+// ── Scanner: reset ─────────────────────────────────
+window.scannerReset = function() {
+  _scannerItems = [];
+  _currentScanResult = null;
+  showToast('🗑️ Lista svuotata');
+  _renderScannerStep('camera');
+};
+
+// ── Scanner: close ─────────────────────────────────
+window.closeScannerFlow = function() {
+  _stopScannerCamera();
+  document.getElementById('photo-scanner-modal')?.remove();
+  _scannerItems = [];
+  _currentScanResult = null;
+};
+
+// ── Scanner: save all items as one meal ─────────────
+window.scannerSave = function() {
+  if (_scannerItems.length === 0) { showToast('Nessun alimento da salvare', 'err'); return; }
+  if (!window.isServerLoaded) {
+    showToast('Caricamento dati in corso... Riprova tra un istante', 'info');
+    return;
+  }
+
+  const totals = _getScannerTotals();
+  const names = _scannerItems.map(i => i.name);
+  const mealName = names.length === 1 ? names[0] : names.join(' + ');
+  const ingredients = _scannerItems.map(i => i.ingredients || i.name).filter(Boolean).join(', ');
+  const hasSat = _scannerItems.some(i => i.saturatedFat != null);
+
+  // Push using existing extra_meals infrastructure (same as saveExtraMeal)
+  if (!logData.extra_meals) logData.extra_meals = [];
+  logData.extra_meals.push({
+    name: mealName,
+    type: 'extra',
+    kcal: Math.round(totals.kcal),
+    protein: parseFloat(totals.protein.toFixed(1)),
+    carbs: parseFloat(totals.carbs.toFixed(1)),
+    fats: parseFloat(totals.fats.toFixed(1)),
+    saturatedFat: hasSat ? parseFloat(totals.saturatedFat.toFixed(1)) : null,
+    ingredients,
+    time: new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }),
+    added_at: new Date().toISOString(),
+    eaten: true,
+    _source: 'photo_scanner',
+    _items: _scannerItems.map(i => ({ ...i }))
+  });
+
+  // Re-use existing state management pipeline
+  updateNutritionTotals();
+  saveToLocal();
+
+  // Close scanner
+  _stopScannerCamera();
+  document.getElementById('photo-scanner-modal')?.remove();
+
+  showToast(`✅ Pasto salvato! (${_scannerItems.length} aliment${_scannerItems.length > 1 ? 'i' : 'o'})`);
+  _scannerItems = [];
+  _currentScanResult = null;
+  buildMeals();
+};
+
+
 let isGeneratingAdvice = false;
 
 function getPartOfDay() {
