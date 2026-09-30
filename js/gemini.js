@@ -980,7 +980,7 @@ Regole fondamentali e VINCOLANTI:
 1. kcal = (Proteine * 4) + (Carboidrati * 4) + (Grassi * 9). PRIMA calcola i macro di ogni ingrediente, POI somma, POI calcola le kcal dalla formula.
 2. Stima le porzioni in modo realistico basandoti sulle dimensioni visive del piatto/contenitore.
 3. IMPORTANTE: il cibo visibile in foto è COTTO/preparato. Usa i valori nutrizionali per il prodotto COTTO (pasta cotta, riso cotto, pollo cotto, ecc.), NON i valori a crudo.
-4. ${REFERENCE_TABLE}
+4. ${GENERAL_NUTRITIONAL_GUIDELINES}
 5. SANITY CHECK: ingrediente < 200g NON può avere > 900 kcal (eccezione: olio/burro/frutta secca). Proteine/100g mai > 35g.
 6. Se vedi un'ETICHETTA NUTRIZIONALE leggibile, LEGGI i valori dall'etichetta e usali.
 7. GRASSI SATURI: per ogni ingrediente (e nei totali), stima anche i grassi saturi (saturatedFat in grammi). Se il dato non è noto, usa null.
@@ -999,7 +999,7 @@ Struttura JSON richiesta:
     { inlineData: { mimeType, data: base64Image } }
   ];
 
-  const res = await callGemini(key, null, { temperature: 0.1, maxOutputTokens: 768, parts });
+  const res = await callGemini(key, null, { temperature: 0.1, maxOutputTokens: 1536, parts });
   if (!res.success) return { success: false, error: 'Errore analisi immagine food scanner' };
 
   const raw = res.text;
