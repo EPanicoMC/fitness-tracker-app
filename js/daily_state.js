@@ -2015,6 +2015,8 @@ function renderMealRow(m, mi, originalMeals) {
         ${macroCompareBox}
         <div style="margin-top:12px">
           <label class="fl" style="display:flex;justify-content:space-between;align-items:center"><span><i class="ri-edit-2-line"></i> Ingredienti</span><span id="meal-stale-${mi}" style="display:${isStale ? 'inline-block' : 'none'};font-size:11px;color:var(--orange);font-weight:700">⚠️ Da ricalcolare</span></label>
+          <textarea id="meal-txt-${mi}" class="fi" rows="2" style="font-size:13px" oninput="window.onMealTextEdit(${mi})">${userTxt}</textarea>
+          <button class="btn btn-ghost btn-sm" onclick="window.recalcMeal(${mi})" style="width:100%;margin-top:8px">✨ Ricalcola con AI</button>
           <div id="meal-ai-${mi}" style="display:none;margin-top:8px"></div>
         </div>
         <div class="meal-delta" id="meal-delta-${mi}"></div>
