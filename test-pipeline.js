@@ -112,6 +112,27 @@ assert(userLunchSimulated.totals.protein < 46 && userLunchSimulated.totals.prote
 assert(userLunchSimulated.totals.fats < 18 && userLunchSimulated.totals.fats > 12, `Grassi totali pranzo = ${userLunchSimulated.totals.fats}g (corretti a ~15g, non 28g)`);
 console.log('');
 
+// 9. Dispensa — Calcolo per fetta e scalamento fette
+console.log('[Test 9] Dispensa: Calcolo macro per N fette e gestione fette rimanenti');
+const torteDispensa = { name: 'Torta al Cioccolato', total_kcal: 2400, total_protein: 40, total_carbs: 320, total_fats: 80, slices: 8, slices_remaining: 8 };
+const slice1Kcal = Math.round(torteDispensa.total_kcal * 1 / torteDispensa.slices);
+const slice1Pro = parseFloat((torteDispensa.total_protein * 1 / torteDispensa.slices).toFixed(1));
+const slice1Carb = parseFloat((torteDispensa.total_carbs * 1 / torteDispensa.slices).toFixed(1));
+const slice1Fat = parseFloat((torteDispensa.total_fats * 1 / torteDispensa.slices).toFixed(1));
+
+assert(slice1Kcal === 300, '1 fetta di torta (1/8 di 2400 kcal) = 300 kcal');
+assert(slice1Pro === 5, '1 fetta di torta = 5g proteine');
+assert(slice1Carb === 40, '1 fetta di torta = 40g carbo');
+assert(slice1Fat === 10, '1 fetta di torta = 10g grassi');
+
+const slicesUsed = 2;
+const remAfter2 = Math.max(0, torteDispensa.slices_remaining - slicesUsed);
+assert(remAfter2 === 6, 'Consumate 2 fette su 8 => rimangono 6 fette');
+
+const slice2Kcal = Math.round(torteDispensa.total_kcal * 2 / torteDispensa.slices);
+assert(slice2Kcal === 600, '2 fette di torta = 600 kcal');
+console.log('');
+
 console.log('════════════════════════════════════════════════════════════');
 console.log(` 📊 RISULTATI FINALI TEST SUITE: ${passed} PASSATI, ${failed} FALLITI`);
 console.log('════════════════════════════════════════════════════════════');
