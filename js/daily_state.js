@@ -4396,6 +4396,15 @@ window.openConsumeFridgeModal = function(idx) {
     ...planMeals.map((m, i) => `<option value="${i}">🍽️ ${m.label || m.type} (${m.kcal} kcal)</option>`)
   ].join('');
 
+  const pillsCount = Math.min(remSlices, 8);
+  const pillsHtml = hasSlices ? Array.from({length: pillsCount}, (_, i) => i + 1).map(n => `
+    <button type="button" class="btn btn-ghost btn-sm cfm-pill" 
+      style="padding:6px 14px;font-size:13px;font-weight:700;border-radius:20px;${n === 1 ? 'background:rgb(20,184,166);color:#000;border-color:rgb(20,184,166)' : 'border-color:rgba(255,255,255,0.15)'}"
+      onclick="window.selectConsumeSlicesPill(${n}, ${idx})">
+      ${n} ${n === 1 ? 'fetta' : 'fette'}
+    </button>
+  `).join('') : '';
+
   const bg = document.createElement('div');
   bg.className = 'modal-bg consume-fridge-modal';
   bg.innerHTML = `
@@ -4412,9 +4421,12 @@ window.openConsumeFridgeModal = function(idx) {
       ${hasSlices ? `
       <div class="fg">
         <label class="fl">Quante fette vuoi prendere?</label>
-        <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+        <div id="cfm-pills" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;margin-bottom:10px">
+          ${pillsHtml}
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
           <button type="button" class="btn btn-ghost" style="width:40px;height:40px;font-size:20px;padding:0;display:flex;align-items:center;justify-content:center;border-color:rgba(20,184,166,0.4);color:rgb(20,184,166)" onclick="window.stepConsumeSlices(-1, ${idx})">-</button>
-          <input type="number" class="fi" id="cfm-slices" value="1" min="1" max="${remSlices}" style="text-align:center;font-size:18px;font-weight:800;width:70px;padding:6px" oninput="window.updateConsumeFridgePreview(${idx}, false)" onblur="window.updateConsumeFridgePreview(${idx}, true)">
+          <input type="text" inputmode="numeric" pattern="[0-9]*" class="fi" id="cfm-slices" value="1" style="text-align:center;font-size:18px;font-weight:800;width:70px;padding:6px" onfocus="this.select()" oninput="window.updateConsumeFridgePreview(${idx}, false)" onblur="window.updateConsumeFridgePreview(${idx}, true)">
           <button type="button" class="btn btn-ghost" style="width:40px;height:40px;font-size:20px;padding:0;display:flex;align-items:center;justify-content:center;border-color:rgba(20,184,166,0.4);color:rgb(20,184,166)" onclick="window.stepConsumeSlices(1, ${idx})">+</button>
           <span style="font-size:12px;color:var(--t3)">(disponibili: ${remSlices}/${totSlices})</span>
         </div>
@@ -4441,6 +4453,12 @@ window.openConsumeFridgeModal = function(idx) {
     </div>`;
   document.body.appendChild(bg);
   bg.addEventListener('click', e => { if (e.target === bg) bg.remove(); });
+  window.updateConsumeFridgePreview(idx, true);
+};
+
+window.selectConsumeSlicesPill = function(n, idx) {
+  const inputEl = document.getElementById('cfm-slices');
+  if (inputEl) inputEl.value = n;
   window.updateConsumeFridgePreview(idx, true);
 };
 
@@ -4471,6 +4489,20 @@ window.updateConsumeFridgePreview = function(idx, clamp = false) {
   if (clamp && inputEl) {
     inputEl.value = n;
   }
+
+  const pills = document.querySelectorAll('#cfm-pills .cfm-pill');
+  pills.forEach((p, i) => {
+    const pNum = i + 1;
+    if (pNum === n) {
+      p.style.background = 'rgb(20,184,166)';
+      p.style.color = '#000';
+      p.style.borderColor = 'rgb(20,184,166)';
+    } else {
+      p.style.background = 'none';
+      p.style.color = 'var(--t1)';
+      p.style.borderColor = 'rgba(255,255,255,0.15)';
+    }
+  });
 
   const kcal = Math.round((item.total_kcal || 0) * n / totSlices);
   const pro = ((item.total_protein || 0) * n / totSlices).toFixed(1);
@@ -4585,11 +4617,11 @@ window.openEditFridgeModal = function(idx) {
         <div style="display:flex;gap:10px">
           <div style="flex:1">
             <label class="fl" style="font-size:10px">Fette rimaste</label>
-            <input type="number" class="fi" id="fe-rem-slices" value="${item.slices_remaining ?? (item.slices || 1)}" min="0">
+            <input type="number" class="fi" id="fe-rem-slices" value="${item.slices_remaining ?? (item.slices || 1)}" min="0" onfocus="this.select()">
           </div>
           <div style="flex:1">
             <label class="fl" style="font-size:10px">Fette totali</label>
-            <input type="number" class="fi" id="fe-tot-slices" value="${item.slices || 1}" min="1">
+            <input type="number" class="fi" id="fe-tot-slices" value="${item.slices || 1}" min="1" onfocus="this.select()">
           </div>
         </div>
       </div>
