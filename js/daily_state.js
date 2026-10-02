@@ -2704,7 +2704,9 @@ window.openAddMeal = function(prefillData, editIndex) {
           }).join('')}
         </select>
         <div id="am-fridge-slices-row" style="display:none;align-items:center;gap:8px;margin-bottom:8px">
-          <input type="number" class="fi" id="am-fridge-slices" placeholder="Quante fette?" min="1" style="flex:1" oninput="window.onFridgeSlicesInput()">
+          <button type="button" class="btn btn-ghost" style="width:36px;height:36px;font-size:18px;padding:0;display:flex;align-items:center;justify-content:center;border-color:rgba(20,184,166,0.4);color:rgb(20,184,166)" onclick="window.stepAddMealFridgeSlices(-1)">-</button>
+          <input type="number" class="fi" id="am-fridge-slices" placeholder="Fette" min="1" style="text-align:center;font-size:16px;font-weight:700;width:60px" oninput="window.onFridgeSlicesInput(false)" onblur="window.onFridgeSlicesInput(true)">
+          <button type="button" class="btn btn-ghost" style="width:36px;height:36px;font-size:18px;padding:0;display:flex;align-items:center;justify-content:center;border-color:rgba(20,184,166,0.4);color:rgb(20,184,166)" onclick="window.stepAddMealFridgeSlices(1)">+</button>
           <span id="am-fridge-slices-max" style="font-size:11px;color:var(--t3);white-space:nowrap"></span>
         </div>
         <div id="am-fridge-preview" style="font-size:12px;color:rgb(20,184,166);font-weight:600;min-height:16px"></div>
@@ -2760,8 +2762,6 @@ window.openAddMeal = function(prefillData, editIndex) {
         </div>
       </div>
  
-
- 
       <div class="modal-btns" style="display:flex;flex-wrap:wrap;gap:8px">
         <button class="btn btn-flat btn-sm" onclick="document.getElementById('add-meal-modal').remove()">
           Annulla
@@ -2802,22 +2802,40 @@ window.onFridgeSelect = function(val) {
     if (slicesRow) slicesRow.style.display = 'flex';
     if (slicesInput) { slicesInput.value = '1'; slicesInput.max = rem; }
     if (slicesMax) slicesMax.textContent = `max ${rem}`;
-    window.onFridgeSlicesInput();
+    window.onFridgeSlicesInput(true);
   } else {
     if (slicesRow) slicesRow.style.display = 'none';
-    // Fill all fields with total
     _fillFridgeMacros(item, 1, 1);
     if (preview) preview.textContent = `→ ${item.total_kcal||0} kcal · P:${item.total_protein||0}g · C:${item.total_carbs||0}g · F:${item.total_fats||0}g`;
   }
 };
 
-window.onFridgeSlicesInput = function() {
+window.stepAddMealFridgeSlices = function(delta) {
+  if (_selectedFridgeIdx < 0) return;
+  const item = fridgeItems[_selectedFridgeIdx];
+  if (!item || !item.slices) return;
+  const rem = item.slices_remaining ?? item.slices;
+  const input = document.getElementById('am-fridge-slices');
+  if (!input) return;
+  let cur = parseInt(input.value) || 1;
+  let next = Math.max(1, Math.min(cur + delta, rem));
+  input.value = next;
+  window.onFridgeSlicesInput(true);
+};
+
+window.onFridgeSlicesInput = function(clamp = false) {
   if (_selectedFridgeIdx < 0) return;
   const item = fridgeItems[_selectedFridgeIdx];
   if (!item || !item.slices) return;
   const slicesInput = document.getElementById('am-fridge-slices');
   const preview = document.getElementById('am-fridge-preview');
-  const n = Math.max(1, parseInt(slicesInput?.value) || 1);
+  const rem = item.slices_remaining ?? item.slices;
+  let raw = slicesInput?.value;
+  let n = parseInt(raw);
+  if (isNaN(n) || n < 1) n = 1;
+  if (n > rem) n = rem;
+  if (clamp && slicesInput) slicesInput.value = n;
+
   const tot = item.slices;
   _fillFridgeMacros(item, n, tot);
   const kcal = Math.round((item.total_kcal||0) * n / tot);
@@ -4239,7 +4257,23 @@ async function loadFridgeFromFirebase() {
       }
     }
 
-    fridgeItems = [...myItems, ...friendItems];
+    // Merge shared items by ID or Name + CreatedAt
+    const itemMap = new Map();
+    [...myItems, ...friendItems].forEach(item => {
+      const key = item.id || (item.name + '_' + item.created_at);
+      if (!itemMap.has(key)) {
+        itemMap.set(key, item);
+      } else {
+        const existing = itemMap.get(key);
+        const rem1 = item.slices_remaining ?? item.slices ?? 999;
+        const rem2 = existing.slices_remaining ?? existing.slices ?? 999;
+        if (rem1 < rem2) {
+          itemMap.set(key, { ...existing, ...item, slices_remaining: rem1 });
+        }
+      }
+    });
+
+    fridgeItems = Array.from(itemMap.values());
     fridgeItems.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
   } catch(e) {
     console.warn('Fridge load error:', e.message);
@@ -4253,12 +4287,25 @@ async function saveFridgeItem(item) {
 
 async function updateFridgeItem(id, data, owner) {
   const ownerId = owner || getUserId();
-  await setDoc(doc(db, 'users', ownerId, 'fridge', id), data, { merge: true });
+  try {
+    await setDoc(doc(db, 'users', ownerId, 'fridge', id), data, { merge: true });
+  } catch(e) {
+    console.warn(`Failed writing fridge item to ${ownerId}, falling back to current user:`, e.message);
+    if (ownerId !== getUserId()) {
+      await setDoc(doc(db, 'users', getUserId(), 'fridge', id), data, { merge: true });
+    }
+  }
 }
 
 async function removeFridgeItem(id, owner) {
   const ownerId = owner || getUserId();
-  await deleteDoc(doc(db, 'users', ownerId, 'fridge', id));
+  try {
+    await deleteDoc(doc(db, 'users', ownerId, 'fridge', id));
+  } catch(e) {
+    if (ownerId !== getUserId()) {
+      try { await deleteDoc(doc(db, 'users', getUserId(), 'fridge', id)); } catch(e2) {}
+    }
+  }
 }
 
 function buildFridgeHtml() {
@@ -4297,7 +4344,10 @@ function buildFridgeHtml() {
             <button class="btn btn-ghost btn-sm" onclick="window.openConsumeFridgeModal(${idx})" style="font-size:11px;padding:4px 8px;border-color:rgba(20,184,166,0.4);color:rgb(20,184,166)" title="Prendi fetta e aggiungi ai pasti">
               🍕 ${hasSlices ? 'Prendi fetta' : 'Usa'}
             </button>
-            <button onclick="window.deleteFridgeItemUI(${idx})" style="background:none;border:none;color:var(--t3);cursor:pointer;padding:4px 6px;font-size:14px">
+            <button onclick="window.openEditFridgeModal(${idx})" style="background:none;border:none;color:var(--t3);cursor:pointer;padding:4px 4px;font-size:14px" title="Modifica piatto / fette">
+              <i class="ri-edit-line"></i>
+            </button>
+            <button onclick="window.deleteFridgeItemUI(${idx})" style="background:none;border:none;color:var(--t3);cursor:pointer;padding:4px 4px;font-size:14px" title="Elimina piatto">
               <i class="ri-delete-bin-line"></i>
             </button>
           </div>
@@ -4361,11 +4411,16 @@ window.openConsumeFridgeModal = function(idx) {
 
       ${hasSlices ? `
       <div class="fg">
-        <label class="fl">Quante fette vuoi prendere? (disponibili: ${remSlices}/${totSlices})</label>
-        <input type="number" class="fi" id="cfm-slices" value="1" min="1" max="${remSlices}" oninput="window.updateConsumeFridgePreview(${idx})">
+        <label class="fl">Quante fette vuoi prendere?</label>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+          <button type="button" class="btn btn-ghost" style="width:40px;height:40px;font-size:20px;padding:0;display:flex;align-items:center;justify-content:center;border-color:rgba(20,184,166,0.4);color:rgb(20,184,166)" onclick="window.stepConsumeSlices(-1, ${idx})">-</button>
+          <input type="number" class="fi" id="cfm-slices" value="1" min="1" max="${remSlices}" style="text-align:center;font-size:18px;font-weight:800;width:70px;padding:6px" oninput="window.updateConsumeFridgePreview(${idx}, false)" onblur="window.updateConsumeFridgePreview(${idx}, true)">
+          <button type="button" class="btn btn-ghost" style="width:40px;height:40px;font-size:20px;padding:0;display:flex;align-items:center;justify-content:center;border-color:rgba(20,184,166,0.4);color:rgb(20,184,166)" onclick="window.stepConsumeSlices(1, ${idx})">+</button>
+          <span style="font-size:12px;color:var(--t3)">(disponibili: ${remSlices}/${totSlices})</span>
+        </div>
       </div>` : ''}
 
-      <div class="fg">
+      <div class="fg" style="margin-top:12px">
         <label class="fl">Dove inserire il pasto?</label>
         <select class="fi" id="cfm-dest">
           ${destOptions}
@@ -4386,19 +4441,36 @@ window.openConsumeFridgeModal = function(idx) {
     </div>`;
   document.body.appendChild(bg);
   bg.addEventListener('click', e => { if (e.target === bg) bg.remove(); });
-  window.updateConsumeFridgePreview(idx);
+  window.updateConsumeFridgePreview(idx, true);
 };
 
-window.updateConsumeFridgePreview = function(idx) {
+window.stepConsumeSlices = function(delta, idx) {
+  const item = fridgeItems[idx];
+  if (!item) return;
+  const remSlices = item.slices > 0 ? (item.slices_remaining ?? item.slices) : 1;
+  const inputEl = document.getElementById('cfm-slices');
+  if (!inputEl) return;
+  let cur = parseInt(inputEl.value) || 1;
+  let next = Math.max(1, Math.min(cur + delta, remSlices));
+  inputEl.value = next;
+  window.updateConsumeFridgePreview(idx, true);
+};
+
+window.updateConsumeFridgePreview = function(idx, clamp = false) {
   const item = fridgeItems[idx];
   if (!item) return;
   const hasSlices = item.slices > 0;
   const remSlices = hasSlices ? (item.slices_remaining ?? item.slices) : 1;
   const totSlices = item.slices || 1;
   const inputEl = document.getElementById('cfm-slices');
-  let n = hasSlices ? parseInt(inputEl?.value) || 1 : 1;
-  n = Math.max(1, Math.min(n, remSlices));
-  if (inputEl && inputEl.value !== String(n)) inputEl.value = n;
+  let raw = inputEl?.value;
+  let n = parseInt(raw);
+  if (isNaN(n) || n < 1) n = 1;
+  if (n > remSlices) n = remSlices;
+
+  if (clamp && inputEl) {
+    inputEl.value = n;
+  }
 
   const kcal = Math.round((item.total_kcal || 0) * n / totSlices);
   const pro = ((item.total_protein || 0) * n / totSlices).toFixed(1);
@@ -4420,7 +4492,7 @@ window.confirmConsumeFridge = async function(idx) {
   const remSlices = hasSlices ? (item.slices_remaining ?? item.slices) : 1;
   const totSlices = item.slices || 1;
   const inputEl = document.getElementById('cfm-slices');
-  let n = hasSlices ? parseInt(inputEl?.value) || 1 : 1;
+  let n = hasSlices ? (parseInt(inputEl?.value) || 1) : 1;
   n = Math.max(1, Math.min(n, remSlices));
 
   const dest = document.getElementById('cfm-dest')?.value || 'extra';
@@ -4467,6 +4539,121 @@ window.confirmConsumeFridge = async function(idx) {
 
   const itemOwner = item._owner || getUserId();
   await processFridgeDeduction(item, itemOwner, n);
+};
+
+window.openEditFridgeModal = function(idx) {
+  const item = fridgeItems[idx];
+  if (!item) return;
+
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg fridge-edit-modal';
+  bg.innerHTML = `
+    <div class="modal" style="max-height:88vh;overflow-y:auto">
+      <div class="modal-handle"></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+        <span style="font-size:18px">✏️</span>
+        <h3 style="margin:0;color:rgb(20,184,166)">Modifica Piatto in Dispensa</h3>
+      </div>
+
+      <div class="fg">
+        <label class="fl">Nome ricetta / piatto *</label>
+        <input id="fe-name" class="fi" value="${item.name || ''}">
+      </div>
+
+      <div style="font-size:11px;color:var(--t2);font-weight:700;letter-spacing:0.5px;margin-bottom:8px">MACRO TOTALI DEL PIATTO</div>
+      <div class="fmp" style="margin-bottom:12px">
+        <div class="fmp-item">
+          <input type="number" class="fi" id="fe-kcal" value="${item.total_kcal || 0}">
+          <div class="fmp-l">Kcal</div>
+        </div>
+        <div class="fmp-item">
+          <input type="number" class="fi" id="fe-protein" value="${item.total_protein || 0}">
+          <div class="fmp-l">Prot g</div>
+        </div>
+        <div class="fmp-item">
+          <input type="number" class="fi" id="fe-carbs" value="${item.total_carbs || 0}">
+          <div class="fmp-l">Carbo g</div>
+        </div>
+        <div class="fmp-item">
+          <input type="number" class="fi" id="fe-fats" value="${item.total_fats || 0}">
+          <div class="fmp-l">Grassi g</div>
+        </div>
+      </div>
+
+      <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;margin-bottom:12px">
+        <div style="font-size:11px;color:var(--t2);font-weight:700;letter-spacing:0.5px;margin-bottom:8px">🍕 FETTE / PORZIONI</div>
+        <div style="display:flex;gap:10px">
+          <div style="flex:1">
+            <label class="fl" style="font-size:10px">Fette rimaste</label>
+            <input type="number" class="fi" id="fe-rem-slices" value="${item.slices_remaining ?? (item.slices || 1)}" min="0">
+          </div>
+          <div style="flex:1">
+            <label class="fl" style="font-size:10px">Fette totali</label>
+            <input type="number" class="fi" id="fe-tot-slices" value="${item.slices || 1}" min="1">
+          </div>
+        </div>
+      </div>
+
+      <div class="fg">
+        <label class="fl">Note (opzionale)</label>
+        <input id="fe-note" class="fi" value="${item.note || ''}">
+      </div>
+
+      <div class="modal-btns" style="margin-top:16px">
+        <button class="btn btn-flat btn-cancel" onclick="this.closest('.modal-bg').remove()">Annulla</button>
+        <button class="btn btn-ok" style="background:rgba(20,184,166,0.2);border:1px solid rgb(20,184,166);color:rgb(20,184,166)" onclick="window.confirmEditFridge(${idx})">
+          <i class="ri-save-line"></i> Salva Modifiche
+        </button>
+      </div>
+    </div>`;
+  document.body.appendChild(bg);
+  bg.addEventListener('click', e => { if (e.target === bg) bg.remove(); });
+};
+
+window.confirmEditFridge = async function(idx) {
+  const item = fridgeItems[idx];
+  if (!item) return;
+
+  const name = document.getElementById('fe-name')?.value.trim();
+  const kcal = parseFloat(document.getElementById('fe-kcal')?.value) || 0;
+  const protein = parseFloat(document.getElementById('fe-protein')?.value) || 0;
+  const carbs = parseFloat(document.getElementById('fe-carbs')?.value) || 0;
+  const fats = parseFloat(document.getElementById('fe-fats')?.value) || 0;
+  const totSlices = parseInt(document.getElementById('fe-tot-slices')?.value) || 1;
+  const remSlices = parseInt(document.getElementById('fe-rem-slices')?.value);
+  const note = document.getElementById('fe-note')?.value.trim() || '';
+
+  if (!name) { showToast('Inserisci il nome del piatto', 'err'); return; }
+
+  const updatedData = {
+    name,
+    total_kcal: kcal,
+    total_protein: protein,
+    total_carbs: carbs,
+    total_fats: fats,
+    slices: totSlices > 1 ? totSlices : null,
+    slices_remaining: !isNaN(remSlices) ? Math.max(0, remSlices) : (totSlices > 1 ? totSlices : null),
+    note
+  };
+
+  try {
+    const owner = item._owner || getUserId();
+    await updateFridgeItem(item.id, updatedData, owner);
+    fridgeItems[idx] = { ...item, ...updatedData };
+
+    if (updatedData.slices_remaining === 0) {
+      await removeFridgeItem(item.id, owner);
+      fridgeItems.splice(idx, 1);
+      showToast('🎉 Piatto esaurito e rimosso dalla Dispensa!');
+    } else {
+      showToast('✅ Piatto modificato con successo!');
+    }
+
+    document.querySelector('.modal-bg.fridge-edit-modal')?.remove();
+    buildMeals();
+  } catch(e) {
+    showToast('Errore durante la modifica: ' + e.message, 'err');
+  }
 };
 
 window.openAddFridgeModal = function() {
