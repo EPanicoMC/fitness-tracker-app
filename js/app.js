@@ -705,12 +705,7 @@ document.addEventListener('visibilitychange', () => {
 export function maybeRecoverFromBrokenFirestore(message) {
   try {
     if (!message || !FIRESTORE_FATAL_RE.test(String(message))) return false;
-    if (performance.now() - _lastResumeAt > RECOVERY_WINDOW_MS) return false;
-    const last = Number(sessionStorage.getItem('kova_fs_recover_at')) || 0;
-    if (Date.now() - last < RECOVERY_COOLDOWN_MS) return false;
-    sessionStorage.setItem('kova_fs_recover_at', String(Date.now()));
-    console.warn('[recovery] Client Firestore in stato non valido: ricarico la pagina');
-    setTimeout(() => window.location.reload(), 300);
+    console.warn('[recovery] Client Firestore error encountered:', message);
     return true;
   } catch (e) {
     return false;

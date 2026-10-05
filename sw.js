@@ -1,4 +1,4 @@
-const CACHE = 'ft-v87';
+const CACHE = 'ft-v88';
 // Cache separata per librerie CDN con URL versionato (contenuto immutabile):
 // non viene svuotata ai bump di CACHE, così l'SDK Firebase non va riscaricato a ogni deploy.
 const CDN_CACHE = 'ft-cdn-v1';
