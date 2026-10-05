@@ -50,8 +50,8 @@ async function loadDiets() {
 
   const coll = collection(db, 'users', userId, 'diet_plans');
 
-  const processAndRender = async (snap) => {
-    diets = await Promise.all(snap.docs.map(async d => {
+  const processAndRender = (snap) => {
+    diets = snap.docs.map(d => {
       const data = d.data();
       let updated = false;
       ['day_on', 'day_off'].forEach(dk => {
@@ -68,10 +68,10 @@ async function loadDiets() {
         }
       });
       if (updated) {
-        try { await setDoc(doc(db, 'users', getUserId(), 'diet_plans', d.id), data); } catch(e){}
+        setDoc(doc(db, 'users', getUserId(), 'diet_plans', d.id), data).catch(e => console.warn('setDoc diet totals error:', e));
       }
       return { id: d.id, ...data };
-    }));
+    });
     diets.sort((a, b) => (b.active?1:0) - (a.active?1:0));
     renderList();
   };
@@ -877,7 +877,7 @@ async function buildDrinks() {
 
     snap.forEach(d => {
       const data = d.data();
-      const drinks = data.drinks || 0;
+      const drinks = Math.max(data.drinks || 0, data.nutrition?.totals?.alcoholDrinks || 0);
       if (drinks > 0) {
         nightsCount++;
         totalDrinks += drinks;

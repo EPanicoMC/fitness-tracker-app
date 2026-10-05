@@ -512,6 +512,8 @@ window.showDay = async function(dateStr) {
             <span>🥩 ${Math.round(tots.protein || 0)}g${proDiffStr}</span>
             <span>🌾 ${Math.round(tots.carbs || 0)}g${carbDiffStr}</span>
             <span>🧈 ${Math.round(tots.fats || 0)}g${fatDiffStr}</span>
+            ${tots.saturatedFat != null ? `<span>🥓 Sat: ${Math.round(tots.saturatedFat)}g${!tots.saturatedFatComplete ? ' (inc)' : ''}</span>` : ''}
+            ${tots.alcohol != null && tots.alcohol > 0 ? `<span style="color:#f472b6;font-weight:700">🍷 Alcol: ${Math.round(tots.alcohol)}g (${tots.alcoholDrinks||1}d)</span>` : ''}
           </div>`;
       })() : '<p style="color:var(--t3);font-size:13px">Nessun dato nutrizionale</p>'}
       ${log.weight_kg   ? `<div style="margin-top:8px;font-size:13px;color:var(--orange);font-weight:700">⚖️ Peso: ${log.weight_kg} kg</div>` : ''}
@@ -1576,6 +1578,12 @@ window.openRecoverDay = function(dateStr) {
       <div class="grid2">
         <div class="fg"><label class="fl">Grassi (g)</label>
           <input type="number" class="fi" id="rec-fat" placeholder="0" step="0.1"></div>
+        <div class="fg"><label class="fl">Grassi Saturi (g)</label>
+          <input type="number" class="fi" id="rec-sat-fat" placeholder="opzionale" step="0.1"></div>
+      </div>
+      <div class="grid2">
+        <div class="fg"><label class="fl">Alcol etanolo (g)</label>
+          <input type="number" class="fi" id="rec-alcohol" placeholder="opzionale" step="0.1"></div>
         <div class="fg"><label class="fl">Passi</label>
           <input type="number" class="fi" id="rec-steps" placeholder="0"></div>
       </div>
@@ -1615,6 +1623,9 @@ window.saveRecoveredDay = async function(dateStr) {
   const fats       = parseFloat(document.getElementById('rec-fat')?.value)     || 0;
   const satFatVal  = parseFloat(document.getElementById('rec-sat-fat')?.value);
   const saturatedFat = !isNaN(satFatVal) ? satFatVal : null;
+  const alcVal     = parseFloat(document.getElementById('rec-alcohol')?.value);
+  const alcohol    = !isNaN(alcVal) ? alcVal : null;
+  const alcoholDrinks = (alcohol != null && alcohol > 0) ? Math.round(alcohol / 12) || 1 : null;
   const steps      = parseInt(document.getElementById('rec-steps')?.value)     || null;
   const note       = document.getElementById('rec-note')?.value                || '';
   const didWorkout = document.getElementById('rec-workout')?.value             === 'yes';
@@ -1624,7 +1635,7 @@ window.saveRecoveredDay = async function(dateStr) {
     date: dateStr,
     is_training_day: didWorkout,
     steps, daily_note: note, recovered: true,
-    nutrition: { totals: { kcal, protein, carbs, fats, saturatedFat } }
+    nutrition: { totals: { kcal, protein, carbs, fats, saturatedFat, alcohol, alcoholDrinks } }
   };
   if (didWorkout && sessionDay && programData?.schedule?.[sessionDay]) {
     data.workout = {
@@ -1691,6 +1702,8 @@ window.openEditDay = function(dateStr) {
           <input type="number" class="fi" id="ed-fat" value="${Math.round(tots.fats || 0)}" placeholder="0" step="0.1"></div>
         <div class="fg"><label class="fl">Grassi Saturi (g)</label>
           <input type="number" class="fi" id="ed-sat-fat" value="${tots.saturatedFat != null ? Math.round(tots.saturatedFat) : ''}" placeholder="opzionale" step="0.1"></div>
+        <div class="fg"><label class="fl">Alcol etanolo (g)</label>
+          <input type="number" class="fi" id="ed-alcohol" value="${tots.alcohol != null ? tots.alcohol : ''}" placeholder="opzionale" step="0.1"></div>
       </div>
       <div class="modal-btns">
         <button class="btn btn-flat" onclick="document.getElementById('edit-day-modal').remove()">Annulla</button>
@@ -1711,6 +1724,9 @@ window.saveEditDay = async function(dateStr) {
   const fats       = parseFloat(document.getElementById('ed-fat')?.value)   || 0;
   const satFatVal  = parseFloat(document.getElementById('ed-sat-fat')?.value);
   const saturatedFat = !isNaN(satFatVal) ? satFatVal : null;
+  const alcVal     = parseFloat(document.getElementById('ed-alcohol')?.value);
+  const alcohol    = !isNaN(alcVal) ? alcVal : null;
+  const alcoholDrinks = (alcohol != null && alcohol > 0) ? Math.round(alcohol / 12) || 1 : null;
   const sleep      = parseFloat(document.getElementById('ed-sleep')?.value) || null;
   const drinks     = parseInt(document.getElementById('ed-drinks')?.value)  || null;
   const mealsOut   = parseInt(document.getElementById('ed-meals-out')?.value) || null;
@@ -1723,7 +1739,7 @@ window.saveEditDay = async function(dateStr) {
       sleep_hours: sleep,
       drinks: drinks,
       meals_out: mealsOut,
-      nutrition: { totals: { kcal, protein, carbs, fats, saturatedFat } }
+      nutrition: { totals: { kcal, protein, carbs, fats, saturatedFat, alcohol, alcoholDrinks } }
     };
     await setDoc(doc(db, 'users', getUserId(), 'daily_logs', dateStr), payload, { merge: true });
 

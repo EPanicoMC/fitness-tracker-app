@@ -9,7 +9,7 @@
  */
 
 // ── Schema ──────────────────────────────────────────────────
-export const MACRO_FIELDS = ['kcal', 'protein', 'carbs', 'fats', 'saturatedFat'];
+export const MACRO_FIELDS = ['kcal', 'protein', 'carbs', 'fats', 'saturatedFat', 'alcohol', 'alcoholDrinks'];
 
 // ── Zero-kcal allowlist (exact match, not substring) ────────
 const KNOWN_ZERO_KCAL = new Set([
@@ -45,13 +45,15 @@ export function isZeroKcalFood(name) {
  * Missing fields stay null; explicit 0 stays 0.
  */
 export function createNutrients(raw) {
-  if (!raw) return { kcal: null, protein: null, carbs: null, fats: null, saturatedFat: null };
+  if (!raw) return { kcal: null, protein: null, carbs: null, fats: null, saturatedFat: null, alcohol: null, alcoholDrinks: null };
   return {
-    kcal:         raw.kcal         != null ? Math.max(0, Number(raw.kcal)         || 0) : null,
-    protein:      raw.protein      != null ? Math.max(0, Number(raw.protein)      || 0) : null,
-    carbs:        raw.carbs        != null ? Math.max(0, Number(raw.carbs)        || 0) : null,
-    fats:         raw.fats         != null ? Math.max(0, Number(raw.fats)         || 0) : null,
-    saturatedFat: raw.saturatedFat != null ? Math.max(0, Number(raw.saturatedFat) || 0) : null,
+    kcal:          raw.kcal          != null ? Math.max(0, Number(raw.kcal)          || 0) : null,
+    protein:       raw.protein       != null ? Math.max(0, Number(raw.protein)       || 0) : null,
+    carbs:         raw.carbs         != null ? Math.max(0, Number(raw.carbs)         || 0) : null,
+    fats:          raw.fats          != null ? Math.max(0, Number(raw.fats)          || 0) : null,
+    saturatedFat:  raw.saturatedFat  != null ? Math.max(0, Number(raw.saturatedFat)  || 0) : null,
+    alcohol:       raw.alcohol       != null ? Math.max(0, Number(raw.alcohol)       || 0) : null,
+    alcoholDrinks: raw.alcoholDrinks != null ? Math.max(0, Number(raw.alcoholDrinks) || 0) : null,
   };
 }
 
@@ -249,11 +251,13 @@ export function validateNutrients(raw, opts = {}) {
  */
 export function roundForDisplay(nutrients) {
   return {
-    kcal:         nutrients.kcal         != null ? Math.round(nutrients.kcal)                   : null,
-    protein:      nutrients.protein      != null ? parseFloat(nutrients.protein.toFixed(1))      : null,
-    carbs:        nutrients.carbs        != null ? parseFloat(nutrients.carbs.toFixed(1))        : null,
-    fats:         nutrients.fats         != null ? parseFloat(nutrients.fats.toFixed(1))         : null,
-    saturatedFat: nutrients.saturatedFat != null ? parseFloat(nutrients.saturatedFat.toFixed(1)) : null,
+    kcal:          nutrients.kcal          != null ? Math.round(nutrients.kcal)                    : null,
+    protein:       nutrients.protein       != null ? parseFloat(nutrients.protein.toFixed(1))       : null,
+    carbs:         nutrients.carbs         != null ? parseFloat(nutrients.carbs.toFixed(1))         : null,
+    fats:          nutrients.fats          != null ? parseFloat(nutrients.fats.toFixed(1))          : null,
+    saturatedFat:  nutrients.saturatedFat  != null ? parseFloat(nutrients.saturatedFat.toFixed(1))  : null,
+    alcohol:       nutrients.alcohol       != null ? parseFloat(nutrients.alcohol.toFixed(1))       : null,
+    alcoholDrinks: nutrients.alcoholDrinks != null ? parseFloat(nutrients.alcoholDrinks.toFixed(1)) : null,
   };
 }
 
@@ -267,20 +271,74 @@ export function formatNutrient(value, unit = 'g', fallback = '—') {
   return `${rounded}${unit}`;
 }
 
+// ── Per 100g Conversions ───────────────────────────────────
+
+export function per100gFrom(nutrients, grams) {
+  const g = Math.max(1, Number(grams) || 100);
+  const factor = 100 / g;
+  return scaleNutrients(nutrients, factor);
+}
+
+export function fromPer100g(per100Nutrients, grams) {
+  const g = Math.max(0, Number(grams) || 0);
+  const factor = g / 100;
+  return scaleNutrients(per100Nutrients, factor);
+}
+
+// ── Alcohol Detection & Estimation ─────────────────────────
+
+export function estimateAlcoholGrams(ml, abv) {
+  return Math.round((Number(ml) || 0) * (Number(abv) || 0) * 0.00789 * 10) / 10;
+}
+
+const ALCOHOLIC_DICTIONARY = [
+  { keywords: ['spritz', 'aperol spritz', 'campari spritz', 'hugo'], ml: 150, abv: 8, drinks: 1 },
+  { keywords: ['calice di vino', 'bicchiere di vino', 'vino rosso', 'vino bianco', 'prosecco', 'champagne', 'spumante', 'calice'], ml: 125, abv: 12, drinks: 1 },
+  { keywords: ['birra piccol', 'birra 33', 'lattina di birra'], ml: 330, abv: 5, drinks: 1 },
+  { keywords: ['birra medi', 'birra alla spina', 'pinta di birra', 'birra 40', 'birra 50', 'birra 66'], ml: 400, abv: 5, drinks: 1.3 },
+  { keywords: ['birra', 'beer'], ml: 330, abv: 5, drinks: 1 },
+  { keywords: ['gin tonic', 'negroni', 'mojito', 'moscow mule', 'americani', 'americana', 'cuba libre', 'vodka tonic', 'cocktail', 'aperitivo alcolico'], ml: 180, abv: 14, drinks: 1.5 },
+  { keywords: ['amaro', 'limoncello', 'grappa', 'whisky', 'rum', 'vodka', 'tequila', 'shot', 'chupito', 'liquore'], ml: 40, abv: 30, drinks: 1 },
+  { keywords: ['sangria'], ml: 200, abv: 9, drinks: 1 }
+];
+
+const NON_ALCOHOLIC_EXCLUSIONS = ['aceto', 'aceto di vino', 'aceto balsamico', 'risotto al vino', 'strotto', 'tiramisu', 'tiramisù', 'senza alcol', 'analcolico', 'zero alcol'];
+
+export function detectAlcoholicDrink(name) {
+  if (!name) return null;
+  const norm = name.toLowerCase().trim();
+  if (NON_ALCOHOLIC_EXCLUSIONS.some(ex => norm.includes(ex))) return null;
+  for (const item of ALCOHOLIC_DICTIONARY) {
+    if (item.keywords.some(kw => norm.includes(kw))) {
+      const alcoholGrams = Math.round(item.ml * (item.abv / 100) * 0.789 * 10) / 10;
+      return {
+        isAlcohol: true,
+        ml: item.ml,
+        abv: item.abv,
+        alcoholGrams,
+        drinks: item.drinks
+      };
+    }
+  }
+  return null;
+}
+
 // ── Legacy compat helpers ───────────────────────────────────
 
 /**
- * Convert legacy data (without saturatedFat) to current schema.
- * Does NOT invent saturatedFat data — sets it to null.
+ * Convert legacy data (without saturatedFat or alcohol) to current schema.
+ * Does NOT invent data — sets missing fields to null.
  */
 export function fromLegacy(data) {
   if (!data) return createNutrients(null);
   return createNutrients({
-    kcal:         data.kcal,
-    protein:      data.protein,
-    carbs:        data.carbs,
-    fats:         data.fats,
-    saturatedFat: data.saturatedFat ?? null   // never invent
+    kcal:          data.kcal,
+    protein:       data.protein,
+    carbs:         data.carbs,
+    fats:          data.fats,
+    saturatedFat:  data.saturatedFat  ?? null,
+    alcohol:       data.alcohol       ?? null,
+    alcoholDrinks: data.alcoholDrinks ?? null
   });
 }
 

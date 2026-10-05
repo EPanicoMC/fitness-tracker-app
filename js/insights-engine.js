@@ -67,6 +67,8 @@ export function normalizeDiaryAnalyticsData(dates, logs, programData, dietPlan, 
       carbs: log.nutrition.totals.carbs || 0,
       fats: log.nutrition.totals.fats || 0,
       saturatedFat: log.nutrition.totals.saturatedFat ?? null,
+      alcohol: log.nutrition.totals.alcohol ?? null,
+      alcoholDrinks: log.nutrition.totals.alcoholDrinks ?? null,
     } : null;
 
     // Workout completed
@@ -604,6 +606,9 @@ export function buildExportModel(metrics, rankedInsights, actionPlan, validDays,
       proteinTarget: d.target?.protein || 0,
       fatActual: d.nut?.fats || 0,
       fatTarget: d.target?.fats || 0,
+      saturatedFatActual: d.nut?.saturatedFat ?? null,
+      alcoholActual: d.nut?.alcohol ?? null,
+      alcoholDrinksActual: d.nut?.alcoholDrinks ?? (d.log?.drinks ?? null),
       carbsActual: d.nut?.carbs || 0,
       carbsTarget: d.target?.carbs || 0,
       workout: d.workoutDone ? (d.workoutName || 'Completato') : (d.isTrainingDay ? 'Saltato' : 'Riposo'),

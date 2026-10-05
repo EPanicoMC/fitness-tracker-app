@@ -417,6 +417,90 @@ window.startSession = function() {
 
 function setT(id, v) { const e = document.getElementById(id); if (e) e.textContent = v; }
 
+let globalAudioCtx = null;
+function getAudioContext() {
+  if (!globalAudioCtx) {
+    globalAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (globalAudioCtx.state === 'suspended') {
+    globalAudioCtx.resume().catch(() => {});
+  }
+  return globalAudioCtx;
+}
+
+function beep() {
+  try {
+    const audioCtx = getAudioContext();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.type = 'sine';
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(1, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+    osc.start(audioCtx.currentTime);
+    osc.stop(audioCtx.currentTime + 0.5);
+  } catch(e) {}
+}
+
+// Data URI di un file WAV di 1s di silenzio per mantenere l'entitlement audio su iOS/Android
+const SILENT_WAV_URI = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==';
+let bgAudioElem = null;
+
+function enableBackgroundAudioKeepAlive(title = 'Recupero KOVA') {
+  try {
+    if (!bgAudioElem) {
+      bgAudioElem = new Audio(SILENT_WAV_URI);
+      bgAudioElem.loop = true;
+    }
+    bgAudioElem.play().catch(() => {});
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: title,
+        artist: 'KOVA Fitness',
+        album: 'Timer Allenamento'
+      });
+      navigator.mediaSession.playbackState = 'playing';
+    }
+  } catch (e) {
+    console.warn('Background audio keep alive error:', e);
+  }
+}
+
+function disableBackgroundAudioKeepAlive() {
+  try {
+    if (bgAudioElem) {
+      bgAudioElem.pause();
+    }
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = 'none';
+    }
+  } catch (e) {}
+}
+
+function triggerRestDoneEffects(label = '') {
+  showToast('⚡ Recupero terminato!');
+  if (document.getElementById('sound-tgl')?.checked) {
+    beep();
+    setTimeout(beep, 250);
+  }
+  if (navigator.vibrate) navigator.vibrate([300, 150, 300, 150, 400]);
+
+  if ('serviceWorker' in navigator && Notification.permission === 'granted') {
+    navigator.serviceWorker.ready.then(reg => {
+      reg.showNotification('⚡ Recupero terminato!', {
+        body: label ? `Prossimo: ${label}` : 'Pronti per la prossima serie? 💪',
+        icon: 'icon.svg',
+        vibrate: [300, 150, 300, 150, 400],
+        tag: 'rest-timer',
+        renotify: true,
+        requireInteraction: true
+      });
+    }).catch(() => {});
+  }
+}
+
 function onVisibilityChange() {
   if (document.visibilityState !== 'visible' || !sessionStarted) return;
   if (!isPaused) {
@@ -426,7 +510,13 @@ function onVisibilityChange() {
   if (restEndTime > 0) {
     restSec = Math.max(0, Math.ceil((restEndTime - Date.now()) / 1000));
     updateRestDisplay();
-    if (restSec <= 0) { clearInterval(restInt); hideRest(); }
+    if (restSec <= 0) {
+      clearInterval(restInt);
+      hideRest();
+      disableBackgroundAudioKeepAlive();
+      triggerRestDoneEffects();
+      restEndTime = 0;
+    }
   }
 }
 document.addEventListener('visibilitychange', onVisibilityChange);
@@ -727,14 +817,28 @@ function startRest(sec, label) {
   document.getElementById('rest-next').textContent = label;
   document.getElementById('rest-box').scrollIntoView({ behavior: 'smooth', block: 'center' });
   updateRestDisplay();
-  postToSW({ type: 'schedule-rest-done', ms: sec * 1000 });
+
+  // Mantiene vivo il thread JS su iOS/Android riproducendo silenzio e sbloccando MediaSession
+  enableBackgroundAudioKeepAlive(`⏳ Recupero (${sec}s) — ${label}`);
+
+  postToSW({ type: 'schedule-rest-done', ms: sec * 1000, label });
   restInt = setInterval(() => {
     restSec = Math.max(0, Math.ceil((restEndTime - Date.now()) / 1000));
     updateRestDisplay();
+
+    if ('mediaSession' in navigator && restSec > 0) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: `⏱ ${restSec}s — ${label}`,
+        artist: 'KOVA Fitness',
+        album: 'Recupero in corso'
+      });
+    }
+
     if (restSec <= 0) {
-      clearInterval(restInt); hideRest(); showToast('⚡ Recupero terminato!');
-      if (document.getElementById('sound-tgl')?.checked) beep();
-      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+      clearInterval(restInt);
+      hideRest();
+      disableBackgroundAudioKeepAlive();
+      triggerRestDoneEffects(label);
     }
   }, 500);
 }
@@ -744,9 +848,17 @@ function updateRestDisplay() {
   el.textContent = restSec;
   el.className = 'timer-rest ' + (restSec > 30 ? 'rest-g' : restSec > 10 ? 'rest-o' : 'rest-r');
 }
-function hideRest() { document.getElementById('rest-box').style.display = 'none'; }
+function hideRest() {
+  document.getElementById('rest-box').style.display = 'none';
+  disableBackgroundAudioKeepAlive();
+}
 
-window.skipRest = function() { clearInterval(restInt); hideRest(); postToSW({ type: 'cancel-rest' }); };
+window.skipRest = function() {
+  clearInterval(restInt);
+  hideRest();
+  disableBackgroundAudioKeepAlive();
+  postToSW({ type: 'cancel-rest' });
+};
 window.togglePause = function() {
   isPaused = !isPaused;
   if (isPaused) {

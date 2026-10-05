@@ -3,7 +3,8 @@ import { doc, getDoc, getDocs, collection, query, orderBy, limit, where } from '
 import {
   isZeroKcalFood, createNutrients, sumNutrients, scaleNutrients,
   computeAtwater, diagnoseAtwater, validateNutrients, roundForDisplay,
-  formatNutrient, fromLegacy, forFirestore
+  formatNutrient, fromLegacy, forFirestore,
+  detectAlcoholicDrink, estimateAlcoholGrams, per100gFrom, fromPer100g
 } from './nutrition-core.js';
 
 let cachedKey = null;
@@ -30,14 +31,15 @@ let _lastCallTime = 0;
 const _THROTTLE_MS = 4000;
 
 async function callGemini(key, prompt, opts = {}) {
-  const { temperature = 0.7, maxOutputTokens = 1024, parts } = opts;
+  const { temperature = 0.7, maxOutputTokens = 1024, parts, models } = opts;
   const contentParts = parts || [{ text: prompt }];
+  const targetModels = models || MODELS;
 
   const now = Date.now();
   const wait = _THROTTLE_MS - (now - _lastCallTime);
   if (wait > 0) await _delay(wait);
 
-  for (const model of MODELS) {
+  for (const model of targetModels) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         if (attempt > 0) await _delay(2000);
@@ -79,6 +81,8 @@ export function validateNutrientResponse(parsed) {
     carbs: res.nutrients.carbs != null ? parseFloat(res.nutrients.carbs.toFixed(1)) : 0,
     fats: res.nutrients.fats != null ? parseFloat(res.nutrients.fats.toFixed(1)) : 0,
     saturatedFat: res.nutrients.saturatedFat != null ? parseFloat(res.nutrients.saturatedFat.toFixed(1)) : null,
+    alcohol: res.nutrients.alcohol != null ? parseFloat(res.nutrients.alcohol.toFixed(1)) : null,
+    alcoholDrinks: res.nutrients.alcoholDrinks != null ? parseFloat(res.nutrients.alcoholDrinks.toFixed(1)) : null,
     items: res.items || [],
     warnings: res.warnings,
     errors: res.errors,
@@ -442,13 +446,14 @@ Regole fondamentali e VINCOLANTI:
    - Kinder Joy: 10g = ~5.5g carbo, ~3.6g grassi, ~0.8g proteine (~56 kcal).
    - Pancarré / pane in cassetta: 1 fetta = ~25g (~65 kcal, 2.5g pro, 1g grassi, 11g carbo). 2 fette soya (~50g) = ~130 kcal, ~5.5g pro, ~2g grassi, ~23g carbo.
    - Insalata verde: 60g = ~9 kcal, ~0.8g pro, ~1g carbo, ~0.1g grassi.
+   - BEVANDE ALCOLICHE: per vino, birra, spritz, cocktail, amaro, liquore, ecc., stima i grammi di etanolo in "alcohol" e le unità/drink in "alcoholDrinks" (1 calice vino 125ml 12% = ~11.8g alcol = 1 drink; 1 spritz = ~9.5g alcol = 1 drink; 1 birra 400ml = ~16g alcol = 1.3 drink). Includi 7 kcal per grammo di alcol nel totale kcal.
 4. NESSUN ALIMENTO REALE HA 0 KCAL (tranne acqua pura e caffè nero).
 5. Output SOLO JSON valido, senza markdown, senza commenti.
 
 Formato JSON richiesto:
 {
   "items": [
-    { "name": "Nome alimento con porzione", "grams": 0, "kcal": 0, "protein": 0, "carbs": 0, "fats": 0, "saturatedFat": null }
+    { "name": "Nome alimento con porzione", "grams": 0, "kcal": 0, "protein": 0, "carbs": 0, "fats": 0, "saturatedFat": null, "alcohol": null, "alcoholDrinks": null }
   ]
 }`;
 
@@ -469,7 +474,10 @@ Formato JSON richiesto:
     let sumCarbs = 0;
     let sumFats = 0;
     let sumSatFat = 0;
+    let sumAlcohol = 0;
+    let sumDrinks = 0;
     let hasSatFat = rawItems.length > 0;
+    let hasAlcohol = false;
 
     const cleanedItems = rawItems.map(item => {
       const k = Math.round(Number(item.kcal) || 0);
@@ -479,6 +487,23 @@ Formato JSON richiesto:
       const sf = (item.saturatedFat != null && !isNaN(Number(item.saturatedFat)))
         ? parseFloat((Number(item.saturatedFat)).toFixed(1))
         : null;
+
+      let alc = (item.alcohol != null && !isNaN(Number(item.alcohol)))
+        ? parseFloat((Number(item.alcohol)).toFixed(1))
+        : null;
+
+      let drk = (item.alcoholDrinks != null && !isNaN(Number(item.alcoholDrinks)))
+        ? parseFloat((Number(item.alcoholDrinks)).toFixed(1))
+        : null;
+
+      // Fallback alcohol detection from dictionary if AI missed it
+      if ((alc == null || alc === 0) && item.name) {
+        const detected = detectAlcoholicDrink(item.name);
+        if (detected) {
+          alc = detected.alcoholGrams;
+          drk = detected.drinks;
+        }
+      }
 
       sumKcal += k;
       sumPro += p;
@@ -490,6 +515,12 @@ Formato JSON richiesto:
         hasSatFat = false;
       }
 
+      if (alc != null && alc > 0) {
+        sumAlcohol += alc;
+        sumDrinks += (drk || 1);
+        hasAlcohol = true;
+      }
+
       return {
         name: item.name || 'Alimento',
         grams: Number(item.grams) || 0,
@@ -497,9 +528,21 @@ Formato JSON richiesto:
         protein: p,
         carbs: c,
         fats: f,
-        saturatedFat: sf
+        saturatedFat: sf,
+        alcohol: alc,
+        alcoholDrinks: drk
       };
     });
+
+    // Check whole prompt fallback if no items were flagged
+    if (!hasAlcohol) {
+      const wholeDetected = detectAlcoholicDrink(cleanedText);
+      if (wholeDetected) {
+        sumAlcohol = wholeDetected.alcoholGrams;
+        sumDrinks = wholeDetected.drinks;
+        hasAlcohol = true;
+      }
+    }
 
     const totalFats = parseFloat(sumFats.toFixed(1));
     const totalSat = hasSatFat ? parseFloat(sumSatFat.toFixed(1)) : null;
@@ -510,6 +553,8 @@ Formato JSON richiesto:
       carbs: parseFloat(sumCarbs.toFixed(1)),
       fats: totalFats,
       saturatedFat: (totalSat !== null && totalSat <= totalFats) ? totalSat : null,
+      alcohol: hasAlcohol ? parseFloat(sumAlcohol.toFixed(1)) : null,
+      alcoholDrinks: hasAlcohol ? parseFloat(sumDrinks.toFixed(1)) : null,
       items: cleanedItems
     };
 
@@ -876,6 +921,7 @@ Mantieni il report compatto ed efficace (circa 220-280 parole). Non aggiungere n
 }
 
 // ── Barcode lookup via Open Food Facts (gratuito, no API key) ─
+// ── Barcode lookup via Open Food Facts (gratuito, no API key) ─
 async function lookupBarcode(code) {
   try {
     const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name,nutriments,brands,quantity`);
@@ -893,27 +939,43 @@ async function lookupBarcode(code) {
     const carb100 = n.carbohydrates_100g || n.carbohydrates || 0;
     const fat100 = n.fat_100g || n.fat || 0;
     const satFat100 = n['saturated-fat_100g'] != null ? n['saturated-fat_100g'] : (n['saturated-fat'] != null ? n['saturated-fat'] : null);
+    const alc100 = n.alcohol_100g != null ? n.alcohol_100g : (n.alcohol != null ? n.alcohol : null);
 
     // Try to extract serving size from quantity field
     let servingG = 100;
     const qtyMatch = qty.match(/(\d+)\s*(?:g|ml)/i);
-    if (qtyMatch) servingG = parseInt(qtyMatch[1]);
+    if (qtyMatch) servingG = parseInt(qtyMatch[1]) || 100;
+
+    const per100g = {
+      kcal: Math.round(kcal100),
+      protein: parseFloat(Number(pro100 || 0).toFixed(1)),
+      carbs: parseFloat(Number(carb100 || 0).toFixed(1)),
+      fats: parseFloat(Number(fat100 || 0).toFixed(1)),
+      saturatedFat: satFat100 != null ? parseFloat(Number(satFat100).toFixed(1)) : null,
+      alcohol: alc100 != null ? parseFloat(Number(alc100).toFixed(1)) : null,
+      alcoholDrinks: alc100 != null ? parseFloat(((Number(alc100) * (servingG / 100)) / 10).toFixed(1)) : null
+    };
 
     const factor = servingG / 100;
     const satFatVal = satFat100 != null ? parseFloat((satFat100 * factor).toFixed(1)) : null;
+    const alcVal = alc100 != null ? parseFloat((alc100 * factor).toFixed(1)) : null;
 
     return {
       success: true,
       name: name + (qty ? ` (${qty})` : ''),
+      grams: servingG,
+      _estGrams: servingG,
       kcal: Math.round(kcal100 * factor),
       protein: parseFloat((pro100 * factor).toFixed(1)),
       carbs: parseFloat((carb100 * factor).toFixed(1)),
       fats: parseFloat((fat100 * factor).toFixed(1)),
       saturatedFat: satFatVal,
+      alcohol: alcVal,
+      alcoholDrinks: alcVal != null ? parseFloat((alcVal / 10).toFixed(1)) : null,
       ingredients: `${name} ${qty}`,
       _source: 'barcode',
       _barcode: code,
-      _per100g: { kcal: Math.round(kcal100), protein: parseFloat(pro100.toFixed(1)), carbs: parseFloat(carb100.toFixed(1)), fats: parseFloat(fat100.toFixed(1)), saturatedFat: satFat100 != null ? parseFloat(Number(satFat100).toFixed(1)) : null }
+      _per100g: per100g
     };
   } catch(e) {
     console.warn('lookupBarcode error:', e.message);
@@ -921,77 +983,57 @@ async function lookupBarcode(code) {
   }
 }
 
-// ── Analisi immagine cibo (ibrida: cibo + barcode auto-detect) ──
+// ── Analisi immagine cibo con supporto visione 3.5 Flash e tracciamento alcol ──
 export async function analyzeFoodImageAI(base64Image, mimeType = 'image/jpeg') {
   const key = await getKey();
   if (!key) return { success: false, error: 'API key mancante.' };
 
-  // Step 1: Ask AI to classify the image (food vs barcode)
-  const classifyPrompt = `Osserva questa immagine e rispondi SOLO con un JSON valido.
+  const promptText = `Analizza questa immagine. Può trattarsi di:
+- CIBO/PIATTO (preparato o al ristorante)
+- ETICHETTA NUTRIZIONALE (con tabella valori nutrizionali)
+- PRODOTTO CONFEZIONATO
+- BEVANDA ALCOLICA O ANALCOLICA
+- CODICE A BARRE (barcode)
 
-Se vedi un CODICE A BARRE o QR CODE leggibile su un prodotto alimentare, rispondi:
-{"type":"barcode","code":"NUMERO_BARCODE"}
+REGOLE VINCOLANTI PER L'ANALISI:
+1. BARCODE: Se vedi un codice a barre leggibile, scrivi in "barcode": "CODICE_NUMERICO".
+2. ETICHETTA NUTRIZIONALE: Se vedi una tabella o etichetta nutrizionale, LEGGI i valori reali per 100g/100ml e trascrivili in "per100g". Se è visibile la porzione consigliata o peso netto, indicalo in "grams".
+3. PIATTO/CIBO: stima la porzione visibile in grammi ("grams"). Per piatti cucinati usa valori da cotto. Per prodotti confezionati o crudi usa valori da crudo.
+4. BEVANDE ALCOLICHE (vino, birra, spritz, cocktail, amaro, liquore, ecc.):
+   - Stima il volume in ml ("grams");
+   - Stima i grammi di etanolo puro in "alcohol" e le unità/drink in "alcoholDrinks" (1 calice vino = 1 drink; 1 spritz = 1 drink; 1 birra 400ml = 1.3 drink);
+   - Includi 7 kcal per grammo di alcol nel totale kcal. I carbo/zuccheri in "carbs", i grassi in "fats", le pro in "protein".
+5. FORMULA KCAL: kcal = (protein * 4) + (carbs * 4) + (fats * 9) + ((alcohol || 0) * 7).
+6. GRASSI SATURI: esprimi "saturatedFat" per 100g e nei totali se stimabile (altrimenti null).
+7. ${GENERAL_NUTRITIONAL_GUIDELINES}
+8. Rispondi esclusivamente in formato JSON valido, senza markdown.
 
-Se vedi CIBO/PIATTO/ALIMENTO (senza barcode visibile), rispondi:
-{"type":"food"}
-
-Se l'immagine è ambigua, poco chiara, o non contiene né cibo né barcode, rispondi:
-{"type":"unknown"}
-
-Rispondi SOLO con il JSON, niente altro.`;
-
-  const classifyParts = [
-    { text: classifyPrompt },
-    { inlineData: { mimeType, data: base64Image } }
-  ];
-
-  const classRes = await callGemini(key, null, { temperature: 0.05, maxOutputTokens: 128, parts: classifyParts });
-  
-  let imageType = 'food';
-  let barcodeNum = null;
-  
-  if (classRes.success) {
-    try {
-      const cr = classRes.text;
-      const cs1 = cr.indexOf('{');
-      const cs2 = cr.lastIndexOf('}');
-      if (cs1 !== -1 && cs2 !== -1) {
-        const classification = JSON.parse(cr.slice(cs1, cs2 + 1));
-        imageType = classification.type || 'food';
-        barcodeNum = classification.code || null;
-      }
-    } catch(e) { /* fallback: treat as food */ }
-  }
-
-  // Step 2a: If barcode detected, lookup on Open Food Facts
-  if (imageType === 'barcode' && barcodeNum) {
-    const barcodeResult = await lookupBarcode(barcodeNum);
-    if (barcodeResult && barcodeResult.kcal > 0) {
-      return barcodeResult;
-    }
-    // Barcode not found in database — fall through to food analysis
-  }
-
-  // Step 2b: Standard food analysis
-  const promptText = `Analizza l'immagine di questo cibo e stima accuratamente i macronutrienti (Proteine, Carboidrati, Grassi, Grassi Saturi) e le Calorie (kcal).
-Identifica ogni ingrediente visibile, stima le quantità in grammi e calcola i macro per ciascuno.
-
-Regole fondamentali e VINCOLANTI:
-1. kcal = (Proteine * 4) + (Carboidrati * 4) + (Grassi * 9). PRIMA calcola i macro di ogni ingrediente, POI somma, POI calcola le kcal dalla formula.
-2. Stima le porzioni in modo realistico basandoti sulle dimensioni visive del piatto/contenitore.
-3. IMPORTANTE: il cibo visibile in foto è COTTO/preparato. Usa i valori nutrizionali per il prodotto COTTO (pasta cotta, riso cotto, pollo cotto, ecc.), NON i valori a crudo.
-4. ${GENERAL_NUTRITIONAL_GUIDELINES}
-5. SANITY CHECK: ingrediente < 200g NON può avere > 900 kcal (eccezione: olio/burro/frutta secca). Proteine/100g mai > 35g.
-6. Se vedi un'ETICHETTA NUTRIZIONALE leggibile, LEGGI i valori dall'etichetta e usali.
-7. GRASSI SATURI: per ogni ingrediente (e nei totali), stima anche i grassi saturi (saturatedFat in grammi). Se il dato non è noto, usa null.
-8. Rispondi esclusivamente con un oggetto JSON valido, no markdown.
-
-Struttura JSON richiesta:
+Formato JSON richiesto:
 {
-  "name": "Nome sintetico del piatto",
-  "kcal": 0, "protein": 0, "carbs": 0, "fats": 0, "saturatedFat": null,
-  "ingredients": "150g riso cotto, 100g salmone grigliato, 1 cucchiaio olio EVO",
-  "items": [{ "name": "Riso cotto (150g)", "grams": 150, "kcal": 195, "protein": 4, "carbs": 43, "fats": 0.5, "saturatedFat": null }]
+  "barcode": null,
+  "type": "dish",
+  "name": "Nome alimento o prodotto",
+  "grams": 150,
+  "kcal": 250,
+  "protein": 15,
+  "carbs": 30,
+  "fats": 8,
+  "saturatedFat": 2.5,
+  "alcohol": null,
+  "alcoholDrinks": null,
+  "per100g": {
+    "kcal": 167,
+    "protein": 10,
+    "carbs": 20,
+    "fats": 5.3,
+    "saturatedFat": 1.7,
+    "alcohol": null,
+    "alcoholDrinks": null
+  },
+  "ingredients": "150g riso cotto, 100g pollo grigliato",
+  "items": [
+    { "name": "Riso cotto (150g)", "grams": 150, "kcal": 195, "protein": 4, "carbs": 43, "fats": 0.5, "saturatedFat": null, "alcohol": null }
+  ]
 }`;
 
   const parts = [
@@ -999,7 +1041,14 @@ Struttura JSON richiesta:
     { inlineData: { mimeType, data: base64Image } }
   ];
 
-  const res = await callGemini(key, null, { temperature: 0.1, maxOutputTokens: 1536, parts });
+  // Try high-accuracy gemini-3.5-flash vision model first, then fallback to lite models
+  const res = await callGemini(key, null, {
+    temperature: 0.1,
+    maxOutputTokens: 1536,
+    parts,
+    models: ['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite']
+  });
+
   if (!res.success) return { success: false, error: 'Errore analisi immagine food scanner' };
 
   const raw = res.text;
@@ -1009,21 +1058,60 @@ Struttura JSON richiesta:
 
   try {
     const parsed = JSON.parse(raw.slice(s1, s2 + 1));
+
+    // If barcode was detected in image, try database lookup first
+    if (parsed.barcode && typeof parsed.barcode === 'string' && parsed.barcode.trim().length >= 8) {
+      const barcodeRes = await lookupBarcode(parsed.barcode.trim());
+      if (barcodeRes && barcodeRes.kcal > 0) {
+        return barcodeRes;
+      }
+    }
+
+    // Auto-detect alcohol if AI missed it in name
+    const detectedAlc = detectAlcoholicDrink(parsed.name || '');
+    if (detectedAlc && (parsed.alcohol == null || parsed.alcohol === 0)) {
+      parsed.alcohol = detectedAlc.alcoholGrams;
+      parsed.alcoholDrinks = detectedAlc.drinks;
+    }
+
     const validated = validateAndFixMacros(parsed);
+    const estGrams = Math.max(1, Number(parsed.grams) || 100);
+
+    // Build or normalize per100g object
+    let per100 = parsed.per100g;
+    if (!per100 || !per100.kcal) {
+      per100 = per100gFrom(validated, estGrams);
+    } else {
+      per100 = {
+        kcal: Math.round(Number(per100.kcal) || 0),
+        protein: parseFloat((Number(per100.protein) || 0).toFixed(1)),
+        carbs: parseFloat((Number(per100.carbs) || 0).toFixed(1)),
+        fats: parseFloat((Number(per100.fats) || 0).toFixed(1)),
+        saturatedFat: per100.saturatedFat != null ? parseFloat((Number(per100.saturatedFat)).toFixed(1)) : null,
+        alcohol: per100.alcohol != null ? parseFloat((Number(per100.alcohol)).toFixed(1)) : null,
+        alcoholDrinks: per100.alcoholDrinks != null ? parseFloat((Number(per100.alcoholDrinks)).toFixed(1)) : null
+      };
+    }
 
     return {
       success: true,
       name: parsed.name || 'Pasto Scansionato',
+      grams: estGrams,
+      _estGrams: estGrams,
       kcal: validated.kcal,
       protein: validated.protein,
       carbs: validated.carbs,
       fats: validated.fats,
       saturatedFat: validated.saturatedFat ?? null,
+      alcohol: validated.alcohol ?? null,
+      alcoholDrinks: validated.alcoholDrinks ?? null,
       ingredients: parsed.ingredients || (validated.items || []).map(i => i.name).join(', '),
       items: validated.items,
-      _source: 'vision'
+      _per100g: per100,
+      _source: res.model?.includes('3.5-flash') ? 'vision_high' : 'vision'
     };
   } catch(e) {
+    console.error('analyzeFoodImageAI parse error:', e);
     return { success: false, error: 'Errore parsing risposta AI.' };
   }
 }

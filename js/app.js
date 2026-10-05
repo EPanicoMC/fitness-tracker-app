@@ -6,22 +6,69 @@ import {
   setDoc,
   getDoc,
   getDocs,
+  getDocFromCache,
+  getDocsFromCache,
   collection,
   deleteDoc
 } from './firebase-config.js';
 import { runMigrations } from './migration.js';
+
+// ── Boot timing ────────────────────────────────────────────────────
+// performance.now() = ms dall'inizio della navigazione (include SW + download JS).
+const _bootMarks = {};
+let _slowBootReported = false;
+const SLOW_BOOT_THRESHOLD_MS = 8000;
+
+export function bootMark(label) {
+  const ms = Math.round(performance.now());
+  if (_bootMarks[label] == null) {
+    _bootMarks[label] = ms;
+    console.log(`[boot] ${label}: ${ms}ms`);
+  }
+  return _bootMarks[label];
+}
+
+/** Segna un passo di boot e, se supera la soglia, registra un 'slow_boot' (max 1 per pagina). */
+export function reportBootStep(label) {
+  const ms = bootMark(label);
+  if (ms > SLOW_BOOT_THRESHOLD_MS && !_slowBootReported) {
+    _slowBootReported = true;
+    logErrorToFirebase('slow_boot', {
+      message: `Avvio lento: "${label}" a ${ms}ms`,
+      marks: { ..._bootMarks },
+      page: window.location.pathname,
+      online: navigator.onLine,
+      connection: navigator.connection?.effectiveType || null
+    });
+  }
+  return ms;
+}
+
+const SESSION_INIT_KEY = 'kova_session_init_';
 
 export function requireAuth() {
   return new Promise((resolve) => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       unsubscribe();
       if (user) {
-        if (user.email) {
-          const emailLower = user.email.toLowerCase();
-          setDoc(doc(db, 'users', emailLower), { email: emailLower }, { merge: true })
-            .catch(e => console.warn('Poteva non essere possibile salvare il doc utente:', e));
+        bootMark('auth');
+        // Doc utente + migrazioni: una sola volta per sessione (non a ogni cambio pagina).
+        // requireAuth può essere chiamata più volte nella stessa pagina (es. diet.js + daily_state.js).
+        const sessKey = SESSION_INIT_KEY + (user.email || user.uid || '').toLowerCase();
+        let firstInSession = true;
+        try {
+          firstInSession = sessionStorage.getItem(sessKey) !== '1';
+          if (firstInSession) sessionStorage.setItem(sessKey, '1');
+        } catch (e) { /* sessionStorage non disponibile: comportamento come prima */ }
+
+        if (firstInSession) {
+          if (user.email) {
+            const emailLower = user.email.toLowerCase();
+            setDoc(doc(db, 'users', emailLower), { email: emailLower }, { merge: true })
+              .catch(e => console.warn('Poteva non essere possibile salvare il doc utente:', e));
+          }
+          runMigrations().catch(e => console.warn('Migration error:', e));
         }
-        runMigrations().catch(e => console.warn('Migration error:', e));
         resolve(user);
       } else {
         const search = window.location.search;
@@ -519,20 +566,154 @@ export async function cleanOldLogs(db, userId, monthsToKeep=12) {
 }
 
 
-export async function loadSmart(refs, callback) {
-  // The Firestore SDK with persistentLocalCache handles caching transparently.
-  // We just do a direct getDocs/getDoc — the SDK serves from cache when offline
-  // and updates from the network when online. No manual cache-first needed.
+function _isDocRef(ref) {
+  return ref.type === 'document' || (ref.path && ref.path.split('/').length % 2 === 0);
+}
+
+// Snapshot "documento inesistente" usato quando un doc non è ancora nella cache locale
+// (es. daily_log di oggi alla prima apertura del giorno). Espone la stessa API usata dai chiamanti.
+function _missingDocSnapshot(ref) {
+  return {
+    id: ref.id,
+    ref,
+    exists: () => false,
+    data: () => undefined,
+    get: () => undefined,
+    metadata: { fromCache: true, hasPendingWrites: false }
+  };
+}
+
+async function _readAllFromCache(refs) {
+  const snaps = await Promise.all(refs.map(async ref => {
+    if (_isDocRef(ref)) {
+      try {
+        return await getDocFromCache(ref);
+      } catch (e) {
+        // Doc non presente in cache → trattalo come inesistente (verrà corretto dal refresh server)
+        return _missingDocSnapshot(ref);
+      }
+    }
+    return getDocsFromCache(ref);
+  }));
+  // Cache utilizzabile solo se contiene almeno qualcosa: se è tutto vuoto (es. persistenza
+  // ricaduta su cache in memoria) meglio aspettare il server come prima.
+  const hasAnyData = snaps.some(s => (typeof s.exists === 'function' ? s.exists() : !s.empty));
+  return hasAnyData ? snaps : null;
+}
+
+/**
+ * Carica documenti/collection da Firestore.
+ *
+ * Senza opzioni: comportamento identico a prima (getDoc/getDocs, server-first).
+ *
+ * Con opzioni (usato dalla Home):
+ *  - timeoutMs: se il server non risponde entro questo tempo, legge dalla cache locale
+ *               di Firestore e chiama callback(snaps, true)  ← dati "provvisori"
+ *  - refreshOnServer: quando poi arrivano i dati dal server, richiama callback(snaps, false)
+ *  - onServerError: chiamata se, dopo aver usato la cache, la lettura server fallisce
+ */
+export async function loadSmart(refs, callback, opts = {}) {
+  const { timeoutMs = 0, refreshOnServer = false, onServerError = null } = opts;
+  const fetchServer = () => Promise.all(refs.map(ref => _isDocRef(ref) ? getDoc(ref) : getDocs(ref)));
+
+  // ── Comportamento classico ──
+  if (!timeoutMs) {
+    try {
+      const snaps = await fetchServer();
+      callback(snaps, false);
+    } catch (err) {
+      console.error('loadSmart: fetch failed:', err.code, err.message);
+      maybeRecoverFromBrokenFirestore(err?.message);
+      // Re-throw so callers can handle (e.g. show error toast)
+      throw err;
+    }
+    return;
+  }
+
+  // ── Server con timeout + fallback cache ──
+  const serverPromise = fetchServer();
+  const TIMEOUT = Symbol('timeout');
+  let timer;
+  let first;
   try {
-    const snaps = await Promise.all(refs.map(ref => {
-      const isDoc = ref.type === 'document' || (ref.path && ref.path.split('/').length % 2 === 0);
-      return isDoc ? getDoc(ref) : getDocs(ref);
-    }));
-    callback(snaps, false);
+    first = await Promise.race([
+      serverPromise,
+      new Promise(resolve => { timer = setTimeout(() => resolve(TIMEOUT), timeoutMs); })
+    ]);
   } catch (err) {
+    clearTimeout(timer);
     console.error('loadSmart: fetch failed:', err.code, err.message);
-    // Re-throw so callers can handle (e.g. show error toast)
+    maybeRecoverFromBrokenFirestore(err?.message);
     throw err;
+  }
+  clearTimeout(timer);
+
+  if (first !== TIMEOUT) {
+    callback(first, false);
+    return;
+  }
+
+  let cacheSnaps = null;
+  try {
+    cacheSnaps = await _readAllFromCache(refs);
+  } catch (e) {
+    console.warn('loadSmart: cache non disponibile, attendo il server:', e?.message);
+  }
+
+  if (!cacheSnaps) {
+    // Nessuna cache utilizzabile (es. cache in memoria): stesso comportamento di prima
+    try {
+      const snaps = await serverPromise;
+      callback(snaps, false);
+    } catch (err) {
+      console.error('loadSmart: fetch failed:', err.code, err.message);
+      maybeRecoverFromBrokenFirestore(err?.message);
+      throw err;
+    }
+    return;
+  }
+
+  console.warn(`[loadSmart] server lento (>${timeoutMs}ms): uso la cache locale`);
+  callback(cacheSnaps, true);
+
+  serverPromise
+    .then(snaps => {
+      if (refreshOnServer) {
+        console.log('[loadSmart] dati server arrivati: aggiorno');
+        callback(snaps, false);
+      }
+    })
+    .catch(err => {
+      console.warn('[loadSmart] lettura server fallita dopo fallback cache:', err?.code, err?.message);
+      maybeRecoverFromBrokenFirestore(err?.message);
+      if (onServerError) onServerError(err);
+    });
+}
+
+// ── Recupero client Firestore "rotto" (tipico iOS dopo lungo background) ──
+// iOS può chiudere la connessione IndexedDB mentre la PWA è sospesa: il client Firestore
+// resta inutilizzabile finché la pagina non viene ricaricata. Ricarichiamo UNA volta,
+// solo se l'errore avviene a ridosso dell'avvio o della ripresa dal background.
+const FIRESTORE_FATAL_RE = /Indexed Database server lost|INTERNAL ASSERTION FAILED|database connection is closing/i;
+const RECOVERY_WINDOW_MS = 20000;
+const RECOVERY_COOLDOWN_MS = 60000;
+let _lastResumeAt = 0; // 0 = inizio navigazione (performance.now)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') _lastResumeAt = performance.now();
+});
+
+export function maybeRecoverFromBrokenFirestore(message) {
+  try {
+    if (!message || !FIRESTORE_FATAL_RE.test(String(message))) return false;
+    if (performance.now() - _lastResumeAt > RECOVERY_WINDOW_MS) return false;
+    const last = Number(sessionStorage.getItem('kova_fs_recover_at')) || 0;
+    if (Date.now() - last < RECOVERY_COOLDOWN_MS) return false;
+    sessionStorage.setItem('kova_fs_recover_at', String(Date.now()));
+    console.warn('[recovery] Client Firestore in stato non valido: ricarico la pagina');
+    setTimeout(() => window.location.reload(), 300);
+    return true;
+  } catch (e) {
+    return false;
   }
 }
 
@@ -561,6 +742,7 @@ async function logErrorToFirebase(type, errorData) {
 }
 
 window.addEventListener('error', event => {
+  maybeRecoverFromBrokenFirestore(event.message || event.error?.message);
   logErrorToFirebase('window.onerror', {
     message: event.message,
     source: event.filename,
@@ -571,6 +753,7 @@ window.addEventListener('error', event => {
 });
 
 window.addEventListener('unhandledrejection', event => {
+  maybeRecoverFromBrokenFirestore(event.reason?.message || String(event.reason));
   logErrorToFirebase('window.onunhandledrejection', {
     reason: event.reason?.message || String(event.reason),
     stack: event.reason?.stack || null

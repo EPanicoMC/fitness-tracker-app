@@ -3,7 +3,7 @@ import {
   db, getUserId, doc, getDoc, setDoc, getDocs, addDoc, deleteDoc, collection, query, orderBy, limit, where
 } from './firebase-config.js';
 import {
-  getTodayString, getYesterdayString, getDayOfWeek, formatDateIT, formatDateShort, addDays, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER, cleanOldLogs, calcFitScore, calcSmartScore, calcRecoveryPlan
+  getTodayString, getYesterdayString, getDayOfWeek, formatDateIT, formatDateShort, addDays, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER, cleanOldLogs, calcFitScore, calcSmartScore, calcRecoveryPlan, bootMark, reportBootStep
 } from './app.js';
 import { calcMacrosFromText, analyzeFoodImageAI, generateSmartAdviceAI, generateRecoveryAdviceAI, generateAdvisor360AI, saveAICorrection } from './gemini.js';
 import { PHASE_CONFIG, getCurrentPhaseWeek, getCurrentBlock, calcE1RM } from './phase-config.js';
@@ -155,7 +155,8 @@ async function init() {
     return;
   }
 
-  await checkDayRollover();
+  reportBootStep('home_init');
+  checkDayRollover().catch(e => console.warn('Errore auto-save yesterday (bg):', e));
   
   // Load weekly logs in the background concurrently, and update SmartScore and Advisor once loaded
   loadWeeklyLogsForScore().then(() => {
@@ -177,7 +178,8 @@ async function init() {
     window.isServerLoaded = false;
     window.isMockData = false;
 
-    await loadSmart(refs, (snaps) => {
+    await loadSmart(refs, (snaps, isCache) => {
+      reportBootStep(isCache ? 'home_data_cache' : 'home_data_server');
       const [logSnap, progSnap, dietSnap, settSnap, checksSnap] = snaps;
       logData = logSnap.exists() ? logSnap.data() : {};
       activeProgram = progSnap.docs.find(d => d.data().active)?.data() || null;
@@ -263,7 +265,7 @@ async function init() {
           });
         }
       }
-    });
+    }, { timeoutMs: 3000, refreshOnServer: true });
 
     // loadSmart resolved — mark loaded and build advisor
     window.isServerLoaded = true;
@@ -607,6 +609,21 @@ function buildNutrition() {
     }
   }
 
+  const alcEl = document.getElementById('mc-alcohol');
+  if (alcEl) {
+    const chip = alcEl.closest('.mchip');
+    if (tots.alcohol != null && tots.alcohol > 0) {
+      alcEl.textContent = `${tots.alcohol}g`;
+      if (chip) {
+        chip.style.display = 'flex';
+        const lbl = chip.querySelector('.mchip-l');
+        if (lbl) lbl.innerHTML = `🍷 Alcol <span style="color:#f472b6;font-size:10px">(${tots.alcoholDrinks||1} drink)</span>`;
+      }
+    } else if (chip) {
+      chip.style.display = 'none';
+    }
+  }
+
   const rem = tgt.kcal - tots.kcal;
   const deltaEl = document.getElementById('kcal-delta');
   if(deltaEl) { if (rem >= 0) {
@@ -639,6 +656,7 @@ function calcTotals() {
   const planMeals = activeDiet?.[dayKey]?.meals || [];
   let kcal = 0, protein = 0, carbs = 0, fats = 0;
   let satFatSum = 0, satFatKnown = 0, satFatTotalCount = 0;
+  let alcoholSum = 0, alcoholDrinksSum = 0;
 
   planMeals.forEach((meal, i) => {
     if (!logData.meals_state?.[i]?.eaten) return;
@@ -648,10 +666,16 @@ function calcTotals() {
     carbs   += ov?.carbs   ?? meal.carbs   ?? 0;
     fats    += ov?.fats    ?? meal.fats    ?? 0;
     const sf = ov?.saturatedFat ?? meal.saturatedFat;
+    const alc = ov?.alcohol ?? meal.alcohol;
+    const drk = ov?.alcoholDrinks ?? meal.alcoholDrinks;
     satFatTotalCount++;
     if (sf != null) {
       satFatSum += Number(sf) || 0;
       satFatKnown++;
+    }
+    if (alc != null && alc > 0) {
+      alcoholSum += Number(alc) || 0;
+      alcoholDrinksSum += Number(drk) || (alc / 10);
     }
   });
 
@@ -666,6 +690,10 @@ function calcTotals() {
       satFatSum += Number(m.saturatedFat) || 0;
       satFatKnown++;
     }
+    if (m.alcohol != null && m.alcohol > 0) {
+      alcoholSum += Number(m.alcohol) || 0;
+      alcoholDrinksSum += Number(m.alcoholDrinks) || (m.alcohol / 10);
+    }
   });
 
   return {
@@ -676,7 +704,9 @@ function calcTotals() {
     saturatedFat: satFatKnown > 0 ? parseFloat(satFatSum.toFixed(1)) : null,
     saturatedFatComplete: satFatTotalCount > 0 && satFatKnown === satFatTotalCount,
     saturatedFatKnownCount: satFatKnown,
-    saturatedFatTotalCount: satFatTotalCount
+    saturatedFatTotalCount: satFatTotalCount,
+    alcohol: alcoholSum > 0 ? parseFloat(alcoholSum.toFixed(1)) : null,
+    alcoholDrinks: alcoholDrinksSum > 0 ? parseFloat(alcoholDrinksSum.toFixed(1)) : null
   };
 }
 
@@ -688,11 +718,13 @@ function updateNutritionTotals() {
   const recapCarb = document.getElementById('recap-carb');
   const recapFat = document.getElementById('recap-fat');
   const recapSatFat = document.getElementById('recap-sat-fat');
+  const recapAlcohol = document.getElementById('recap-alcohol');
   if (recapKcal) recapKcal.textContent = Math.round(tots.kcal);
   if (recapPro) recapPro.textContent = Math.round(tots.protein) + 'g';
   if (recapCarb) recapCarb.textContent = Math.round(tots.carbs) + 'g';
   if (recapFat) recapFat.textContent = Math.round(tots.fats) + 'g';
   if (recapSatFat) recapSatFat.textContent = tots.saturatedFat != null ? Math.round(tots.saturatedFat) + 'g' : '—';
+  if (recapAlcohol) recapAlcohol.textContent = tots.alcohol != null ? `${tots.alcohol}g (${tots.alcoholDrinks||1}d)` : '—';
 }
 
 // ── Striscia oggi ──────────────────────────────────────────
@@ -2100,6 +2132,7 @@ window.recalcMeal = async function(mi) {
   if (box) {
     box.style.display = 'block';
     const satStr = (r.saturatedFat !== null && r.saturatedFat !== undefined) ? r.saturatedFat + 'g' : '-';
+    const alcBadge = (r.alcohol != null && r.alcohol > 0) ? `<div style="font-size:11px;color:#f472b6;margin-top:4px">🍷 Alcol: ${r.alcohol.toFixed(1)}g (${r.alcoholDrinks||1} drink)</div>` : '';
     box.innerHTML = `
       <div class="fmp" style="grid-template-columns:repeat(5,1fr)">
         <div class="fmp-item"><div class="fmp-v" style="color:var(--green)">${r.kcal}</div><div class="fmp-l">Kcal</div></div>
@@ -2108,7 +2141,8 @@ window.recalcMeal = async function(mi) {
         <div class="fmp-item"><div class="fmp-v" style="color:var(--purple)">${r.fats}g</div><div class="fmp-l">Grassi</div></div>
         <div class="fmp-item"><div class="fmp-v" style="color:var(--t2)">${satStr}</div><div class="fmp-l">Saturi</div></div>
       </div>
-      <button class="btn btn-v btn-sm" onclick="window.applyMealAI(${mi},${r.kcal},${r.protein},${r.carbs},${r.fats},${r.saturatedFat !== null && r.saturatedFat !== undefined ? r.saturatedFat : 'null'})" style="margin-top:8px">✅ Applica</button>`;
+      ${alcBadge}
+      <button class="btn btn-v btn-sm" onclick="window.applyMealAI(${mi},${r.kcal},${r.protein},${r.carbs},${r.fats},${r.saturatedFat !== null && r.saturatedFat !== undefined ? r.saturatedFat : 'null'},${r.alcohol != null ? r.alcohol : 'null'},${r.alcoholDrinks != null ? r.alcoholDrinks : 'null'})" style="margin-top:8px">✅ Applica</button>`;
     const tgt = mealStates[mi].kcal;
     const diff = r.kcal - tgt;
     const deltaEl = document.getElementById(`meal-delta-${mi}`);
@@ -2119,13 +2153,15 @@ window.recalcMeal = async function(mi) {
   }
 };
 
-function patchMealRow(mi, kcal, protein, carbs, fats, saturatedFat) {
+function patchMealRow(mi, kcal, protein, carbs, fats, saturatedFat, alcohol = null, alcoholDrinks = null) {
   if (mealStates[mi]) {
     mealStates[mi].kcal         = kcal;
     mealStates[mi].protein      = protein;
     mealStates[mi].carbs        = carbs;
     mealStates[mi].fats         = fats;
     if (saturatedFat !== undefined) mealStates[mi].saturatedFat = saturatedFat;
+    if (alcohol !== undefined) mealStates[mi].alcohol = alcohol;
+    if (alcoholDrinks !== undefined) mealStates[mi].alcoholDrinks = alcoholDrinks;
     mealStates[mi].override_kcal = kcal;
     mealStates[mi].eaten        = true;
   }
@@ -2138,29 +2174,35 @@ function patchMealRow(mi, kcal, protein, carbs, fats, saturatedFat) {
     const chk = mealEl.querySelector('.meal-chk');
     if (chk) chk.textContent = '✓';
     const satStr = (saturatedFat !== null && saturatedFat !== undefined) ? ` <span style="font-size:10px;opacity:0.85;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:4px;white-space:nowrap">(d.c. sat ${typeof saturatedFat === 'number' ? saturatedFat.toFixed(1) : saturatedFat}g)</span>` : '';
+    const alcStr = (alcohol != null && alcohol > 0) ? ` <span style="font-size:10px;color:#f472b6;background:rgba(244,114,182,0.1);padding:1px 4px;border-radius:4px;white-space:nowrap">🍷 ${alcohol.toFixed(1)}g (${alcoholDrinks||1}d)</span>` : '';
     const meta = mealEl.querySelector('.meal-meta');
-    if (meta) meta.innerHTML = `${kcal} kcal · P:${protein}g C:${carbs}g F:${fats}g${satStr}`;
+    if (meta) meta.innerHTML = `${kcal} kcal · P:${protein}g C:${carbs}g F:${fats}g${satStr}${alcStr}`;
     const kcalEl = mealEl.querySelector('.meal-kcal');
     if (kcalEl) kcalEl.textContent = kcal;
   }
 }
 
-window.applyMealAI = function(mi, kcal, protein, carbs, fats, saturatedFat) {
+window.applyMealAI = function(mi, kcal, protein, carbs, fats, saturatedFat, alcohol = null, alcoholDrinks = null) {
   if (!logData.meals_overrides) logData.meals_overrides = {};
   const txt = document.getElementById(`meal-txt-${mi}`)?.value || '';
   const satFatVal = (saturatedFat !== undefined && saturatedFat !== null && !isNaN(parseFloat(saturatedFat))) ? parseFloat(saturatedFat) : null;
+  const alcVal = (alcohol !== undefined && alcohol !== null && !isNaN(parseFloat(alcohol))) ? parseFloat(alcohol) : null;
+  const drkVal = (alcoholDrinks !== undefined && alcoholDrinks !== null && !isNaN(parseFloat(alcoholDrinks))) ? parseFloat(alcoholDrinks) : null;
+  
   logData.meals_overrides[mi] = {
-    kcal, protein, carbs, fats, saturatedFat: satFatVal, items_text: txt,
-    ai_estimate: { kcal, protein, carbs, fats, saturatedFat: satFatVal }
+    kcal, protein, carbs, fats, saturatedFat: satFatVal, alcohol: alcVal, alcoholDrinks: drkVal, items_text: txt,
+    ai_estimate: { kcal, protein, carbs, fats, saturatedFat: satFatVal, alcohol: alcVal, alcoholDrinks: drkVal }
   };
   
   if (window._mealDrafts) delete window._mealDrafts[mi];
   const staleEl = document.getElementById(`meal-stale-${mi}`);
   if (staleEl) staleEl.style.display = 'none';
 
-  patchMealRow(mi, kcal, protein, carbs, fats, satFatVal);
+  patchMealRow(mi, kcal, protein, carbs, fats, satFatVal, alcVal, drkVal);
   saveToLocal();
   buildNutrition();
+  showToast('✅ Pasto ricalcolato con AI!');
+};
   const box = document.getElementById(`meal-ai-${mi}`);
   if (box) box.style.display = 'none';
   showToast('✅ Macro applicati! Pasto segnato ✓');
@@ -2909,6 +2951,13 @@ window.saveExtraMeal = async function(editIndex) {
   const protein = parseFloat(document.getElementById('am-protein')?.value) || 0;
   const carbs   = parseFloat(document.getElementById('am-carbs')?.value)   || 0;
   const fats    = parseFloat(document.getElementById('am-fats')?.value)    || 0;
+  const satFatVal = document.getElementById('am-sat-fat')?.value;
+  const saturatedFat = satFatVal !== '' && satFatVal !== undefined && !isNaN(parseFloat(satFatVal)) ? Math.min(fats, Math.max(0, parseFloat(satFatVal))) : null;
+  const alcVal = document.getElementById('am-alcohol')?.value;
+  const alcohol = alcVal !== '' && alcVal !== undefined && !isNaN(parseFloat(alcVal)) ? Math.max(0, parseFloat(alcVal)) : null;
+  const drkVal = document.getElementById('am-alcohol-drinks')?.value;
+  const alcoholDrinks = drkVal !== '' && drkVal !== undefined && !isNaN(parseFloat(drkVal)) ? Math.max(0, parseFloat(drkVal)) : (alcohol != null ? parseFloat((alcohol / 10).toFixed(1)) : null);
+
   const type    = 'extra';
   const ingredients = document.getElementById('am-ingredients')?.value?.trim() || '';
   const destination = document.getElementById('am-destination')?.value || 'extra';
@@ -2943,6 +2992,9 @@ window.saveExtraMeal = async function(editIndex) {
       protein,
       carbs,
       fats,
+      saturatedFat,
+      alcohol,
+      alcoholDrinks,
       items_text: name + (ingredients ? `: ${ingredients}` : '')
     };
     if (!logData.meals_state) logData.meals_state = {};
@@ -2950,7 +3002,7 @@ window.saveExtraMeal = async function(editIndex) {
       eaten: true,
       variant: logData.meals_state[targetMealIndex]?.variant ?? null
     };
-    patchMealRow(targetMealIndex, kcal, protein, carbs, fats);
+    patchMealRow(targetMealIndex, kcal, protein, carbs, fats, saturatedFat, alcohol, alcoholDrinks);
     saveToLocal();
     buildNutrition();
     document.getElementById('add-meal-modal')?.remove();
@@ -2970,11 +3022,11 @@ window.saveExtraMeal = async function(editIndex) {
     const existing = logData.extra_meals[editIndex];
     logData.extra_meals[editIndex] = {
       ...existing,
-      name, type, kcal, protein, carbs, fats, ingredients
+      name, type, kcal, protein, carbs, fats, saturatedFat, alcohol, alcoholDrinks, ingredients
     };
   } else {
     logData.extra_meals.push({
-      name, type, kcal, protein, carbs, fats, ingredients,
+      name, type, kcal, protein, carbs, fats, saturatedFat, alcohol, alcoholDrinks, ingredients,
       time:     new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }),
       added_at: new Date().toISOString(),
       eaten:    true
@@ -3017,6 +3069,8 @@ window.openManualMacro = function(mealIndex) {
           <input type="number" class="fi" id="mm-fat" value="${existing.fats || meal?.fats || ''}" placeholder="${meal?.fats || 0}" step="0.1"></div>
         <div class="fg"><label class="fl">Grassi Saturi (g)</label>
           <input type="number" class="fi" id="mm-sat-fat" value="${existing.saturatedFat ?? meal?.saturatedFat ?? ''}" placeholder="${meal?.saturatedFat ?? ''}" step="0.1"></div>
+        <div class="fg"><label class="fl">Alcol (g)</label>
+          <input type="number" class="fi" id="mm-alcohol" value="${existing.alcohol ?? meal?.alcohol ?? ''}" placeholder="opzionale" step="0.1"></div>
       </div>
       <div class="fg">
         <label class="fl">Note ingredienti (opzionale)</label>
@@ -3042,13 +3096,16 @@ window.saveManualMacro = function(mealIndex) {
   const fats    = parseFloat(document.getElementById('mm-fat')?.value)   || 0;
   const satFatVal = document.getElementById('mm-sat-fat')?.value;
   const saturatedFat = satFatVal !== '' && satFatVal !== undefined && !isNaN(parseFloat(satFatVal)) ? Math.min(fats, Math.max(0, parseFloat(satFatVal))) : null;
+  const alcVal = document.getElementById('mm-alcohol')?.value;
+  const alcohol = alcVal !== '' && alcVal !== undefined && !isNaN(parseFloat(alcVal)) ? Math.max(0, parseFloat(alcVal)) : null;
+  const alcoholDrinks = alcohol != null ? parseFloat((alcohol / 10).toFixed(1)) : null;
   const note    = document.getElementById('mm-note')?.value || '';
 
   // Track AI correction if user is overriding a previous AI estimate
   const prevOverride = logData.meals_overrides?.[mealIndex];
   if (prevOverride?.ai_estimate && prevOverride.ai_estimate.kcal > 0) {
     const aiEst = prevOverride.ai_estimate;
-    const userVals = { kcal, protein, carbs, fats, saturatedFat };
+    const userVals = { kcal, protein, carbs, fats, saturatedFat, alcohol, alcoholDrinks };
     // Only track if there's a meaningful difference (>5%)
     const diffPct = Math.abs(kcal - aiEst.kcal) / Math.max(aiEst.kcal, 1);
     if (diffPct > 0.05) {
@@ -3060,9 +3117,9 @@ window.saveManualMacro = function(mealIndex) {
   }
 
   if (!logData.meals_overrides) logData.meals_overrides = {};
-  logData.meals_overrides[mealIndex] = { kcal, protein, carbs, fats, saturatedFat, items_text: note };
+  logData.meals_overrides[mealIndex] = { kcal, protein, carbs, fats, saturatedFat, alcohol, alcoholDrinks, items_text: note };
 
-  patchMealRow(mealIndex, kcal, protein, carbs, fats, saturatedFat);
+  patchMealRow(mealIndex, kcal, protein, carbs, fats, saturatedFat, alcohol, alcoholDrinks);
   saveToLocal();
   buildNutrition();
   document.getElementById('manual-macro-modal')?.remove();
@@ -3283,14 +3340,17 @@ function _getScannerTotals() {
     protein: a.protein + (i.protein || 0),
     carbs: a.carbs + (i.carbs || 0),
     fats: a.fats + (i.fats || 0),
-    saturatedFat: a.saturatedFat + (i.saturatedFat || 0)
-  }), { kcal: 0, protein: 0, carbs: 0, fats: 0, saturatedFat: 0 });
+    saturatedFat: a.saturatedFat + (i.saturatedFat || 0),
+    alcohol: a.alcohol + (i.alcohol || 0),
+    alcoholDrinks: a.alcoholDrinks + (i.alcoholDrinks || 0)
+  }), { kcal: 0, protein: 0, carbs: 0, fats: 0, saturatedFat: 0, alcohol: 0, alcoholDrinks: 0 });
 }
 
 function _renderTotalBar() {
   if (_scannerItems.length === 0) return '';
   const t = _getScannerTotals();
   const hasSat = _scannerItems.some(i => i.saturatedFat != null);
+  const hasAlc = _scannerItems.some(i => i.alcohol != null && i.alcohol > 0);
   return `
     <div class="scanner-total-bar">
       <div class="scanner-total-label">${_scannerItems.length} aliment${_scannerItems.length > 1 ? 'i' : 'o'} aggiunt${_scannerItems.length > 1 ? 'i' : 'o'}</div>
@@ -3300,6 +3360,7 @@ function _renderTotalBar() {
         <span>C: ${Math.round(t.carbs)}g</span>
         <span>F: ${Math.round(t.fats)}g</span>
         ${hasSat ? `<span>Sat: ${Math.round(t.saturatedFat)}g</span>` : ''}
+        ${hasAlc ? `<span style="color:#f472b6;font-weight:700">🍷 ${t.alcohol.toFixed(1)}g (${t.alcoholDrinks.toFixed(1)}d)</span>` : ''}
       </div>
     </div>`;
 }
@@ -3318,6 +3379,90 @@ function _renderTargetMealPicker() {
       </select>
     </div>`;
 }
+
+// ── Scanner: live update from per 100g inputs and grams ───────────
+window.scannerUpdateFromPer100 = function() {
+  if (!_currentScanResult) return;
+
+  const getNum = id => { const e = document.getElementById(id); return e && e.value !== '' ? parseFloat(e.value) : null; };
+
+  const p100Kcal = getNum('p100-kcal') ?? 0;
+  const p100Pro  = getNum('p100-pro')  ?? 0;
+  const p100Carb = getNum('p100-carb') ?? 0;
+  const p100Fat  = getNum('p100-fat')  ?? 0;
+  const p100Sat  = getNum('p100-sat');
+  const p100Alc  = getNum('p100-alc');
+
+  const inputG = document.getElementById('scanner-grams-input');
+  const sliderG = document.getElementById('scanner-grams-slider');
+  const g = Math.max(1, parseFloat(inputG?.value) || 100);
+
+  if (sliderG && document.activeElement !== sliderG) sliderG.value = g;
+  if (inputG && document.activeElement !== inputG) inputG.value = g;
+
+  const label = document.getElementById('scanner-grams-label');
+  if (label) label.textContent = `~${g}g`;
+
+  const factor = g / 100;
+
+  _currentScanResult.grams = g;
+  _currentScanResult._per100g = {
+    kcal: p100Kcal,
+    protein: p100Pro,
+    carbs: p100Carb,
+    fats: p100Fat,
+    saturatedFat: p100Sat,
+    alcohol: p100Alc,
+    alcoholDrinks: p100Alc != null ? parseFloat((p100Alc * factor / 10).toFixed(1)) : null
+  };
+
+  _currentScanResult.kcal = Math.round(p100Kcal * factor);
+  _currentScanResult.protein = parseFloat((p100Pro * factor).toFixed(1));
+  _currentScanResult.carbs = parseFloat((p100Carb * factor).toFixed(1));
+  _currentScanResult.fats = parseFloat((p100Fat * factor).toFixed(1));
+  _currentScanResult.saturatedFat = p100Sat != null ? parseFloat((p100Sat * factor).toFixed(1)) : null;
+  _currentScanResult.alcohol = p100Alc != null ? parseFloat((p100Alc * factor).toFixed(1)) : null;
+  _currentScanResult.alcoholDrinks = _currentScanResult.alcohol != null ? parseFloat((_currentScanResult.alcohol / 10).toFixed(1)) : null;
+
+  const el = (id, val) => { const e = document.getElementById(id); if (e) e.textContent = val; };
+  el('sr-kcal', _currentScanResult.kcal);
+  el('sr-pro', _currentScanResult.protein + 'g');
+  el('sr-carb', _currentScanResult.carbs + 'g');
+  el('sr-fat', _currentScanResult.fats + 'g');
+
+  const satEl = document.getElementById('sr-sat');
+  if (satEl) satEl.textContent = _currentScanResult.saturatedFat != null ? _currentScanResult.saturatedFat + 'g' : '—';
+
+  const alcEl = document.getElementById('sr-alc');
+  if (alcEl) alcEl.textContent = _currentScanResult.alcohol != null ? `${_currentScanResult.alcohol}g (${_currentScanResult.alcoholDrinks}d)` : '—';
+
+  // Check Atwater hint
+  const atwaterKcal = Math.round((p100Pro * 4 + p100Carb * 4 + p100Fat * 9 + (p100Alc || 0) * 7) * factor);
+  const hintEl = document.getElementById('scanner-atwater-hint');
+  if (hintEl) {
+    const diff = Math.abs(atwaterKcal - _currentScanResult.kcal);
+    if (diff > 15 && _currentScanResult.kcal > 0) {
+      hintEl.style.display = 'flex';
+      const alignedPer100Kcal = Math.round(atwaterKcal / factor);
+      hintEl.innerHTML = `💡 Kcal da macro: <b>${atwaterKcal} kcal</b> <button class="btn btn-ghost btn-xs" style="padding:2px 6px;font-size:10px" onclick="document.getElementById('p100-kcal').value=${alignedPer100Kcal};window.scannerUpdateFromPer100()">Usa ${atwaterKcal}</button>`;
+    } else {
+      hintEl.style.display = 'none';
+    }
+  }
+};
+
+window.scannerSetPresetGrams = function(g) {
+  const input = document.getElementById('scanner-grams-input');
+  if (input) input.value = g;
+  window.scannerUpdateFromPer100();
+};
+
+window.scannerEditItem = function(idx) {
+  const item = _scannerItems.splice(idx, 1)[0];
+  if (item) {
+    _renderScannerStep('result', item);
+  }
+};
 
 function _renderScannerStep(step, data) {
   let modal = document.getElementById('photo-scanner-modal');
@@ -3382,54 +3527,103 @@ function _renderScannerStep(step, data) {
     const r = data;
     _currentScanResult = { ...r };
 
-    // Calculate estimated total grams from items array
-    const estGrams = (r.items || []).reduce((s, i) => s + (i.grams || 0), 0) || 100;
-    _currentScanResult._estGrams = estGrams;
-    _currentScanResult._scaleFactor = 1;
-    _currentScanResult._base = {
-      kcal: r.kcal, protein: r.protein, carbs: r.carbs,
-      fats: r.fats, saturatedFat: r.saturatedFat
-    };
+    const estGrams = Number(r.grams) || (r.items || []).reduce((s, i) => s + (i.grams || 0), 0) || 100;
+    _currentScanResult.grams = estGrams;
+
+    let per100 = r._per100g;
+    if (!per100) {
+      const factor = 100 / estGrams;
+      per100 = {
+        kcal: Math.round((r.kcal || 0) * factor),
+        protein: parseFloat(((r.protein || 0) * factor).toFixed(1)),
+        carbs: parseFloat(((r.carbs || 0) * factor).toFixed(1)),
+        fats: parseFloat(((r.fats || 0) * factor).toFixed(1)),
+        saturatedFat: r.saturatedFat != null ? parseFloat((r.saturatedFat * factor).toFixed(1)) : null,
+        alcohol: r.alcohol != null ? parseFloat((r.alcohol * factor).toFixed(1)) : null
+      };
+    }
+    _currentScanResult._per100g = per100;
 
     const satChip = r.saturatedFat != null
       ? `<div class="srm-item"><div class="srm-v" id="sr-sat">${r.saturatedFat}g</div><div class="srm-l">Saturi</div></div>` : '';
+
+    const alcChip = (r.alcohol != null && r.alcohol > 0)
+      ? `<div class="srm-item" style="border-color:rgba(244,114,182,0.4)"><div class="srm-v" id="sr-alc" style="color:#f472b6">${r.alcohol}g (${r.alcoholDrinks||1}d)</div><div class="srm-l">Alcol</div></div>` : '';
+
+    const badgeText = r._source === 'barcode' ? '📦 Barcode riconosciuto'
+      : (r._source === 'vision_high' ? '🎯 etichetta/prodotto (Vision 3.5)'
+      : (r._source === 'text' ? '✍️ Inserimento manuale AI' : '🤖 Riconosciuto da AI'));
 
     modal.innerHTML = `
       <div class="modal scanner-modal">
         <div class="modal-handle"></div>
         <div class="scanner-header">
-          <h3>📸 Risultato Riconosciuto</h3>
+          <h3>📸 Risultato & Modifica Valori</h3>
           <button class="btn-icon" onclick="window.closeScannerFlow()">✕</button>
         </div>
         ${totalBar}
         ${targetPicker}
         <div class="scanner-body">
           <div class="scanner-result-card">
-            <div class="scanner-result-badge">${r._source === 'barcode' ? '📦 Barcode riconosciuto' : (r._source === 'text' ? '✍️ Inserimento manuale AI' : '🤖 Riconosciuto da AI')}</div>
-            <div class="scanner-result-name">${r.name || 'Alimento'}</div>
+            <div class="scanner-result-badge">${badgeText}</div>
+            <div class="scanner-result-name" style="margin-bottom:8px">
+              <input type="text" id="sr-name-input" class="fi" value="${r.name || 'Alimento'}" style="font-size:16px;font-weight:800;padding:4px 8px;margin-bottom:4px" onchange="_currentScanResult.name=this.value">
+            </div>
             ${r.ingredients ? `<div class="scanner-result-ingredients">${r.ingredients}</div>` : ''}
 
-            <div class="scanner-grams-section" style="margin-bottom:14px">
-              <div class="scanner-grams-header">
-                <span>Porzione: <b id="scanner-grams-label">~${estGrams}g</b></span>
-                <span style="font-size:11px;color:var(--t3)">trascina per aggiustare</span>
+            <!-- Valori per 100g Modificabili -->
+            <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:10px 0">
+              <div style="font-size:11px;font-weight:700;color:var(--t2);letter-spacing:0.5px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">
+                <span>📊 VALORI PER 100g / 100ml</span>
+                <span style="font-size:10px;color:var(--accent)">modifica e ricalcola</span>
               </div>
-              <div class="scanner-grams-edit" style="display:flex">
-                <input type="range" id="scanner-grams-slider" min="10" max="${Math.max(500, estGrams * 3)}" value="${estGrams}"
-                  oninput="window.scannerScaleGrams(this.value)">
-                <input type="number" class="fi" id="scanner-grams-input" value="${estGrams}" min="1"
-                  oninput="window.scannerScaleGrams(this.value);document.getElementById('scanner-grams-slider').value=this.value"
-                  style="width:70px;text-align:center;font-weight:700;padding:6px">
-                <span style="color:var(--t3);font-size:13px">g</span>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(65px, 1fr));gap:6px">
+                <div><label style="font-size:10px;color:var(--t3)">Kcal</label><input type="number" id="p100-kcal" class="fi" style="padding:4px 6px;font-size:13px;font-weight:700" value="${per100.kcal||0}" oninput="window.scannerUpdateFromPer100()"></div>
+                <div><label style="font-size:10px;color:var(--t3)">Pro (g)</label><input type="number" id="p100-pro" class="fi" style="padding:4px 6px;font-size:13px;font-weight:700" value="${per100.protein||0}" step="0.1" oninput="window.scannerUpdateFromPer100()"></div>
+                <div><label style="font-size:10px;color:var(--t3)">Carbo (g)</label><input type="number" id="p100-carb" class="fi" style="padding:4px 6px;font-size:13px;font-weight:700" value="${per100.carbs||0}" step="0.1" oninput="window.scannerUpdateFromPer100()"></div>
+                <div><label style="font-size:10px;color:var(--t3)">Grassi (g)</label><input type="number" id="p100-fat" class="fi" style="padding:4px 6px;font-size:13px;font-weight:700" value="${per100.fats||0}" step="0.1" oninput="window.scannerUpdateFromPer100()"></div>
+                <div><label style="font-size:10px;color:var(--t3)">Saturi (g)</label><input type="number" id="p100-sat" class="fi" style="padding:4px 6px;font-size:13px;font-weight:700" value="${per100.saturatedFat ?? ''}" placeholder="—" step="0.1" oninput="window.scannerUpdateFromPer100()"></div>
+                <div><label style="font-size:10px;color:#f472b6">Alcol (g)</label><input type="number" id="p100-alc" class="fi" style="padding:4px 6px;font-size:13px;font-weight:700;color:#f472b6;border-color:rgba(244,114,182,0.4)" value="${per100.alcohol ?? ''}" placeholder="—" step="0.1" oninput="window.scannerUpdateFromPer100()"></div>
               </div>
             </div>
 
+            <!-- Atwater Diagnostic Hint -->
+            <div id="scanner-atwater-hint" style="display:none;align-items:center;justify-content:space-between;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.3);border-radius:8px;padding:6px 10px;margin-bottom:10px;font-size:11px;color:var(--orange)"></div>
+
+            <!-- Regolazione Grammi e Preset -->
+            <div class="scanner-grams-section" style="margin-bottom:14px">
+              <div class="scanner-grams-header" style="margin-bottom:6px">
+                <span>Porzione: <b id="scanner-grams-label">~${estGrams}g</b></span>
+                <span style="font-size:11px;color:var(--t3)">trascina o seleziona</span>
+              </div>
+
+              <!-- Quick Presets -->
+              <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+                <button type="button" class="btn btn-ghost btn-xs" onclick="window.scannerSetPresetGrams(${estGrams})">Stima (${estGrams}g)</button>
+                <button type="button" class="btn btn-ghost btn-xs" onclick="window.scannerSetPresetGrams(100)">100g</button>
+                <button type="button" class="btn btn-ghost btn-xs" onclick="window.scannerSetPresetGrams(${Math.round(estGrams * 0.5)})">½ porz. (${Math.round(estGrams * 0.5)}g)</button>
+                <button type="button" class="btn btn-ghost btn-xs" onclick="window.scannerSetPresetGrams(${Math.round(estGrams * 2)})">×2 (${Math.round(estGrams * 2)}g)</button>
+              </div>
+
+              <div class="scanner-grams-edit" style="display:flex;gap:8px;align-items:center">
+                <input type="range" id="scanner-grams-slider" min="10" max="${Math.max(600, estGrams * 3)}" value="${estGrams}"
+                  oninput="document.getElementById('scanner-grams-input').value=this.value;window.scannerUpdateFromPer100()">
+                <input type="number" class="fi" id="scanner-grams-input" value="${estGrams}" min="1"
+                  oninput="document.getElementById('scanner-grams-slider').value=this.value;window.scannerUpdateFromPer100()"
+                  style="width:75px;text-align:center;font-weight:800;padding:6px;font-size:14px">
+                <span style="color:var(--t3);font-size:13px">g/ml</span>
+              </div>
+            </div>
+
+            <!-- Total Resulting Macros Display -->
+            <div style="font-size:11px;font-weight:700;color:var(--t2);margin-bottom:4px">TOTALE PORZIONE REGISTRATO</div>
             <div class="scanner-result-macros" id="scanner-macros-display">
               <div class="srm-item srm-kcal"><div class="srm-v" id="sr-kcal">${r.kcal}</div><div class="srm-l">Kcal</div></div>
               <div class="srm-item"><div class="srm-v" id="sr-pro">${r.protein}g</div><div class="srm-l">Pro</div></div>
               <div class="srm-item"><div class="srm-v" id="sr-carb">${r.carbs}g</div><div class="srm-l">Carbo</div></div>
               <div class="srm-item"><div class="srm-v" id="sr-fat">${r.fats}g</div><div class="srm-l">Grassi</div></div>
               ${satChip}
+              ${alcChip}
             </div>
           </div>
 
@@ -3442,6 +3636,8 @@ function _renderScannerStep(step, data) {
         </div>
         ${footerBtns}
       </div>`;
+
+    setTimeout(() => window.scannerUpdateFromPer100(), 50);
   }
 
   else if (step === 'summary') {
@@ -3449,9 +3645,14 @@ function _renderScannerStep(step, data) {
       <div class="scanner-item-card">
         <div style="flex:1;min-width:0">
           <div class="scanner-item-name">${item.name}</div>
-          <div class="scanner-item-macros">${Math.round(item.kcal)} kcal · P:${Math.round(item.protein)}g C:${Math.round(item.carbs)}g G:${Math.round(item.fats)}g${item.saturatedFat != null ? ` · Sat:${Math.round(item.saturatedFat)}g` : ''}</div>
+          <div class="scanner-item-macros">
+            ${Math.round(item.kcal)} kcal · P:${Math.round(item.protein)}g C:${Math.round(item.carbs)}g G:${Math.round(item.fats)}g${item.saturatedFat != null ? ` · Sat:${Math.round(item.saturatedFat)}g` : ''}${item.alcohol != null && item.alcohol > 0 ? ` · 🍷 ${item.alcohol.toFixed(1)}g alcol` : ''}
+          </div>
         </div>
-        <button class="btn-del" onclick="window.scannerRemoveItem(${i})" style="font-size:16px;flex-shrink:0">✕</button>
+        <div style="display:flex;gap:4px;align-items:center">
+          <button class="btn-ghost" onclick="window.scannerEditItem(${i})" style="border:none;font-size:14px;padding:4px 6px;color:var(--accent)" title="Modifica">✏️</button>
+          <button class="btn-del" onclick="window.scannerRemoveItem(${i})" style="font-size:16px;flex-shrink:0" title="Rimuovi">✕</button>
+        </div>
       </div>`).join('');
 
     modal.innerHTML = `
@@ -3549,14 +3750,14 @@ window.scannerCapture = async function() {
   if (actions) actions.style.display = 'none';
 
   try {
-    const base64 = canvas.toDataURL('image/jpeg').split(',')[1];
+    const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
     const r = await analyzeFoodImageAI(base64, 'image/jpeg');
     if (!r.success) {
       showToast(r.error || 'Errore analisi immagine', 'err');
       _renderScannerStep('camera');
       return;
     }
-    showToast(r._source === 'barcode' ? '📦 Barcode riconosciuto!' : '🤖 Prodotto identificato!');
+    showToast(r._source === 'barcode' ? '📦 Barcode riconosciuto!' : (r._source === 'vision_high' ? '🎯 Prodotto identificato (3.5 Vision)!' : '🤖 Prodotto identificato!'));
     _renderScannerStep('result', r);
   } catch(e) {
     showToast('Errore durante la scansione: ' + (e.message || 'errore sconosciuto'), 'err');
@@ -3596,7 +3797,7 @@ window.scannerUpload = async function(event) {
       _renderScannerStep('camera');
       return;
     }
-    showToast(r._source === 'barcode' ? '📦 Barcode riconosciuto!' : '🤖 Prodotto identificato!');
+    showToast(r._source === 'barcode' ? '📦 Barcode riconosciuto!' : (r._source === 'vision_high' ? '🎯 Prodotto identificato (3.5 Vision)!' : '🤖 Prodotto identificato!'));
     _renderScannerStep('result', r);
   } catch(e) {
     showToast('Errore durante la scansione: ' + (e.message || 'errore sconosciuto'), 'err');
@@ -3605,47 +3806,35 @@ window.scannerUpload = async function(event) {
   }
 };
 
-// ── Scanner: live grams scaling ────────────────────
-window.scannerScaleGrams = function(newGrams) {
-  if (!_currentScanResult?._base || !_currentScanResult._estGrams) return;
-  const g = Math.max(1, parseInt(newGrams) || 1);
-  const factor = g / _currentScanResult._estGrams;
-  const b = _currentScanResult._base;
-
-  _currentScanResult.kcal = Math.round(b.kcal * factor);
-  _currentScanResult.protein = parseFloat((b.protein * factor).toFixed(1));
-  _currentScanResult.carbs = parseFloat((b.carbs * factor).toFixed(1));
-  _currentScanResult.fats = parseFloat((b.fats * factor).toFixed(1));
-  if (b.saturatedFat != null) {
-    _currentScanResult.saturatedFat = parseFloat((b.saturatedFat * factor).toFixed(1));
-  }
-
-  const el = (id, val) => { const e = document.getElementById(id); if (e) e.textContent = val; };
-  el('sr-kcal', _currentScanResult.kcal);
-  el('sr-pro', _currentScanResult.protein + 'g');
-  el('sr-carb', _currentScanResult.carbs + 'g');
-  el('sr-fat', _currentScanResult.fats + 'g');
-  if (b.saturatedFat != null) el('sr-sat', _currentScanResult.saturatedFat + 'g');
-
-  const label = document.getElementById('scanner-grams-label');
-  if (label) label.textContent = `~${g}g`;
-  const slider = document.getElementById('scanner-grams-slider');
-  const input = document.getElementById('scanner-grams-input');
-  if (slider && document.activeElement !== slider) slider.value = g;
-  if (input && document.activeElement !== input) input.value = g;
-};
-
 // ── Scanner: add item to accumulator ───────────────
 window.scannerAddItem = function() {
   if (!_currentScanResult) return;
+
+  // Track AI correction if user edited values from original estimate
+  if (_currentScanResult._base) {
+    const orig = _currentScanResult._base;
+    const cur = _currentScanResult;
+    const diffPct = Math.abs(cur.kcal - orig.kcal) / Math.max(orig.kcal, 1);
+    if (diffPct > 0.05 && (cur.name || '').length > 1) {
+      saveAICorrection(cur.name, orig, {
+        kcal: cur.kcal, protein: cur.protein, carbs: cur.carbs, fats: cur.fats,
+        saturatedFat: cur.saturatedFat, alcohol: cur.alcohol, alcoholDrinks: cur.alcoholDrinks
+      });
+    }
+  }
+
   _scannerItems.push({
     name: _currentScanResult.name || 'Alimento',
+    grams: _currentScanResult.grams || 100,
     kcal: _currentScanResult.kcal || 0,
     protein: _currentScanResult.protein || 0,
     carbs: _currentScanResult.carbs || 0,
     fats: _currentScanResult.fats || 0,
     saturatedFat: _currentScanResult.saturatedFat ?? null,
-    ingredients: _currentScanResult.ingredients || ''
+    alcohol: _currentScanResult.alcohol ?? null,
+    alcoholDrinks: _currentScanResult.alcoholDrinks ?? null,
+    ingredients: _currentScanResult.ingredients || '',
+    _per100g: _currentScanResult._per100g || null
   });
   _currentScanResult = null;
   showToast(`✅ Aggiunto! (${_scannerItems.length} element${_scannerItems.length > 1 ? 'i' : 'o'})`);
@@ -3688,6 +3877,9 @@ window.scannerSave = function() {
   const ingredients = _scannerItems.map(i => i.ingredients || i.name).filter(Boolean).join(', ');
   const hasSat = _scannerItems.some(i => i.saturatedFat != null);
   const totalSat = hasSat ? parseFloat(totals.saturatedFat.toFixed(1)) : null;
+  const hasAlc = _scannerItems.some(i => i.alcohol != null && i.alcohol > 0);
+  const totalAlc = hasAlc ? parseFloat(totals.alcohol.toFixed(1)) : null;
+  const totalDrinks = hasAlc ? parseFloat(totals.alcoholDrinks.toFixed(1)) : null;
 
   const target = _scannerTargetMealIndex;
 
@@ -3701,6 +3893,8 @@ window.scannerSave = function() {
       carbs: parseFloat(totals.carbs.toFixed(1)),
       fats: parseFloat(totals.fats.toFixed(1)),
       saturatedFat: totalSat,
+      alcohol: totalAlc,
+      alcoholDrinks: totalDrinks,
       ingredients,
       time: new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }),
       added_at: new Date().toISOString(),
@@ -3719,9 +3913,11 @@ window.scannerSave = function() {
         carbs: parseFloat(totals.carbs.toFixed(1)),
         fats: parseFloat(totals.fats.toFixed(1)),
         saturatedFat: totalSat,
+        alcohol: totalAlc,
+        alcoholDrinks: totalDrinks,
         items_text: ingredients || mealName
       };
-      patchMealRow(mi, Math.round(totals.kcal), parseFloat(totals.protein.toFixed(1)), parseFloat(totals.carbs.toFixed(1)), parseFloat(totals.fats.toFixed(1)), totalSat);
+      patchMealRow(mi, Math.round(totals.kcal), parseFloat(totals.protein.toFixed(1)), parseFloat(totals.carbs.toFixed(1)), parseFloat(totals.fats.toFixed(1)), totalSat, totalAlc, totalDrinks);
       const mealLabel = mealStates?.[mi]?.label || mealStates?.[mi]?.type || `Pasto ${mi+1}`;
       showToast(`✅ ${mealLabel} aggiornato! Pasto segnato ✓`);
     }

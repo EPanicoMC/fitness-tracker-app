@@ -133,6 +133,36 @@ const slice2Kcal = Math.round(torteDispensa.total_kcal * 2 / torteDispensa.slice
 assert(slice2Kcal === 600, '2 fette di torta = 600 kcal');
 console.log('');
 
+// 10. Tracciamento alcol & Stima etanolo
+console.log('[Test 10] Tracciamento Alcol e riconoscimento bevande alcoliche');
+const wineGrams = NC.estimateAlcoholGrams(125, 12);
+assert(wineGrams >= 11.5 && wineGrams <= 12, `125ml vino 12% = ${wineGrams}g etanolo (~11.8g)`);
+
+const spritzDetect = NC.detectAlcoholicDrink('Aperol Spritz');
+assert(spritzDetect !== null && spritzDetect.isAlcohol === true, '"Aperol Spritz" riconosciuto come alcolico');
+assert(spritzDetect.drinks === 1, '"Aperol Spritz" = 1 drink standard');
+
+const vinoDetect = NC.detectAlcoholicDrink('2 calici di vino rosso');
+assert(vinoDetect !== null && vinoDetect.isAlcohol === true, '"2 calici di vino rosso" riconosciuto come alcolico');
+
+const acetoExcl = NC.detectAlcoholicDrink('aceto di vino bianco');
+assert(acetoExcl === null, '"aceto di vino bianco" NON riconosciuto come alcolico');
+
+const tiramisuExcl = NC.detectAlcoholicDrink('tiramisù della casa');
+assert(tiramisuExcl === null, '"tiramisù della casa" NON riconosciuto come drink alcolico');
+console.log('');
+
+// 11. Conversione per 100g <-> Porzione
+console.log('[Test 11] Conversioni per100g ↔ Porzione');
+const per100Example = { kcal: 250, protein: 12, carbs: 30, fats: 8, saturatedFat: 2.5, alcohol: null, alcoholDrinks: null };
+const portion150 = NC.fromPer100g(per100Example, 150);
+assert(portion150.kcal === 375, '150g = 375 kcal');
+assert(portion150.protein === 18, '150g = 18g pro');
+
+const computedPer100 = NC.per100gFrom(portion150, 150);
+assert(Math.round(computedPer100.kcal) === 250, 'Riconversione a 100g = 250 kcal');
+console.log('');
+
 console.log('════════════════════════════════════════════════════════════');
 console.log(` 📊 RISULTATI FINALI TEST SUITE: ${passed} PASSATI, ${failed} FALLITI`);
 console.log('════════════════════════════════════════════════════════════');

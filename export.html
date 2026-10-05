@@ -409,7 +409,7 @@ async function fetchData(dateFrom, dateTo) {
 
 function generateDailyTSV() {
   const headers = [
-    'data', 'tipo_giorno', 'peso_kg', 'kcal', 'proteine_g', 'carbo_g', 'grassi_g',
+    'data', 'tipo_giorno', 'peso_kg', 'kcal', 'proteine_g', 'carbo_g', 'grassi_g', 'sat_fat_g', 'alcol_g',
     'giorno_completo', 'passi', 'sonno_h', 'drink', 'pasti_fuori', 'note'
   ];
 
@@ -421,14 +421,16 @@ function generateDailyTSV() {
     const proteine = log.nutrition?.totals?.protein ?? '';
     const carbo = log.nutrition?.totals?.carbs ?? '';
     const grassi = log.nutrition?.totals?.fats ?? '';
+    const satFat = log.nutrition?.totals?.saturatedFat != null ? Number(log.nutrition.totals.saturatedFat).toFixed(1) : '';
+    const alcolG = log.nutrition?.totals?.alcohol != null ? Number(log.nutrition.totals.alcohol).toFixed(1) : '';
     const completo = isGiornoCompleto(log) ? 'si' : 'no';
     const passi = log.steps ?? '';
     const sonno = log.sleep_hours != null ? Number(log.sleep_hours).toFixed(1) : '';
-    const drink = log.drinks ?? 0;
+    const drink = Math.max(log.drinks || 0, log.nutrition?.totals?.alcoholDrinks || 0);
     const pastiFuori = log.meals_out ?? 0;
     const note = (log.daily_note || '').replace(/[\t\n\r]/g, ' ').slice(0, 100);
 
-    return [date, tipoGiorno, pesoKg, kcal, proteine, carbo, grassi,
+    return [date, tipoGiorno, pesoKg, kcal, proteine, carbo, grassi, satFat, alcolG,
             completo, passi, sonno, drink, pastiFuori, note].join('\t');
   });
 
@@ -491,7 +493,7 @@ function generateSessionTSV() {
 function generateWeeklyTSV() {
   const headers = [
     'settimana', 'peso_media_7gg', 'delta_peso', 'vita_cm',
-    'aderenza_pct', 'kcal_medie', 'P_medie', 'C_medie', 'G_medie',
+    'aderenza_pct', 'kcal_medie', 'P_medie', 'C_medie', 'G_medie', 'Sat_medie', 'Alcol_g_medio',
     'sonno_medio', 'notti_sotto_5h', 'passi_medi', 'drink_totali',
     'serate_alcoliche', 'sedute_fatte/previste', 'cervicale_max_settimana',
     'coccige_max_settimana', 'carichi_riferimento'
@@ -537,8 +539,6 @@ function generateWeeklyTSV() {
         deltaWeight = (parseFloat(avgWeight) - prevAvgWeight).toFixed(1);
       }
       prevAvgWeight = parseFloat(avgWeight);
-    } else {
-      // Non aggiorniamo prevAvgWeight se non ci sono abbastanza dati
     }
 
     // Vita (cm): check piu' vicino alla domenica della settimana
@@ -550,7 +550,6 @@ function generateWeeklyTSV() {
       for (const c of checks) {
         const cDate = new Date((c.date || c.id) + 'T00:00:00');
         const dist = Math.abs(cDate - sundayDate);
-        // Consideriamo solo check entro 7 giorni dalla domenica
         if (dist < minDist && dist <= 7 * 24 * 60 * 60 * 1000) {
           minDist = dist;
           closest = c;
@@ -575,9 +574,13 @@ function generateWeeklyTSV() {
     const proVals = logs.map(l => l.nutrition?.totals?.protein).filter(v => v != null);
     const carbVals = logs.map(l => l.nutrition?.totals?.carbs).filter(v => v != null);
     const fatVals = logs.map(l => l.nutrition?.totals?.fats).filter(v => v != null);
+    const satVals = logs.map(l => l.nutrition?.totals?.saturatedFat).filter(v => v != null);
+    const alcVals = logs.map(l => l.nutrition?.totals?.alcohol).filter(v => v != null);
     const pMedie = proVals.length > 0 ? Math.round(proVals.reduce((s, v) => s + v, 0) / proVals.length) : '';
     const cMedie = carbVals.length > 0 ? Math.round(carbVals.reduce((s, v) => s + v, 0) / carbVals.length) : '';
     const gMedie = fatVals.length > 0 ? Math.round(fatVals.reduce((s, v) => s + v, 0) / fatVals.length) : '';
+    const satMedie = satVals.length > 0 ? Math.round(satVals.reduce((s, v) => s + v, 0) / satVals.length) : '';
+    const alcMedio = alcVals.length > 0 ? Math.round(alcVals.reduce((s, v) => s + v, 0) / alcVals.length) : '';
 
     // Sonno medio
     const sleepVals = logs.map(l => l.sleep_hours).filter(v => v != null);
@@ -595,8 +598,9 @@ function generateWeeklyTSV() {
       : '';
 
     // Drink totali e serate alcoliche
-    const drinkTotali = logs.reduce((s, l) => s + (l.drinks || 0), 0);
-    const serateAlcoliche = logs.filter(l => (l.drinks || 0) > 0).length;
+    const getEffectiveDrinks = (l) => Math.max(l.drinks || 0, l.nutrition?.totals?.alcoholDrinks || 0);
+    const drinkTotali = logs.reduce((s, l) => s + getEffectiveDrinks(l), 0);
+    const serateAlcoliche = logs.filter(l => getEffectiveDrinks(l) > 0).length;
 
     // Sedute fatte (giorni con workout valido)
     const seduteFatte = logs.filter(l => l.workout && l.workout.exercises && l.workout.exercises.length > 0).length;
@@ -608,15 +612,12 @@ function generateWeeklyTSV() {
     const cervMax = cervicaleVals.length > 0 ? Math.max(...cervicaleVals) : 0;
     const coccigeMax = coccigeVals.length > 0 ? Math.max(...coccigeVals) : 0;
 
-    // Carichi di riferimento forza: per ogni esercizio di riferimento,
-    // trova l'ultima seduta della settimana che lo contiene
+    // Carichi di riferimento forza
     let carichiRif = '';
     if (rifForza.length > 0) {
       const parts = [];
       for (const nomeRif of rifForza) {
-        // Cerca l'ultima seduta della settimana con questo esercizio
         let found = null;
-        // Iteriamo al contrario per trovare l'ultima occorrenza
         for (let i = logs.length - 1; i >= 0; i--) {
           const exs = logs[i].workout?.exercises || [];
           const match = exs.find(e => e.name && e.name.toLowerCase().includes(nomeRif.toLowerCase()));
@@ -637,7 +638,7 @@ function generateWeeklyTSV() {
 
     rows.push([
       label, avgWeight, deltaWeight, vitaCm,
-      aderenza, kcalMedie, pMedie, cMedie, gMedie,
+      aderenza, kcalMedie, pMedie, cMedie, gMedie, satMedie, alcMedio,
       sonnoMedio, nottiSotto5, passiMedi, drinkTotali,
       serateAlcoliche, seduteFP, cervMax,
       coccigeMax, carichiRif

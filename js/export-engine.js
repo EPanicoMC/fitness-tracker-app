@@ -330,7 +330,7 @@ export async function generatePDF(exportModel) {
   doc.text('4. Registro Giornaliero Dieta & Allenamento', 40, y);
   y += 14;
 
-  const dailyHeaders = [['Data', 'Stato', 'Peso', 'Passi', 'Calorie (Eff/Tgt)', 'Proteine', 'Grassi', 'Saturi', 'Carbo', 'Workout']];
+  const dailyHeaders = [['Data', 'Stato', 'Peso', 'Passi', 'Calorie (Eff/Tgt)', 'Proteine', 'Grassi', 'Saturi', 'Alcol', 'Carbo', 'Workout']];
   const dailyRows = dailyTable.map(d => [
     d.date,
     d.status,
@@ -340,6 +340,7 @@ export async function generatePDF(exportModel) {
     `${d.proteinActual}g`,
     `${d.fatActual}g`,
     d.saturatedFatActual != null ? `${d.saturatedFatActual}g` : '—',
+    d.alcoholActual != null && d.alcoholActual > 0 ? `${d.alcoholActual}g` : '—',
     `${d.carbsActual}g`,
     d.workout
   ]);
@@ -369,7 +370,7 @@ export async function generatePDF(exportModel) {
 export function generateCSV(exportModel) {
   if (!exportModel || !exportModel.dailyTable) throw new Error('Modello esportazione non valido');
 
-  const headers = ['Data', 'Stato', 'Calorie_Actual', 'Calorie_Target', 'Calorie_Delta', 'Proteine_g', 'Grassi_g', 'Grassi_Saturi_g', 'Carboidrati_g', 'Workout'];
+  const headers = ['Data', 'Stato', 'Calorie_Actual', 'Calorie_Target', 'Calorie_Delta', 'Proteine_g', 'Grassi_g', 'Grassi_Saturi_g', 'Alcol_g', 'Drink_Count', 'Carboidrati_g', 'Workout'];
   const rows = exportModel.dailyTable.map(d => [
     d.date,
     d.status,
@@ -379,6 +380,8 @@ export function generateCSV(exportModel) {
     d.proteinActual,
     d.fatActual,
     d.saturatedFatActual != null ? d.saturatedFatActual : '',
+    d.alcoholActual != null ? d.alcoholActual : '',
+    d.alcoholDrinksActual != null ? d.alcoholDrinksActual : '',
     d.carbsActual,
     `"${d.workout.replace(/"/g, '""')}"`
   ]);
