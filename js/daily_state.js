@@ -2201,8 +2201,6 @@ window.applyMealAI = function(mi, kcal, protein, carbs, fats, saturatedFat, alco
   patchMealRow(mi, kcal, protein, carbs, fats, satFatVal, alcVal, drkVal);
   saveToLocal();
   buildNutrition();
-  showToast('✅ Pasto ricalcolato con AI!');
-};
   const box = document.getElementById(`meal-ai-${mi}`);
   if (box) box.style.display = 'none';
   showToast('✅ Macro applicati! Pasto segnato ✓');
