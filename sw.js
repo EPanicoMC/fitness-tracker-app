@@ -1,4 +1,4 @@
-const CACHE = 'ft-v86';
+const CACHE = 'ft-v87';
 // Cache separata per librerie CDN con URL versionato (contenuto immutabile):
 // non viene svuotata ai bump di CACHE, così l'SDK Firebase non va riscaricato a ogni deploy.
 const CDN_CACHE = 'ft-cdn-v1';
@@ -13,6 +13,7 @@ const FILES = [
   'diet.html',
   'diary.html',
   'checks.html',
+  'export.html',
   'settings.html',
   'auth.html',
   'css/style.css',
@@ -153,25 +154,19 @@ self.addEventListener('fetch', e => {
   // Solo GET: le altre richieste non sono cacheabili
   if (e.request.method !== 'GET') return;
 
-  // CDN versionati (SDK Firebase, Remixicon) → cache-first
+  // Priorità 1: risorse dello stesso dominio (local app files: HTML, CSS, JS locale) -> networkFirstWithTimeout
+  const isSameOrigin = url.startsWith(self.location.origin);
+  if (isSameOrigin) {
+    e.respondWith(networkFirstWithTimeout(e));
+    return;
+  }
+
+  // Priorità 2: CDN versionati (SDK Firebase, Remixicon) → cache-first
   if (IMMUTABLE_CDN_PREFIXES.some(p => url.startsWith(p))) {
     e.respondWith(cacheFirstCdn(e));
     return;
   }
 
-  // Skip external APIs — let them go straight to network
-  if (
-    url.includes('firestore.googleapis.com') ||
-    url.includes('firebase') ||
-    url.includes('generativelanguage.googleapis.com') ||
-    url.includes('gstatic.com') ||
-    url.includes('firebaseapp.com') ||
-    url.includes('firebasestorage.googleapis.com')
-  ) return;
-
-  // Only cache same-origin requests
-  const isSameOrigin = url.startsWith(self.location.origin);
-  if (!isSameOrigin) return;
-
-  e.respondWith(networkFirstWithTimeout(e));
+  // External APIs (Firestore API, Gemini API, Firebase Storage) -> rete diretta
+  return;
 });
