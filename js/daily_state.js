@@ -315,6 +315,10 @@ async function init() {
     }
     buildNutrition(); buildMeals(); buildWorkout(); buildStats(); buildFitScore();
     buildTodayStrip();
+    buildArmedRules();
+    buildFiveLevers();
+    buildGate();
+    buildNextCheck();
   });
 
   window.addEventListener('pagehide', () => {
@@ -434,6 +438,10 @@ function renderDailyStateUI(local) {
   buildFitScore();
   buildSmartAdvisor();
   buildTodayStrip();
+  buildArmedRules();
+  buildFiveLevers();
+  buildGate();
+  buildNextCheck();
 
   checkYesterdayLog();
 }
