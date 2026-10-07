@@ -20,10 +20,11 @@ async function getKey() {
 }
 
 // ── Model list ──────────────────────────────────────────────
+// Ordinati per LIMITE MASSIMO di chiamate (RPD = Richieste Per Giorno)
 const MODELS = [
-  'gemini-3.1-flash-lite',
-  'gemini-2.5-flash-lite',
-  'gemini-3.5-flash'
+  'gemini-3.5-flash-lite',    // 500 RPD - MASSIMO limite disponibile
+  'gemini-3.1-flash-lite',    // 500 RPD - Fallback con alto limite
+  'gemini-3.5-flash'          // 20 RPD - Ultimo fallback
 ];
 
 const _delay = ms => new Promise(r => setTimeout(r, ms));
@@ -55,16 +56,28 @@ async function callGemini(key, prompt, opts = {}) {
             })
           }
         );
-        if (r.status === 429) { console.warn(model, '429', attempt === 0 ? '→ retry 2s' : '→ next model'); continue; }
-        if (!r.ok) { console.warn(model, 'error', r.status); break; }
+        if (r.status === 429) { console.warn(`[Gemini] ${model}: 429 Rate limit`, attempt === 0 ? '→ retry 2s' : '→ next model'); continue; }
+        if (!r.ok) {
+          const errText = await r.text();
+          console.error(`[Gemini] ${model}: HTTP ${r.status}`, errText.substring(0, 200));
+          break;
+        }
         const d = await r.json();
+        console.log(`[Gemini] ${model}: Success`);
         const text = d.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('');
-        if (!text) break;
+        if (!text) {
+          console.warn(`[Gemini] ${model}: Empty response`, d);
+          break;
+        }
         return { success: true, text: text.trim(), model };
-      } catch(e) { console.warn(model, 'failed:', e.message); break; }
+      } catch(e) {
+        console.error(`[Gemini] ${model}: Exception:`, e.message, e);
+        break;
+      }
     }
   }
-  return { success: false, error: 'Tutti i modelli occupati. Riprova tra 1 minuto.' };
+  console.error('[Gemini] Tutti i modelli hanno fallito. Verificare quota API e rate limits.');
+  return { success: false, error: 'AI temporaneamente non disponibile. Verifica la quota API o riprova tra 1 minuto.' };
 }
 
 // ── Alimenti legittimamente a 0 kcal ────────────────────────
@@ -1041,15 +1054,18 @@ Formato JSON richiesto:
     { inlineData: { mimeType, data: base64Image } }
   ];
 
-  // Try high-accuracy gemini-3.5-flash vision model first, then fallback to lite models
+  // Priorità ai modelli con limite più alto (500 RPD) per vision
   const res = await callGemini(key, null, {
     temperature: 0.1,
     maxOutputTokens: 1536,
     parts,
-    models: ['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash-lite']
+    models: ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.5-flash']
   });
 
-  if (!res.success) return { success: false, error: 'Errore analisi immagine food scanner' };
+  if (!res.success) {
+    console.error('[FoodScanner] Analisi fallita:', res.error);
+    return { success: false, error: res.error || 'Errore analisi immagine. Verifica la connessione e riprova.' };
+  }
 
   const raw = res.text;
   const s1 = raw.indexOf('{');
