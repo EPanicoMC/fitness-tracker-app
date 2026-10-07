@@ -32,7 +32,7 @@ let _lastCallTime = 0;
 const _THROTTLE_MS = 4000;
 
 async function callGemini(key, prompt, opts = {}) {
-  const { temperature = 0.7, maxOutputTokens = 1024, parts, models } = opts;
+  const { temperature = 0.7, maxOutputTokens = 1024, parts, models, jsonMode } = opts;
   const contentParts = parts || [{ text: prompt }];
   const targetModels = models || MODELS;
 
@@ -45,6 +45,8 @@ async function callGemini(key, prompt, opts = {}) {
       try {
         if (attempt > 0) await _delay(2000);
         _lastCallTime = Date.now();
+        const genConfig = { temperature, maxOutputTokens };
+        if (jsonMode) genConfig.responseMimeType = 'application/json';
         const r = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
           {
@@ -52,7 +54,7 @@ async function callGemini(key, prompt, opts = {}) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               contents: [{ role: 'user', parts: contentParts }],
-              generationConfig: { temperature, maxOutputTokens }
+              generationConfig: genConfig
             })
           }
         );
@@ -470,13 +472,16 @@ Formato JSON richiesto:
   ]
 }`;
 
-    const res = await callGemini(key, prompt, { temperature: 0.1, maxOutputTokens: 1024 });
+    const res = await callGemini(key, prompt, { temperature: 0.1, maxOutputTokens: 1024, jsonMode: true });
     if (!res.success) return { success: false, error: res.error };
 
     const raw = res.text;
     const s1 = raw.indexOf('{');
     const s2 = raw.lastIndexOf('}');
-    if (s1 === -1 || s2 === -1) return { success: false, error: 'Risposta AI non valida.' };
+    if (s1 === -1 || s2 === -1) {
+      console.error('[calcMacros] Risposta non-JSON dal modello:', raw.substring(0, 300));
+      return { success: false, error: 'Risposta AI non valida.' };
+    }
 
     let parsed = JSON.parse(raw.slice(s1, s2 + 1));
     const rawItems = parsed.items || [];
@@ -587,7 +592,7 @@ Ricalcola CORRETTAMENTE i macronutrienti per ogni ingrediente del pasto.
 Rispondi SOLO con JSON valido:
 {"items":[{"name":"...","grams":0,"kcal":0,"protein":0,"carbs":0,"fats":0,"saturatedFat":null}]}`;
         try {
-          const retryRes = await callGemini(key, retryPrompt, { temperature: 0.1, maxOutputTokens: 1024 });
+          const retryRes = await callGemini(key, retryPrompt, { temperature: 0.1, maxOutputTokens: 1024, jsonMode: true });
           if (retryRes.success) {
             const rRaw = retryRes.text;
             const rs1 = rRaw.indexOf('{');
@@ -1059,6 +1064,7 @@ Formato JSON richiesto:
     temperature: 0.1,
     maxOutputTokens: 1536,
     parts,
+    jsonMode: true,
     models: ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.5-flash']
   });
 
@@ -1070,7 +1076,10 @@ Formato JSON richiesto:
   const raw = res.text;
   const s1 = raw.indexOf('{');
   const s2 = raw.lastIndexOf('}');
-  if (s1 === -1 || s2 === -1) return { success: false, error: 'Risposta AI non valida.' };
+  if (s1 === -1 || s2 === -1) {
+    console.error('[FoodScanner] Risposta non-JSON dal modello:', raw.substring(0, 300));
+    return { success: false, error: 'Risposta AI non valida.' };
+  }
 
   try {
     const parsed = JSON.parse(raw.slice(s1, s2 + 1));
