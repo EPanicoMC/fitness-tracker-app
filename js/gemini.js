@@ -24,12 +24,14 @@ async function getKey() {
 const MODELS = [
   'gemini-3.5-flash-lite',    // 500 RPD - MASSIMO limite disponibile
   'gemini-3.1-flash-lite',    // 500 RPD - Fallback con alto limite
-  'gemini-3.5-flash'          // 20 RPD - Ultimo fallback
+  'gemini-3.6-flash',         // 20 RPD - Fallback (3.5-flash non è più nella lista modelli)
+  'gemini-2.5-flash-lite'     // 20 RPD - Ultimo fallback
 ];
 
 const _delay = ms => new Promise(r => setTimeout(r, ms));
 let _lastCallTime = 0;
-const _THROTTLE_MS = 4000;
+const _THROTTLE_MS = 1000;
+const _FETCH_TIMEOUT_MS = 25000;
 
 async function callGemini(key, prompt, opts = {}) {
   const { temperature = 0.7, maxOutputTokens = 1024, parts, models, jsonMode } = opts;
@@ -43,22 +45,29 @@ async function callGemini(key, prompt, opts = {}) {
   for (const model of targetModels) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        if (attempt > 0) await _delay(2000);
+        if (attempt > 0) await _delay(800);
         _lastCallTime = Date.now();
         const genConfig = { temperature, maxOutputTokens };
         if (jsonMode) genConfig.responseMimeType = 'application/json';
-        const r = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ role: 'user', parts: contentParts }],
-              generationConfig: genConfig
-            })
-          }
-        );
-        if (r.status === 429) { console.warn(`[Gemini] ${model}: 429 Rate limit`, attempt === 0 ? '→ retry 2s' : '→ next model'); continue; }
+        const ctrl = new AbortController();
+        const to = setTimeout(() => ctrl.abort(), _FETCH_TIMEOUT_MS);
+        let r;
+        try {
+          r = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              signal: ctrl.signal,
+              body: JSON.stringify({
+                contents: [{ role: 'user', parts: contentParts }],
+                generationConfig: genConfig
+              })
+            }
+          );
+        } finally { clearTimeout(to); }
+        if (r.status === 429) { console.warn(`[Gemini] ${model}: 429 Rate limit → next model`); break; }
+        if (r.status === 503 || r.status === 500) { console.warn(`[Gemini] ${model}: ${r.status} overloaded`, attempt === 0 ? '→ retry' : '→ next model'); continue; }
         if (!r.ok) {
           const errText = await r.text();
           console.error(`[Gemini] ${model}: HTTP ${r.status}`, errText.substring(0, 200));
@@ -1002,9 +1011,29 @@ async function lookupBarcode(code) {
 }
 
 // ── Analisi immagine cibo con supporto visione 3.5 Flash e tracciamento alcol ──
+// Ridimensiona l'immagine (lato max 1024px, JPEG 0.8): upload molto più leggero = risposta più veloce
+async function _downscaleBase64(base64, mimeType, maxSide = 1024) {
+  try {
+    if (typeof document === 'undefined') return { base64, mimeType };
+    const img = new Image();
+    img.src = `data:${mimeType};base64,${base64}`;
+    await img.decode();
+    const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+    if (scale === 1 && base64.length < 400000) return { base64, mimeType };
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.naturalWidth * scale);
+    c.height = Math.round(img.naturalHeight * scale);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    return { base64: c.toDataURL('image/jpeg', 0.8).split(',')[1], mimeType: 'image/jpeg' };
+  } catch (e) {
+    return { base64, mimeType };
+  }
+}
+
 export async function analyzeFoodImageAI(base64Image, mimeType = 'image/jpeg') {
   const key = await getKey();
   if (!key) return { success: false, error: 'API key mancante.' };
+  ({ base64: base64Image, mimeType } = await _downscaleBase64(base64Image, mimeType));
 
   const promptText = `Analizza questa immagine. Può trattarsi di:
 - CIBO/PIATTO (preparato o al ristorante)
@@ -1065,7 +1094,7 @@ Formato JSON richiesto:
     maxOutputTokens: 1536,
     parts,
     jsonMode: true,
-    models: ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.5-flash']
+    models: ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.6-flash', 'gemini-2.5-flash-lite']
   });
 
   if (!res.success) {
