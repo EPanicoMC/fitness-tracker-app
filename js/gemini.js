@@ -42,6 +42,7 @@ async function callGemini(key, prompt, opts = {}) {
   const wait = _THROTTLE_MS - (now - _lastCallTime);
   if (wait > 0) await _delay(wait);
 
+  const diag = [];
   for (const model of targetModels) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
@@ -66,10 +67,13 @@ async function callGemini(key, prompt, opts = {}) {
             }
           );
         } finally { clearTimeout(to); }
-        if (r.status === 429) { console.warn(`[Gemini] ${model}: 429 Rate limit → next model`); break; }
-        if (r.status === 503 || r.status === 500) { console.warn(`[Gemini] ${model}: ${r.status} overloaded`, attempt === 0 ? '→ retry' : '→ next model'); continue; }
+        if (r.status === 429) { diag.push(`${model}:429`); console.warn(`[Gemini] ${model}: 429 Rate limit → next model`); break; }
+        if (r.status === 503 || r.status === 500) { diag.push(`${model}:${r.status}`); console.warn(`[Gemini] ${model}: ${r.status} overloaded`, attempt === 0 ? '→ retry' : '→ next model'); continue; }
         if (!r.ok) {
           const errText = await r.text();
+          let msg = '';
+          try { msg = JSON.parse(errText)?.error?.message || ''; } catch(_) {}
+          diag.push(`${model}:${r.status} ${msg.substring(0, 80)}`);
           console.error(`[Gemini] ${model}: HTTP ${r.status}`, errText.substring(0, 200));
           break;
         }
@@ -77,18 +81,20 @@ async function callGemini(key, prompt, opts = {}) {
         console.log(`[Gemini] ${model}: Success`);
         const text = d.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('');
         if (!text) {
+          diag.push(`${model}:vuoto(${d.candidates?.[0]?.finishReason || d.promptFeedback?.blockReason || '?'})`);
           console.warn(`[Gemini] ${model}: Empty response`, d);
           break;
         }
         return { success: true, text: text.trim(), model };
       } catch(e) {
+        diag.push(`${model}:${e.name === 'AbortError' ? 'timeout' : e.message}`);
         console.error(`[Gemini] ${model}: Exception:`, e.message, e);
         break;
       }
     }
   }
-  console.error('[Gemini] Tutti i modelli hanno fallito. Verificare quota API e rate limits.');
-  return { success: false, error: 'AI temporaneamente non disponibile. Verifica la quota API o riprova tra 1 minuto.' };
+  console.error('[Gemini] Tutti i modelli hanno fallito:', diag);
+  return { success: false, error: `AI non disponibile → ${diag.join(' | ')}` };
 }
 
 // ── Alimenti legittimamente a 0 kcal ────────────────────────
