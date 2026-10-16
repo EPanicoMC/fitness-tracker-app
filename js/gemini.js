@@ -32,9 +32,71 @@ const _delay = ms => new Promise(r => setTimeout(r, ms));
 let _lastCallTime = 0;
 const _THROTTLE_MS = 1000;
 const _FETCH_TIMEOUT_MS = 25000;
+const _MAX_TOKENS_CAP = 8192;
+
+// ── Messaggi d'errore chiari per l'utente ───────────────────
+const AI_ERROR_MESSAGES = {
+  no_key:      'Chiave API Gemini mancante: impostala nelle Impostazioni.',
+  auth:        'Chiave API Gemini non valida o bloccata: controllala nelle Impostazioni.',
+  quota_day:   'Quota AI giornaliera esaurita su tutti i modelli. Riprova domani.',
+  rate_limit:  'Troppe richieste AI ravvicinate. Attendi 1 minuto e riprova.',
+  overloaded:  'I server AI di Google sono sovraccarichi. Riprova tra poco.',
+  timeout:     "L'AI non ha risposto in tempo. Riprova.",
+  network:     'Connessione assente o instabile. Controlla la rete e riprova.',
+  not_found:   'Modello AI non disponibile. Segnala il problema.',
+  blocked:     "L'AI ha rifiutato di analizzare questo contenuto. Prova con un'altra foto.",
+  empty:       "L'AI non ha restituito alcuna risposta. Riprova.",
+  truncated:   "La risposta dell'AI è arrivata incompleta. Riprova.",
+  invalid_json:"L'AI ha risposto in un formato non leggibile. Riprova (foto più nitida e ravvicinata).",
+  unknown:     'AI non disponibile al momento. Riprova tra poco.'
+};
+
+export function aiErrorMessage(kind) {
+  return AI_ERROR_MESSAGES[kind] || AI_ERROR_MESSAGES.unknown;
+}
+
+// Sceglie la causa più significativa tra quelle registrate sui vari modelli
+function _pickErrorKind(kinds) {
+  const priority = ['auth', 'network', 'quota_day', 'rate_limit', 'overloaded', 'timeout', 'blocked', 'truncated', 'empty', 'not_found', 'unknown'];
+  for (const k of priority) if (kinds.includes(k)) return k;
+  return 'unknown';
+}
+
+// ── Log errori AI su Firestore (users/{uid}/ai_errors) ──────
+// Fire-and-forget: non deve MAI bloccare o rompere il flusso principale.
+const _clip = (v, n) => (v == null ? null : String(v).substring(0, n));
+export function logAIError(entry = {}) {
+  try {
+    const uid = getUserId();
+    if (!uid) return;
+    const now = new Date();
+    const payload = {
+      ts: now.toISOString(),
+      date: now.toISOString().split('T')[0],
+      fn: _clip(entry.fn || 'unknown', 60),
+      stage: _clip(entry.stage || 'api', 30),          // api | parse | exception
+      kind: _clip(entry.kind || 'unknown', 30),
+      user_message: _clip(entry.userMessage || aiErrorMessage(entry.kind), 200),
+      model: _clip(entry.model, 60),
+      finish_reason: _clip(entry.finishReason, 40),
+      detail: _clip(entry.detail, 500),
+      diag: Array.isArray(entry.diag) ? entry.diag.slice(0, 12).map(d => _clip(d, 200)) : [],
+      raw_response: _clip(entry.raw, 2000),
+      usage: entry.usage ? Object.fromEntries(Object.entries(entry.usage).filter(([, v]) => typeof v === 'number')) : null,
+      online: typeof navigator !== 'undefined' ? !!navigator.onLine : null,
+      user_agent: typeof navigator !== 'undefined' ? _clip(navigator.userAgent, 200) : null,
+      page: typeof location !== 'undefined' ? _clip(location.pathname, 100) : null
+    };
+    import('./firebase-config.js')
+      .then(({ addDoc }) => addDoc(collection(db, 'users', uid, 'ai_errors'), payload))
+      .catch(e => console.warn('[AI log] scrittura fallita:', e?.message));
+  } catch (e) {
+    console.warn('[AI log] errore:', e?.message);
+  }
+}
 
 async function callGemini(key, prompt, opts = {}) {
-  const { temperature = 0.7, maxOutputTokens = 1024, parts, models, jsonMode } = opts;
+  const { temperature = 0.7, maxOutputTokens = 1024, parts, models, jsonMode, tag = 'callGemini' } = opts;
   const contentParts = parts || [{ text: prompt }];
   const targetModels = models || MODELS;
 
@@ -43,12 +105,15 @@ async function callGemini(key, prompt, opts = {}) {
   if (wait > 0) await _delay(wait);
 
   const diag = [];
+  const kinds = [];
+  let lastRaw = null;
   for (const model of targetModels) {
+    let tokens = maxOutputTokens;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         if (attempt > 0) await _delay(800);
         _lastCallTime = Date.now();
-        const genConfig = { temperature, maxOutputTokens };
+        const genConfig = { temperature, maxOutputTokens: tokens };
         if (jsonMode) genConfig.responseMimeType = 'application/json';
         const ctrl = new AbortController();
         const to = setTimeout(() => ctrl.abort(), _FETCH_TIMEOUT_MS);
@@ -67,34 +132,139 @@ async function callGemini(key, prompt, opts = {}) {
             }
           );
         } finally { clearTimeout(to); }
-        if (r.status === 429) { diag.push(`${model}:429`); console.warn(`[Gemini] ${model}: 429 Rate limit → next model`); break; }
-        if (r.status === 503 || r.status === 500) { diag.push(`${model}:${r.status}`); console.warn(`[Gemini] ${model}: ${r.status} overloaded`, attempt === 0 ? '→ retry' : '→ next model'); continue; }
+        if (r.status === 429) {
+          let msg = '';
+          try { msg = (await r.text()) || ''; } catch(_) {}
+          const perDay = /PerDay|per day|daily/i.test(msg);
+          kinds.push(perDay ? 'quota_day' : 'rate_limit');
+          diag.push(`${model}:429${perDay ? ' (giornaliera)' : ''}`);
+          console.warn(`[Gemini] ${model}: 429 Rate limit → next model`);
+          break;
+        }
+        if (r.status === 503 || r.status === 500) {
+          kinds.push('overloaded');
+          diag.push(`${model}:${r.status}`);
+          console.warn(`[Gemini] ${model}: ${r.status} overloaded`, attempt === 0 ? '→ retry' : '→ next model');
+          continue;
+        }
         if (!r.ok) {
           const errText = await r.text();
           let msg = '';
           try { msg = JSON.parse(errText)?.error?.message || ''; } catch(_) {}
-          diag.push(`${model}:${r.status} ${msg.substring(0, 80)}`);
+          if (r.status === 404) kinds.push('not_found');
+          else if (r.status === 403 || (r.status === 400 && /api key|API_KEY/i.test(msg))) kinds.push('auth');
+          else kinds.push('unknown');
+          diag.push(`${model}:${r.status} ${msg.substring(0, 120)}`);
           console.error(`[Gemini] ${model}: HTTP ${r.status}`, errText.substring(0, 200));
           break;
         }
         const d = await r.json();
-        console.log(`[Gemini] ${model}: Success`);
-        const text = d.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('');
+        const cand = d.candidates?.[0];
+        const finishReason = cand?.finishReason || null;
+        const text = cand?.content?.parts?.filter(p => !p.thought).map(p => p.text || '').join('');
         if (!text) {
-          diag.push(`${model}:vuoto(${d.candidates?.[0]?.finishReason || d.promptFeedback?.blockReason || '?'})`);
+          const reason = finishReason || d.promptFeedback?.blockReason || '?';
+          if (/SAFETY|BLOCK|PROHIBITED|RECITATION/i.test(reason)) { kinds.push('blocked'); diag.push(`${model}:bloccato(${reason})`); break; }
+          if (reason === 'MAX_TOKENS' && attempt === 0 && tokens < _MAX_TOKENS_CAP) {
+            // Il modello ha esaurito i token (spesso nel "ragionamento") prima di scrivere: riprova con più spazio
+            diag.push(`${model}:vuoto(MAX_TOKENS ${tokens}) → retry`);
+            tokens = Math.min(tokens * 2, _MAX_TOKENS_CAP);
+            continue;
+          }
+          kinds.push(reason === 'MAX_TOKENS' ? 'truncated' : 'empty');
+          diag.push(`${model}:vuoto(${reason})`);
           console.warn(`[Gemini] ${model}: Empty response`, d);
           break;
         }
-        return { success: true, text: text.trim(), model };
+        // Risposta JSON troncata per limite token: il JSON sarebbe incompleto → riprova con più token
+        if (jsonMode && finishReason === 'MAX_TOKENS') {
+          lastRaw = text;
+          if (attempt === 0 && tokens < _MAX_TOKENS_CAP) {
+            diag.push(`${model}:troncato(${tokens}) → retry`);
+            console.warn(`[Gemini] ${model}: risposta troncata a ${tokens} token → retry con ${Math.min(tokens * 2, _MAX_TOKENS_CAP)}`);
+            tokens = Math.min(tokens * 2, _MAX_TOKENS_CAP);
+            continue;
+          }
+          kinds.push('truncated');
+          diag.push(`${model}:troncato(${tokens})`);
+          break;
+        }
+        console.log(`[Gemini] ${model}: Success`);
+        return { success: true, text: text.trim(), model, finishReason, usage: d.usageMetadata || null, diag };
       } catch(e) {
-        diag.push(`${model}:${e.name === 'AbortError' ? 'timeout' : e.message}`);
+        const isTimeout = e.name === 'AbortError';
+        const isNet = !isTimeout && (e instanceof TypeError || /fetch|network/i.test(e.message || ''));
+        kinds.push(isTimeout ? 'timeout' : (isNet ? 'network' : 'unknown'));
+        diag.push(`${model}:${isTimeout ? 'timeout' : e.message}`);
         console.error(`[Gemini] ${model}: Exception:`, e.message, e);
         break;
       }
     }
   }
-  console.error('[Gemini] Tutti i modelli hanno fallito:', diag);
-  return { success: false, error: `AI non disponibile → ${diag.join(' | ')}` };
+  const kind = _pickErrorKind(kinds);
+  const error = aiErrorMessage(kind);
+  console.error('[Gemini] Tutti i modelli hanno fallito:', kind, diag);
+  logAIError({ fn: tag, stage: 'api', kind, userMessage: error, diag, raw: lastRaw });
+  return { success: false, error, kind, diag };
+}
+
+// ── Estrazione JSON robusta dalle risposte AI ───────────────
+// Gestisce: blocchi ```json, testo prima/dopo, virgole finali, JSON troncato (chiude stringhe/parentesi aperte).
+export function extractJsonLoose(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+  let s = raw.replace(/```(?:json)?/gi, '').trim();
+  // Risposta racchiusa in un array: prende il primo oggetto
+  if (s.startsWith('[')) {
+    try {
+      const arr = JSON.parse(s);
+      const first = Array.isArray(arr) ? arr.find(x => x && typeof x === 'object' && !Array.isArray(x)) : null;
+      if (first) return first;
+    } catch(_) { /* prosegue con l'estrazione standard */ }
+  }
+  const start = s.indexOf('{');
+  if (start === -1) return null;
+  s = s.slice(start);
+
+  const tryParse = str => { try { const v = JSON.parse(str); return (v && typeof v === 'object') ? v : null; } catch(_) { return null; } };
+
+  // 1) Tentativo diretto fino all'ultima graffa chiusa
+  const end = s.lastIndexOf('}');
+  if (end !== -1) {
+    const direct = tryParse(s.slice(0, end + 1));
+    if (direct) return direct;
+    const noTrailing = tryParse(s.slice(0, end + 1).replace(/,\s*([}\]])/g, '$1'));
+    if (noTrailing) return noTrailing;
+  }
+
+  // 2) Riparazione di JSON troncato: scansione con stack delle parentesi
+  const stack = [];
+  let inStr = false, esc = false, lastSafe = -1;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === '\\') esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === '{' || ch === '[') stack.push(ch);
+    else if (ch === '}' || ch === ']') { stack.pop(); }
+    if (!inStr && (ch === ',' || ch === '}' || ch === ']')) lastSafe = i;
+  }
+  if (lastSafe === -1) return null;
+  // Taglia all'ultimo punto "sicuro" e chiude ciò che resta aperto
+  let cut = s.slice(0, lastSafe + 1).replace(/[,:\s]+$/, '');
+  const st = [];
+  inStr = false; esc = false;
+  for (const ch of cut) {
+    if (inStr) { if (esc) esc = false; else if (ch === '\\') esc = true; else if (ch === '"') inStr = false; continue; }
+    if (ch === '"') inStr = true;
+    else if (ch === '{' || ch === '[') st.push(ch);
+    else if (ch === '}' || ch === ']') st.pop();
+  }
+  const closing = st.reverse().map(c => (c === '{' ? '}' : ']')).join('');
+  return tryParse((cut + closing).replace(/,\s*([}\]])/g, '$1'));
 }
 
 // ── Alimenti legittimamente a 0 kcal ────────────────────────
@@ -461,7 +631,7 @@ export async function calcMacrosFromText(text) {
   busy = true;
   try {
     const key = await getKey();
-    if (!key) return { success: false, error: 'API key mancante.' };
+    if (!key) return { success: false, error: aiErrorMessage('no_key') };
 
     // Pure AI-Native Direct Prompt — No historical bias, no fuzzy table overrides
     const prompt = `Analizza la seguente descrizione di un pasto e stima accuratamente i macronutrienti per OGNI ingrediente.
@@ -487,18 +657,19 @@ Formato JSON richiesto:
   ]
 }`;
 
-    const res = await callGemini(key, prompt, { temperature: 0.1, maxOutputTokens: 1024, jsonMode: true });
-    if (!res.success) return { success: false, error: res.error };
+    const res = await callGemini(key, prompt, { temperature: 0.1, maxOutputTokens: 2048, jsonMode: true, tag: 'calcMacrosFromText' });
+    if (!res.success) return { success: false, error: res.error, kind: res.kind };
 
-    const raw = res.text;
-    const s1 = raw.indexOf('{');
-    const s2 = raw.lastIndexOf('}');
-    if (s1 === -1 || s2 === -1) {
-      console.error('[calcMacros] Risposta non-JSON dal modello:', raw.substring(0, 300));
-      return { success: false, error: 'Risposta AI non valida.' };
+    let parsed = extractJsonLoose(res.text);
+    if (!parsed) {
+      console.error('[calcMacros] Risposta non-JSON dal modello:', res.text.substring(0, 300));
+      logAIError({
+        fn: 'calcMacrosFromText', stage: 'parse', kind: 'invalid_json',
+        model: res.model, finishReason: res.finishReason, usage: res.usage,
+        diag: res.diag, raw: res.text, detail: `input: ${cleanedText.substring(0, 200)}`
+      });
+      return { success: false, error: aiErrorMessage('invalid_json'), kind: 'invalid_json' };
     }
-
-    let parsed = JSON.parse(raw.slice(s1, s2 + 1));
     const rawItems = parsed.items || [];
 
     // Recalculate deterministic exact totals from items
@@ -1038,7 +1209,7 @@ async function _downscaleBase64(base64, mimeType, maxSide = 1024) {
 
 export async function analyzeFoodImageAI(base64Image, mimeType = 'image/jpeg') {
   const key = await getKey();
-  if (!key) return { success: false, error: 'API key mancante.' };
+  if (!key) return { success: false, error: aiErrorMessage('no_key') };
   ({ base64: base64Image, mimeType } = await _downscaleBase64(base64Image, mimeType));
 
   const promptText = `Analizza questa immagine. Può trattarsi di:
@@ -1095,29 +1266,46 @@ Formato JSON richiesto:
   ];
 
   // Priorità ai modelli con limite più alto (500 RPD) per vision
-  const res = await callGemini(key, null, {
-    temperature: 0.1,
-    maxOutputTokens: 1536,
-    parts,
-    jsonMode: true,
-    models: ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.6-flash', 'gemini-2.5-flash-lite']
-  });
+  const VISION_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.6-flash', 'gemini-2.5-flash-lite'];
+  let res = null;
+  let parsed = null;
+  let triedModels = [];
+  // Max 2 giri: se il primo modello risponde con JSON illeggibile, riprova sugli altri modelli
+  for (let round = 0; round < 2 && !parsed; round++) {
+    const models = VISION_MODELS.filter(m => !triedModels.includes(m));
+    if (!models.length) break;
+    res = await callGemini(key, null, {
+      temperature: 0.1,
+      maxOutputTokens: 3072,
+      parts,
+      jsonMode: true,
+      models,
+      tag: 'analyzeFoodImageAI'
+    });
 
-  if (!res.success) {
-    console.error('[FoodScanner] Analisi fallita:', res.error);
-    return { success: false, error: res.error || 'Errore analisi immagine. Verifica la connessione e riprova.' };
+    if (!res.success) {
+      console.error('[FoodScanner] Analisi fallita:', res.kind, res.diag);
+      return { success: false, error: res.error || aiErrorMessage('unknown'), kind: res.kind };
+    }
+
+    parsed = extractJsonLoose(res.text);
+    if (!parsed) {
+      triedModels.push(res.model);
+      console.error(`[FoodScanner] Risposta non leggibile da ${res.model} (round ${round + 1}):`, res.text.substring(0, 300));
+      logAIError({
+        fn: 'analyzeFoodImageAI', stage: 'parse', kind: 'invalid_json',
+        model: res.model, finishReason: res.finishReason, usage: res.usage,
+        diag: res.diag, raw: res.text,
+        detail: round === 0 ? 'retry su altri modelli' : 'retry fallito, errore mostrato'
+      });
+    }
   }
 
-  const raw = res.text;
-  const s1 = raw.indexOf('{');
-  const s2 = raw.lastIndexOf('}');
-  if (s1 === -1 || s2 === -1) {
-    console.error('[FoodScanner] Risposta non-JSON dal modello:', raw.substring(0, 300));
-    return { success: false, error: 'Risposta AI non valida.' };
+  if (!parsed) {
+    return { success: false, error: aiErrorMessage('invalid_json'), kind: 'invalid_json' };
   }
 
   try {
-    const parsed = JSON.parse(raw.slice(s1, s2 + 1));
 
     // If barcode was detected in image, try database lookup first
     if (parsed.barcode && typeof parsed.barcode === 'string' && parsed.barcode.trim().length >= 8) {
@@ -1172,7 +1360,12 @@ Formato JSON richiesto:
     };
   } catch(e) {
     console.error('analyzeFoodImageAI parse error:', e);
-    return { success: false, error: 'Errore parsing risposta AI.' };
+    logAIError({
+      fn: 'analyzeFoodImageAI', stage: 'exception', kind: 'invalid_json',
+      model: res?.model, finishReason: res?.finishReason, usage: res?.usage,
+      diag: res?.diag, raw: res?.text, detail: `${e?.name}: ${e?.message}`
+    });
+    return { success: false, error: "Errore nell'elaborazione della risposta AI. Riprova.", kind: 'invalid_json' };
   }
 }
 

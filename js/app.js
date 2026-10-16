@@ -137,7 +137,7 @@ export function addDays(str, n) {
 export function showToast(msg, type='ok') {
   document.querySelectorAll('.toast').forEach(t=>t.remove());
   const t=document.createElement('div'); t.className=`toast toast-${type}`; t.textContent=msg;
-  document.body.appendChild(t); setTimeout(()=>t.remove(),3000);
+  document.body.appendChild(t); setTimeout(()=>t.remove(), type==='err' ? 6000 : 3000);
 }
 export function showModal(opts) {
   const bg=document.createElement('div'); bg.className='modal-bg';
