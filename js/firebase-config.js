@@ -27,7 +27,10 @@ import {
   where,
   orderBy,
   limit,
-  serverTimestamp
+  serverTimestamp,
+  onSnapshot,
+  runTransaction,
+  increment
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 import { getStorage } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
 
@@ -83,6 +86,9 @@ export {
   orderBy,
   limit,
   serverTimestamp,
+  onSnapshot,
+  runTransaction,
+  increment,
   onAuthStateChanged,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,

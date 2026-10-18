@@ -39,16 +39,127 @@ async function requestWakeLock() {
 }
 function releaseWakeLock() { if (wakeLock) { wakeLock.release(); wakeLock = null; } }
 
-// ── Notification helpers ───────────────────────────────────
+// ── Persistenza sessione attiva (anti-kill) ─────────────────
+const ACTIVE_SESSION_KEY = 'fittracker_active_session_v1';
+let _restNextLabel = '';
 
-function postToSW(msg) {
-  navigator.serviceWorker?.controller?.postMessage(msg);
+function saveActiveSessionState() {
+  if (!sessionData || !exState?.length) return;
+  try {
+    const cardioDone = document.getElementById('cardio-done')?.checked || false;
+    const soundChecked = document.getElementById('sound-tgl')?.checked ?? true;
+    const payload = {
+      savedAt: Date.now(),
+      date: TODAY,
+      userId: getUserId() || null,
+      sessionData,
+      exState,
+      sessionStarted,
+      sessionStartTime,
+      sessionPausedMs,
+      sessionPausedAt,
+      isPaused,
+      restEndTime,
+      restNextLabel: _restNextLabel,
+      cardioDone,
+      soundChecked
+    };
+    localStorage.setItem(ACTIVE_SESSION_KEY, JSON.stringify(payload));
+  } catch (e) {
+    console.warn('saveActiveSessionState error:', e);
+  }
+}
+
+function clearActiveSessionState() {
+  try {
+    localStorage.removeItem(ACTIVE_SESSION_KEY);
+  } catch (e) {}
+}
+
+function tryRestoreActiveSession() {
+  try {
+    const raw = localStorage.getItem(ACTIVE_SESSION_KEY);
+    if (!raw) return false;
+    const saved = JSON.parse(raw);
+    if (!saved || saved.date !== TODAY || !saved.sessionData || !Array.isArray(saved.exState) || !saved.exState.length) {
+      clearActiveSessionState();
+      return false;
+    }
+    const uid = getUserId();
+    if (saved.userId && uid && saved.userId !== uid) return false;
+
+    sessionData = saved.sessionData;
+    exState = saved.exState;
+
+    const weekNum = getCurrentWeek();
+    const totalWeeks = programData?.weeks || 12;
+    const weekLabel = weekNum && sessionData.dayKey !== 'custom' ? ` · Sett. ${weekNum}/${totalWeeks}` : '';
+    const subLabel = sessionData.dayKey === 'custom'
+      ? `${exState.length} esercizi`
+      : `${DAYS_IT[sessionData.dayKey] || ''} · ${exState.length} esercizi${weekLabel}`;
+
+    launchActive(sessionData.name, subLabel, true);
+
+    if (saved.cardioDone && document.getElementById('cardio-done')) {
+      document.getElementById('cardio-done').checked = true;
+    }
+    if (saved.soundChecked !== undefined && document.getElementById('sound-tgl')) {
+      document.getElementById('sound-tgl').checked = saved.soundChecked;
+    }
+
+    if (saved.sessionStarted) {
+      sessionStarted   = true;
+      sessionStartTime = saved.sessionStartTime || Date.now();
+      sessionPausedMs  = saved.sessionPausedMs || 0;
+      sessionPausedAt  = saved.sessionPausedAt || 0;
+      isPaused         = !!saved.isPaused;
+
+      const startBtn = document.getElementById('start-btn');
+      const pauseBtn = document.getElementById('pause-btn');
+      const liveEl   = document.getElementById('live-badge');
+      const hintEl   = document.getElementById('s-hint');
+      if (startBtn) startBtn.style.display = 'none';
+      if (pauseBtn) {
+        pauseBtn.style.display = 'inline-flex';
+        pauseBtn.textContent = isPaused ? '▶️ Riprendi' : '⏸ Pausa';
+      }
+      if (liveEl) liveEl.style.display = 'inline-flex';
+      if (hintEl) hintEl.style.display = 'none';
+
+      const effectiveNow = isPaused && sessionPausedAt ? sessionPausedAt : Date.now();
+      sessionSec = Math.max(0, Math.floor((effectiveNow - sessionStartTime - sessionPausedMs) / 1000));
+      setT('s-timer', fmtTimer(sessionSec));
+
+      sessionInt = setInterval(() => {
+        if (!isPaused) {
+          sessionSec = Math.floor((Date.now() - sessionStartTime - sessionPausedMs) / 1000);
+          setT('s-timer', fmtTimer(sessionSec));
+        }
+      }, 500);
+
+      requestWakeLock();
+      renderExercises();
+      updateVolume();
+
+      if (saved.restEndTime && saved.restEndTime > Date.now()) {
+        const remSec = Math.ceil((saved.restEndTime - Date.now()) / 1000);
+        startRest(remSec, saved.restNextLabel || 'Prossima serie', saved.restEndTime);
+      }
+      showToast('🔄 Sessione in corso ripristinata!');
+    }
+    return true;
+  } catch (e) {
+    console.warn('tryRestoreActiveSession error:', e);
+    return false;
+  }
+}
+
+// ── Notification helpers (disabilitate durante l'allenamento) ─
+function postToSW(_msg) {
+  // Notifiche durante l'allenamento disabilitate su richiesta
 }
 async function requestNotifPermission() {
-  if (!('Notification' in window)) return;
-  if (Notification.permission === 'default') {
-    await Notification.requestPermission();
-  }
+  // Disabilitato
 }
 
 // ── Load select screen ─────────────────────────────────────
@@ -111,6 +222,10 @@ async function loadSessionSelect() {
             <button class="btn btn-o btn-sm" style="flex-shrink:0">▶️</button>
           </div>`;
       }).join('');
+
+      if (!sessionData) {
+        tryRestoreActiveSession();
+      }
     });
   } catch (e) {
     console.error('loadSessionSelect error:', e);
@@ -315,11 +430,11 @@ function getCurrentBlock(weekNum) {
   return null;
 }
 
-function launchActive(title, sub) {
+function launchActive(title, sub, isRestore = false) {
   document.getElementById('st-sel').style.display = 'none';
   document.getElementById('st-act').style.display = 'block';
   document.getElementById('s-title').textContent = title;
-  document.getElementById('s-sub').innerHTML = sub + ` &nbsp; <label style="font-size:12px;background:var(--bg3);padding:2px 6px;border-radius:4px;cursor:pointer"><input type="checkbox" id="sound-tgl" checked> 🔔 Suono</label>`;
+  document.getElementById('s-sub').innerHTML = sub + ` &nbsp; <label style="font-size:12px;background:var(--bg3);padding:2px 6px;border-radius:4px;cursor:pointer"><input type="checkbox" id="sound-tgl" checked onchange="window._onSessionInputChanged && window._onSessionInputChanged()"> 🔔 Suono</label>`;
 
   if (sessionData?.cardio?.type) {
     const c = sessionData.cardio;
@@ -329,16 +444,18 @@ function launchActive(title, sub) {
         <span style="font-size:24px">🏃</span>
         <div><div style="font-weight:700">${c.type}</div>
         <div style="font-size:12px;color:var(--t2)">${c.duration_minutes} min · ${c.notes||''}</div></div>
-        <label class="tgl" style="margin-left:auto"><input type="checkbox" id="cardio-done"><span class="tgl-s"></span></label>
+        <label class="tgl" style="margin-left:auto"><input type="checkbox" id="cardio-done" onchange="window._onSessionInputChanged && window._onSessionInputChanged()"><span class="tgl-s"></span></label>
       </div>`;
   }
 
-  sessionSec       = 0;
-  sessionStartTime = 0;
-  sessionPausedMs  = 0;
-  sessionPausedAt  = 0;
-  sessionStarted   = false;
-  setT('s-timer', '00:00');
+  if (!isRestore) {
+    sessionSec       = 0;
+    sessionStartTime = 0;
+    sessionPausedMs  = 0;
+    sessionPausedAt  = 0;
+    sessionStarted   = false;
+    setT('s-timer', '00:00');
+  }
 
   const startBtn = document.getElementById('start-btn');
   const pauseBtn = document.getElementById('pause-btn');
@@ -350,6 +467,8 @@ function launchActive(title, sub) {
   if (hintEl)   hintEl.style.display   = 'block';
 
   // Mostra feedback coach della sessione precedente (se disponibile)
+  const existingCoachCard = document.getElementById('last-coach-card');
+  if (existingCoachCard) existingCoachCard.remove();
   const coachContainer = document.getElementById('s-exercises');
   if (sessionData?.lastCoachSummary) {
     const cs = sessionData.lastCoachSummary;
@@ -371,7 +490,12 @@ function launchActive(title, sub) {
   }
 
   renderExercises();
+  if (!isRestore) saveActiveSessionState();
 }
+
+window._onSessionInputChanged = function() {
+  saveActiveSessionState();
+};
 
 window.startSession = function() {
   if (sessionStarted) return;
@@ -397,7 +521,7 @@ window.startSession = function() {
 
   renderExercises();
   requestWakeLock();
-  requestNotifPermission();
+  saveActiveSessionState();
 };
 
 function setT(id, v) { const e = document.getElementById(id); if (e) e.textContent = v; }
@@ -422,72 +546,40 @@ function beep() {
     gain.connect(audioCtx.destination);
     osc.type = 'sine';
     osc.frequency.value = 880;
-    gain.gain.setValueAtTime(1, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+    gain.gain.setValueAtTime(0.35, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.35);
     osc.start(audioCtx.currentTime);
-    osc.stop(audioCtx.currentTime + 0.5);
+    osc.stop(audioCtx.currentTime + 0.35);
+    // Sospendi il contesto audio subito dopo il beep per non interferire con la musica su iOS/Android
+    setTimeout(() => {
+      try { if (globalAudioCtx && globalAudioCtx.state === 'running') globalAudioCtx.suspend().catch(() => {}); } catch(_) {}
+    }, 450);
   } catch(e) {}
 }
 
-// Data URI di un file WAV di 1s di silenzio per mantenere l'entitlement audio su iOS/Android
-const SILENT_WAV_URI = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==';
-let bgAudioElem = null;
+// NOTA: Rimosso loop <audio> silenzioso e MediaSession perché su iOS/Android rubano l'audio focus
+// interrompendo Spotify / Apple Music dell'utente. Il timer usa timestamp assoluti (restEndTime)
+// e la sessione è salvata in localStorage a ogni modifica per resistere al kill della PWA.
+function enableBackgroundAudioKeepAlive() {}
+function disableBackgroundAudioKeepAlive() {}
 
-function enableBackgroundAudioKeepAlive(title = 'Recupero KOVA') {
-  try {
-    if (!bgAudioElem) {
-      bgAudioElem = new Audio(SILENT_WAV_URI);
-      bgAudioElem.loop = true;
-    }
-    bgAudioElem.play().catch(() => {});
-    if ('mediaSession' in navigator) {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: title,
-        artist: 'KOVA Fitness',
-        album: 'Timer Allenamento'
-      });
-      navigator.mediaSession.playbackState = 'playing';
-    }
-  } catch (e) {
-    console.warn('Background audio keep alive error:', e);
-  }
-}
-
-function disableBackgroundAudioKeepAlive() {
-  try {
-    if (bgAudioElem) {
-      bgAudioElem.pause();
-    }
-    if ('mediaSession' in navigator) {
-      navigator.mediaSession.playbackState = 'none';
-    }
-  } catch (e) {}
-}
-
-function triggerRestDoneEffects(label = '') {
+function triggerRestDoneEffects(_label = '') {
   showToast('⚡ Recupero terminato!');
   if (document.getElementById('sound-tgl')?.checked) {
     beep();
     setTimeout(beep, 250);
   }
   if (navigator.vibrate) navigator.vibrate([300, 150, 300, 150, 400]);
-
-  if ('serviceWorker' in navigator && Notification.permission === 'granted') {
-    navigator.serviceWorker.ready.then(reg => {
-      reg.showNotification('⚡ Recupero terminato!', {
-        body: label ? `Prossimo: ${label}` : 'Pronti per la prossima serie? 💪',
-        icon: 'icon.svg',
-        vibrate: [300, 150, 300, 150, 400],
-        tag: 'rest-timer',
-        renotify: true,
-        requireInteraction: true
-      });
-    }).catch(() => {});
-  }
+  // Notifiche push/sistema disabilitate durante l'allenamento
 }
 
 function onVisibilityChange() {
-  if (document.visibilityState !== 'visible' || !sessionStarted) return;
+  if (document.visibilityState === 'hidden') {
+    if (sessionData) saveActiveSessionState();
+    return;
+  }
+  if (!sessionStarted) return;
+  requestWakeLock();
   if (!isPaused) {
     sessionSec = Math.floor((Date.now() - sessionStartTime - sessionPausedMs) / 1000);
     setT('s-timer', fmtTimer(sessionSec));
@@ -498,13 +590,14 @@ function onVisibilityChange() {
     if (restSec <= 0) {
       clearInterval(restInt);
       hideRest();
-      disableBackgroundAudioKeepAlive();
       triggerRestDoneEffects();
       restEndTime = 0;
+      saveActiveSessionState();
     }
   }
 }
 document.addEventListener('visibilitychange', onVisibilityChange);
+window.addEventListener('pagehide', () => { if (sessionData) saveActiveSessionState(); });
 
 // ── Render exercises ───────────────────────────────────────
 function renderExercises() {
@@ -701,6 +794,7 @@ window.toggleVariant = function(ei) {
     const visible = el.style.display !== 'none';
     el.style.display = visible ? 'none' : 'block';
     if (exState[ei]) exState[ei].variante_usata = !visible;
+    saveActiveSessionState();
   }
 };
 
@@ -712,11 +806,13 @@ window.markCompDone = function(ei, ci) {
   if (idx >= 0) ex._compDone.splice(idx, 1);
   else ex._compDone.push(ci);
   renderExercises();
+  saveActiveSessionState();
 };
 
 window.onRpeChange = function(ei, val) {
   if (exState[ei]) {
     exState[ei].rpe = parseInt(val) || null;
+    saveActiveSessionState();
   }
 };
 
@@ -726,7 +822,10 @@ window.toggleExNote = function(ei) {
 };
 
 window.saveExNote = function(ei, val) {
-  if (exState[ei]) exState[ei].user_note = val || '';
+  if (exState[ei]) {
+    exState[ei].user_note = val || '';
+    saveActiveSessionState();
+  }
 };
 
 window.addSetToExercise = function(ei) {
@@ -742,6 +841,7 @@ window.addSetToExercise = function(ei) {
   });
   const wrap = document.getElementById(`sets-wrap-${ei}`);
   if (wrap) wrap.innerHTML = ex.sets.map((s, si) => renderSetRow(ex, ei, si, s)).join('');
+  saveActiveSessionState();
 };
 
 window.onWeight = function(ei, si, val) {
@@ -761,10 +861,12 @@ window.onWeight = function(ei, si, val) {
       if (pEl) pEl.innerHTML = getProgArrow(v, exState[ei].sets[j].last_weight);
     }
   }
+  saveActiveSessionState();
 };
 
 window.onReps = function(ei, si, val) {
   exState[ei].sets[si].actual_reps = val;
+  saveActiveSessionState();
 };
 
 window.markDone = function(ei, si) {
@@ -791,39 +893,31 @@ window.markDone = function(ei, si) {
     if (allDone) card.classList.add('completed'); else card.classList.remove('completed');
   }
   updateVolume();
+  saveActiveSessionState();
 };
 
 // ── Rest timer ─────────────────────────────────────────────
-function startRest(sec, label) {
+function startRest(sec, label, explicitEndTime = null) {
   clearInterval(restInt);
-  restEndTime = Date.now() + sec * 1000;
-  restSec = sec;
+  restEndTime = explicitEndTime || (Date.now() + sec * 1000);
+  restSec = Math.max(0, Math.ceil((restEndTime - Date.now()) / 1000));
+  _restNextLabel = label || '';
   document.getElementById('rest-box').style.display = 'block';
   document.getElementById('rest-next').textContent = label;
   document.getElementById('rest-box').scrollIntoView({ behavior: 'smooth', block: 'center' });
   updateRestDisplay();
+  saveActiveSessionState();
 
-  // Mantiene vivo il thread JS su iOS/Android riproducendo silenzio e sbloccando MediaSession
-  enableBackgroundAudioKeepAlive(`⏳ Recupero (${sec}s) — ${label}`);
-
-  postToSW({ type: 'schedule-rest-done', ms: sec * 1000, label });
   restInt = setInterval(() => {
     restSec = Math.max(0, Math.ceil((restEndTime - Date.now()) / 1000));
     updateRestDisplay();
 
-    if ('mediaSession' in navigator && restSec > 0) {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: `⏱ ${restSec}s — ${label}`,
-        artist: 'KOVA Fitness',
-        album: 'Recupero in corso'
-      });
-    }
-
     if (restSec <= 0) {
       clearInterval(restInt);
+      restEndTime = 0;
       hideRest();
-      disableBackgroundAudioKeepAlive();
       triggerRestDoneEffects(label);
+      saveActiveSessionState();
     }
   }, 500);
 }
@@ -835,14 +929,13 @@ function updateRestDisplay() {
 }
 function hideRest() {
   document.getElementById('rest-box').style.display = 'none';
-  disableBackgroundAudioKeepAlive();
 }
 
 window.skipRest = function() {
   clearInterval(restInt);
+  restEndTime = 0;
   hideRest();
-  disableBackgroundAudioKeepAlive();
-  postToSW({ type: 'cancel-rest' });
+  saveActiveSessionState();
 };
 window.togglePause = function() {
   isPaused = !isPaused;
@@ -852,6 +945,7 @@ window.togglePause = function() {
     sessionPausedMs += Date.now() - sessionPausedAt;
   }
   document.getElementById('pause-btn').textContent = isPaused ? '▶️ Riprendi' : '⏸ Pausa';
+  saveActiveSessionState();
 };
 
 function updateVolume() {
@@ -869,9 +963,10 @@ window.confirmExit = function() {
     onConfirm: () => {
       document.removeEventListener('visibilitychange', onVisibilityChange);
       clearInterval(sessionInt); clearInterval(restInt); releaseWakeLock();
-      postToSW({ type: 'cancel-rest' });
       restEndTime = 0;
       sessionStarted = false;
+      sessionData = null;
+      clearActiveSessionState();
       document.getElementById('st-act').style.display = 'none';
       document.getElementById('st-sel').style.display = 'block';
     }
@@ -1042,6 +1137,9 @@ window.finishSession = async function() {
       }))
     }, { merge: false });
 
+    // Sessione salvata su Firestore: pulisci lo stato provvisorio locale
+    clearActiveSessionState();
+
     for (const ex of exState) {
       await saveToLibrary('exercise_library', { name: ex.name, last_used: TODAY });
     }
@@ -1162,9 +1260,19 @@ window.finishSession = async function() {
       console.warn('Coach AI non disponibile:', aiErr.message);
     }
 
-    // Modale sintomi (cervicale/coccige) — salvataggio separato merge:true
+    // Calcola RPE medio esercizi come default per sRPE di sessione
+    const exRpes = exState.map(e => e.rpe).filter(r => r != null && r > 0);
+    const defaultSessionRpe = exRpes.length ? Math.round(exRpes.reduce((a, b) => a + b, 0) / exRpes.length) : 8;
+
+    // Modale sRPE (Foster 2001) + sintomi (cervicale/coccige) — salvataggio separato merge:true
     const symptomsHtml = `
       <div style="margin-top:16px;border-top:1px solid rgba(255,255,255,0.08);padding-top:14px">
+        <div style="margin-bottom:12px">
+          <label style="font-size:12px;font-weight:700;color:var(--t1);display:block;margin-bottom:4px">🔥 RPE Globale Sessione (1-10, Foster sRPE)</label>
+          <select class="fi" id="session-rpe-select" style="width:100%;height:34px;font-size:13px">
+            ${[1,2,3,4,5,6,7,8,9,10].map(v => `<option value="${v}" ${v === defaultSessionRpe ? 'selected' : ''}>${v} — ${v <= 4 ? 'Leggera' : v <= 6 ? 'Moderata' : v <= 8 ? 'Impegnativa' : 'Massimale'}</option>`).join('')}
+          </select>
+        </div>
         <div style="font-size:12px;font-weight:700;color:var(--t2);margin-bottom:10px">Fastidio durante la seduta? (0 = nessuno, 10 = massimo)</div>
         <div style="display:flex;gap:12px">
           <div style="flex:1">
@@ -1189,13 +1297,17 @@ window.finishSession = async function() {
       onConfirm: async () => {
         const cervicale = parseInt(document.getElementById('symptom-cervicale')?.value) || 0;
         const coccige = parseInt(document.getElementById('symptom-coccige')?.value) || 0;
-        if (cervicale > 0 || coccige > 0) {
-          try {
-            await setDoc(doc(db, 'users', getUserId(), 'daily_logs', TODAY), {
-              workout: { cervicale_max: cervicale, coccige_max: coccige }
-            }, { merge: true });
-          } catch(e) { console.warn('Errore salvataggio sintomi:', e); }
-        }
+        const sessionRpe = parseInt(document.getElementById('session-rpe-select')?.value) || defaultSessionRpe;
+        try {
+          const extraWorkoutFields = { session_rpe: sessionRpe };
+          if (cervicale > 0 || coccige > 0) {
+            extraWorkoutFields.cervicale_max = cervicale;
+            extraWorkoutFields.coccige_max = coccige;
+          }
+          await setDoc(doc(db, 'users', getUserId(), 'daily_logs', TODAY), {
+            workout: extraWorkoutFields
+          }, { merge: true });
+        } catch(e) { console.warn('Errore salvataggio sRPE/sintomi:', e); }
         window.location.href = 'index.html';
       }
     });

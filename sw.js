@@ -52,25 +52,10 @@ self.addEventListener('activate', e => e.waitUntil(
     .then(() => self.clients.claim())
 ));
 
-// Rest timer notification scheduling
+// Rest timer notification scheduling (disabilitato durante l'allenamento su richiesta utente)
 let restTimerId = null;
 self.addEventListener('message', event => {
-  if (event.data?.type === 'schedule-rest-done') {
-    clearTimeout(restTimerId);
-    const ms = event.data.ms || 0;
-    const label = event.data.label || '';
-    restTimerId = setTimeout(() => {
-      self.registration.showNotification('⚡ Recupero terminato!', {
-        body: label ? `Prossimo: ${label}` : 'Pronti per la prossima serie? 💪',
-        icon: BASE + 'icon.svg',
-        vibrate: [300, 150, 300, 150, 400],
-        tag: 'rest-timer',
-        renotify: true,
-        requireInteraction: true
-      });
-    }, ms);
-  }
-  if (event.data?.type === 'cancel-rest') {
+  if (event.data?.type === 'schedule-rest-done' || event.data?.type === 'cancel-rest') {
     clearTimeout(restTimerId);
     restTimerId = null;
   }

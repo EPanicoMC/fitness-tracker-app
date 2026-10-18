@@ -1,6 +1,6 @@
 import { requireAuth, loadSmart } from './app.js';
 import {
-  db, getUserId, doc, getDoc, setDoc, getDocs, addDoc, deleteDoc, collection, query, orderBy, limit, where
+  db, getUserId, doc, getDoc, setDoc, getDocs, addDoc, deleteDoc, collection, query, orderBy, limit, where, onSnapshot, runTransaction
 } from './firebase-config.js';
 import {
   getTodayString, getYesterdayString, getDayOfWeek, formatDateIT, formatDateShort, addDays, showToast, showModal, setW, setT, DAYS_IT, DAY_ORDER, cleanOldLogs, calcFitScore, calcSmartScore, calcRecoveryPlan, bootMark, reportBootStep
@@ -313,6 +313,7 @@ async function init() {
         if (local.daily_note != null)  logData.daily_note  = local.daily_note;
       } catch(e) {}
     }
+    loadFridgeFromFirebase().then(() => buildMeals()).catch(() => {});
     buildNutrition(); buildMeals(); buildWorkout(); buildStats(); buildFitScore();
     buildTodayStrip();
   });
@@ -2227,14 +2228,30 @@ window.calcAIMeal = async function() {
  
 async function processFridgeDeduction(fi, fiOwner, slicesUsed) {
   if (fi.slices > 0) {
-    const newRem = Math.max(0, (fi.slices_remaining ?? fi.slices) - slicesUsed);
+    // Read latest server state if possible to avoid stale local slices_remaining
+    let currentRem = fi.slices_remaining ?? fi.slices;
+    const uid = getUserId();
+    const friendEmail = _getCleanFriendEmail();
+    const candidates = [fiOwner, uid, friendEmail].filter(Boolean);
+    for (const cUser of new Set(candidates)) {
+      try {
+        const snap = await getDoc(doc(db, 'users', cUser, 'fridge', fi.id));
+        if (snap.exists()) {
+          const d = snap.data();
+          const r = d.slices_remaining ?? d.slices ?? currentRem;
+          if (r < currentRem) currentRem = r;
+        }
+      } catch (_) {}
+    }
+
+    const newRem = Math.max(0, currentRem - slicesUsed);
     try {
       await updateFridgeItem(fi.id, { slices_remaining: newRem }, fiOwner);
-      const idx = fridgeItems.findIndex(x => x.id === fi.id && x._owner === fiOwner);
-      if (idx >= 0) fridgeItems[idx] = { ...fi, slices_remaining: newRem };
+      const idx = fridgeItems.findIndex(x => x.id === fi.id);
+      if (idx >= 0) fridgeItems[idx] = { ...fi, slices_remaining: newRem, updated_at: Date.now() };
       if (newRem === 0) {
         await removeFridgeItem(fi.id, fiOwner);
-        fridgeItems = fridgeItems.filter(x => !(x.id === fi.id && x._owner === fiOwner));
+        fridgeItems = fridgeItems.filter(x => x.id !== fi.id);
         showToast('🎉 Ultime fette consumate! Piatto rimosso dalla Dispensa.');
       }
     } catch(e) {
@@ -2243,7 +2260,7 @@ async function processFridgeDeduction(fi, fiOwner, slicesUsed) {
   } else {
     try {
       await removeFridgeItem(fi.id, fiOwner);
-      fridgeItems = fridgeItems.filter(x => !(x.id === fi.id && x._owner === fiOwner));
+      fridgeItems = fridgeItems.filter(x => x.id !== fi.id);
     } catch(e) {
       console.warn('Fridge removal error:', e);
     }
@@ -3741,72 +3758,162 @@ window.refreshSmartAdvisor = async function(silent = false) {
 };
 
 // ── Dispensa (Fridge) ──────────────────────────────────────
+let _fridgeUnsubMy = null;
+let _fridgeUnsubFriend = null;
+let _fridgeMyItemsCache = [];
+let _fridgeFriendItemsCache = [];
+
+function _getCleanFriendEmail() {
+  const fe = appSettings?.friend_email?.trim().toLowerCase();
+  return (fe && fe !== getUserId()) ? fe : null;
+}
+
+function _recomputeMergedFridgeItems() {
+  const itemMap = new Map();
+  [..._fridgeMyItemsCache, ..._fridgeFriendItemsCache].forEach(item => {
+    const key = item.id || (item.name + '_' + item.created_at);
+    if (!itemMap.has(key)) {
+      itemMap.set(key, item);
+    } else {
+      const existing = itemMap.get(key);
+      const t1 = item.updated_at || 0;
+      const t2 = existing.updated_at || 0;
+      const rem1 = item.slices_remaining ?? item.slices ?? 999;
+      const rem2 = existing.slices_remaining ?? existing.slices ?? 999;
+      // Prefer the entry with the newer updated_at timestamp, or fewer remaining slices
+      if (t1 > t2 || (t1 === t2 && rem1 < rem2)) {
+        itemMap.set(key, {
+          ...existing,
+          ...item,
+          _owner: existing._owner && existing._owner !== getUserId() ? existing._owner : item._owner,
+          slices_remaining: rem1
+        });
+      }
+    }
+  });
+
+  fridgeItems = Array.from(itemMap.values());
+  fridgeItems.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+}
+
+function setupFridgeRealtimeListeners() {
+  const uid = getUserId();
+  if (!uid || typeof onSnapshot !== 'function') return;
+
+  if (_fridgeUnsubMy) { try { _fridgeUnsubMy(); } catch(_) {} _fridgeUnsubMy = null; }
+  if (_fridgeUnsubFriend) { try { _fridgeUnsubFriend(); } catch(_) {} _fridgeUnsubFriend = null; }
+
+  try {
+    _fridgeUnsubMy = onSnapshot(collection(db, 'users', uid, 'fridge'), snap => {
+      _fridgeMyItemsCache = snap.docs.map(d => {
+        const data = d.data();
+        return { id: d.id, ...data, _owner: data.created_by || uid };
+      });
+      _recomputeMergedFridgeItems();
+      buildMeals();
+    }, err => console.warn('My fridge listener error:', err.message));
+  } catch (e) {}
+
+  const friendEmail = _getCleanFriendEmail();
+  if (friendEmail) {
+    try {
+      _fridgeUnsubFriend = onSnapshot(collection(db, 'users', friendEmail, 'fridge'), snap => {
+        _fridgeFriendItemsCache = snap.docs.map(d => {
+          const data = d.data();
+          return { id: d.id, ...data, _owner: data.created_by || friendEmail };
+        });
+        _recomputeMergedFridgeItems();
+        buildMeals();
+      }, err => console.warn('Friend fridge listener error:', err.message));
+    } catch (e) {}
+  }
+}
 
 async function loadFridgeFromFirebase() {
   if (!getUserId()) return;
   try {
-    const mySnap = await getDocs(collection(db, 'users', getUserId(), 'fridge'));
-    const myItems = mySnap.docs.map(d => ({ id: d.id, ...d.data(), _owner: getUserId() }));
+    const uid = getUserId();
+    const mySnap = await getDocs(collection(db, 'users', uid, 'fridge'));
+    _fridgeMyItemsCache = mySnap.docs.map(d => {
+      const data = d.data();
+      return { id: d.id, ...data, _owner: data.created_by || uid };
+    });
 
-    let friendItems = [];
-    const friendEmail = appSettings?.friend_email?.trim().toLowerCase();
-    if (friendEmail && friendEmail !== getUserId()) {
+    _fridgeFriendItemsCache = [];
+    const friendEmail = _getCleanFriendEmail();
+    if (friendEmail) {
       try {
         const fSnap = await getDocs(collection(db, 'users', friendEmail, 'fridge'));
-        friendItems = fSnap.docs.map(d => ({ id: d.id, ...d.data(), _owner: friendEmail }));
+        _fridgeFriendItemsCache = fSnap.docs.map(d => {
+          const data = d.data();
+          return { id: d.id, ...data, _owner: data.created_by || friendEmail };
+        });
       } catch(e) {
         console.warn('Friend fridge load error:', e.message);
       }
     }
 
-    // Merge shared items by ID or Name + CreatedAt
-    const itemMap = new Map();
-    [...myItems, ...friendItems].forEach(item => {
-      const key = item.id || (item.name + '_' + item.created_at);
-      if (!itemMap.has(key)) {
-        itemMap.set(key, item);
-      } else {
-        const existing = itemMap.get(key);
-        const rem1 = item.slices_remaining ?? item.slices ?? 999;
-        const rem2 = existing.slices_remaining ?? existing.slices ?? 999;
-        if (rem1 < rem2) {
-          itemMap.set(key, { ...existing, ...item, slices_remaining: rem1 });
-        }
-      }
-    });
-
-    fridgeItems = Array.from(itemMap.values());
-    fridgeItems.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+    _recomputeMergedFridgeItems();
+    setupFridgeRealtimeListeners();
   } catch(e) {
     console.warn('Fridge load error:', e.message);
   }
 }
 
 async function saveFridgeItem(item) {
-  const ref = await addDoc(collection(db, 'users', getUserId(), 'fridge'), item);
+  const uid = getUserId();
+  const payload = { ...item, created_by: uid, updated_at: Date.now() };
+  const ref = await addDoc(collection(db, 'users', uid, 'fridge'), payload);
+  const friendEmail = _getCleanFriendEmail();
+  if (friendEmail) {
+    try {
+      await setDoc(doc(db, 'users', friendEmail, 'fridge', ref.id), payload, { merge: true });
+    } catch (e) {
+      console.warn('Could not mirror new fridge item to friend:', e.message);
+    }
+  }
   return ref.id;
 }
 
 async function updateFridgeItem(id, data, owner) {
-  const ownerId = owner || getUserId();
-  try {
-    await setDoc(doc(db, 'users', ownerId, 'fridge', id), data, { merge: true });
-  } catch(e) {
-    console.warn(`Failed writing fridge item to ${ownerId}, falling back to current user:`, e.message);
-    if (ownerId !== getUserId()) {
-      await setDoc(doc(db, 'users', getUserId(), 'fridge', id), data, { merge: true });
+  const uid = getUserId();
+  const ownerId = owner || uid;
+  const friendEmail = _getCleanFriendEmail();
+  const payload = { ...data, updated_at: Date.now() };
+
+  // Find full existing item so that if a mirror write creates the doc, it has all fields
+  const existing = fridgeItems.find(x => x.id === id) || {};
+  const { _owner, id: _ignoreId, ...cleanExisting } = existing;
+  const fullPayload = { ...cleanExisting, ...payload };
+
+  const targets = new Set([ownerId, uid]);
+  if (friendEmail) targets.add(friendEmail);
+
+  let anySuccess = false;
+  for (const targetUser of targets) {
+    if (!targetUser) continue;
+    try {
+      await setDoc(doc(db, 'users', targetUser, 'fridge', id), fullPayload, { merge: true });
+      anySuccess = true;
+    } catch(e) {
+      console.warn(`Failed writing fridge item to ${targetUser}:`, e.message);
     }
   }
+  if (!anySuccess) throw new Error('Impossibile aggiornare il piatto in Dispensa');
 }
 
 async function removeFridgeItem(id, owner) {
-  const ownerId = owner || getUserId();
-  try {
-    await deleteDoc(doc(db, 'users', ownerId, 'fridge', id));
-  } catch(e) {
-    if (ownerId !== getUserId()) {
-      try { await deleteDoc(doc(db, 'users', getUserId(), 'fridge', id)); } catch(e2) {}
-    }
+  const uid = getUserId();
+  const ownerId = owner || uid;
+  const friendEmail = _getCleanFriendEmail();
+  const targets = new Set([ownerId, uid]);
+  if (friendEmail) targets.add(friendEmail);
+
+  for (const targetUser of targets) {
+    if (!targetUser) continue;
+    try {
+      await deleteDoc(doc(db, 'users', targetUser, 'fridge', id));
+    } catch(e) {}
   }
 }
 
