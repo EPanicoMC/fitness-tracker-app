@@ -679,11 +679,18 @@ window.showTab = function(tab) {
   const allEl = document.getElementById('allenamento-view');
   const wkEl  = document.getElementById('week-view');
   const calEl = document.getElementById('cal-view');
+  const nextEl = document.getElementById('next-session');
+  const recEl  = document.getElementById('recent-recap');
 
   if (andEl) andEl.style.display = tab === 'andamento'   ? 'block' : 'none';
   if (allEl) allEl.style.display = tab === 'allenamento' ? 'block' : 'none';
   if (wkEl)  wkEl.style.display  = tab === 'week'        ? 'block' : 'none';
   if (calEl) calEl.style.display = tab === 'cal'         ? 'block' : 'none';
+
+  // Mostra Prossima Sessione e Focus di Oggi solo nelle viste Calendario / 7 Giorni per tenere puliti i Modelli
+  const showClassicHeaders = (tab === 'cal' || tab === 'week');
+  if (nextEl) nextEl.style.display = showClassicHeaders ? 'block' : 'none';
+  if (recEl)  recEl.style.display  = showClassicHeaders ? 'block' : 'none';
 
   document.querySelectorAll('.tab-btn').forEach(btn => {
     const t = btn.getAttribute('data-tab');
@@ -786,8 +793,8 @@ window.autoFillMissingWithAI = async function(saveImmediately = false) {
   const noteEl = document.getElementById('guided-ai-note');
   const userText = txtEl ? txtEl.value.trim() : '';
 
-  showToast('🤖 L\'AI sta analizzando storico e parametri mancanti...', 'info');
-  if (noteEl) noteEl.textContent = '⏳ Elaborazione con Gemini Flash + analisi dello storico in corso...';
+  showToast('🤖 L\'AI sta estraendo i tuoi dati...', 'info');
+  if (noteEl) noteEl.textContent = '⏳ Elaborazione con Gemini Flash in corso...';
 
   try {
     const rawLogs = Object.values(allRecentLogs || {});
@@ -796,7 +803,7 @@ window.autoFillMissingWithAI = async function(saveImmediately = false) {
 
     const setVal = (id, val) => {
       const el = document.getElementById(id);
-      if (el && val != null) el.value = val;
+      if (el && val != null && val !== '') el.value = val;
     };
     setVal('gm-sex', c.sex);
     setVal('gm-height', c.height);
@@ -810,13 +817,13 @@ window.autoFillMissingWithAI = async function(saveImmediately = false) {
     setVal('gm-today-complete', c.today_diary_complete);
 
     if (noteEl) {
-      noteEl.innerHTML = `<span style="color:#30d158;font-weight:700">✅ ${res.aiNote || 'Campi compilati con successo!'}</span>`;
+      noteEl.innerHTML = `<span style="color:#30d158;font-weight:700">✅ ${res.aiNote || 'Campi estratti! Controlla e clicca Salva.'}</span>`;
     }
 
     if (saveImmediately) {
       await window.saveGuidedMissingForm(c.default_session_rpe || 7.5);
     } else {
-      showToast('🪄 Campi compilati dall\'AI! Clicca "Salva Dati e Ricalibra Modelli" per confermare.');
+      showToast('🪄 Campi compilati! Verifica i valori e clicca "Salva i tuoi dati reali".');
     }
   } catch (e) {
     console.error('autoFillMissingWithAI error:', e);
@@ -827,20 +834,20 @@ window.autoFillMissingWithAI = async function(saveImmediately = false) {
 window.saveGuidedMissingForm = async function(defaultSessionRpe = 7.5) {
   const val = (id) => document.getElementById(id)?.value;
   const profileUpdates = {
-    sex: val('gm-sex') || 'M',
-    height: parseFloat(val('gm-height')) || 176,
-    dob: val('gm-dob') || '1994-06-15',
-    activity_level: val('gm-activity') || 'moderate',
-    goal_type: val('gm-goal') || 'cut',
-    weight_target: parseFloat(val('gm-target-w')) || 75.0,
-    target_rate_kg_week: parseFloat(val('gm-rate')) || -0.45
+    sex: val('gm-sex') || null,
+    height: parseFloat(val('gm-height')) || null,
+    dob: val('gm-dob') || null,
+    activity_level: val('gm-activity') || null,
+    goal_type: val('gm-goal') || null,
+    weight_target: parseFloat(val('gm-target-w')) || null,
+    target_rate_kg_week: parseFloat(val('gm-rate')) || null
   };
   const todayUpdates = {
     weight_kg: parseFloat(val('gm-today-w')) || null,
     sleep_hours: parseFloat(val('gm-today-sleep')) || null,
     diary_complete: val('gm-today-complete') || 'yes'
   };
-  const backfillWorkoutsRpe = document.getElementById('gm-backfill-rpe')?.checked !== false;
+  const backfillWorkoutsRpe = document.getElementById('gm-backfill-rpe')?.checked === true;
 
   try {
     showToast('💾 Salvataggio dati e calibrazione modelli...', 'info');

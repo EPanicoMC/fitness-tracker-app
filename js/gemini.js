@@ -2150,45 +2150,39 @@ export async function parseMissingDataWithAI(userText = '', contextSummary = {})
   }
 
   const prompt = `Sei l'assistente di configurazione dati di KOVA (app di fitness e nutrizione).
-L'utente vuole completare o stimare i dati mancanti per attivare i modelli predittivi (Filtro di Kalman TDEE e Modello Banister Fitness-Fatigue).
+L'utente vuole completare i dati mancanti per calibrare i modelli predittivi senza introdurre bias statistici.
 
 CONTESTO STORICO RILEVATO DALL'APP:
 ${JSON.stringify(contextSummary)}
 
-TESTO INSERITO DALL'UTENTE (può essere vuoto se chiede una stima automatica dal contesto):
+TESTO INSERITO DALL'UTENTE:
 "${(userText || '').trim()}"
 
-Regole:
-1. Estrai dal testo dell'utente qualsiasi dato esplicito (sesso M/F, data di nascita YYYY-MM-DD o anno/età, altezza in cm, peso di oggi in kg, peso target in kg, % massa grassa, ore di sonno, qualità sonno 1-5, passi, RPE sessione 1-10, completezza diario yes/partial/no).
-2. Per i campi NON specificati nel testo ma mancanti nel profilo, proponi una stima ragionevole basata sul CONTESTO STORICO (es. se media passi > 9000 e 4 workout/sett → activity_level: "moderate" o "active"; se la dieta attiva è ipocalorica → goal_type: "cut" e target_rate_kg_week: -0.5).
-3. Rispondi ESCLUSIVAMENTE con JSON valido conforme a questo schema:
+REGOLE ANTI-BIAS (TASSATIVE):
+1. Estrai dal TESTO DELL'UTENTE i dati che ha dichiarato esplicitamente (sesso M/F, data di nascita YYYY-MM-DD o anno di nascita, altezza in cm, peso di oggi in kg, peso target in kg, ore di sonno di oggi, completezza diario yes/partial/no).
+2. NON INVENTARE MAI sesso, altezza, data di nascita, peso di oggi o ore di sonno se non sono scritti nel testo dell'utente o già presenti nel contesto: restituisci null per quei campi per non falsare il BMR e il filtro di Kalman.
+3. Dal CONTESTO STORICO puoi dedurre SOLO:
+   - "activity_level" ("sedentary" | "light" | "moderate" | "active" | "very_active") se ci sono passi/allenamenti registrati;
+   - "goal_type" ("cut" | "maintain" | "bulk") e "target_rate_kg_week" se deducibili dal bilancio energetico.
+4. Rispondi ESCLUSIVAMENTE con JSON valido:
 {
-  "profileUpdates": {
-    "sex": "M" | "F" | null,
-    "dob": "YYYY-MM-DD" | null,
-    "height": 178 | null,
-    "body_fat": 15.0 | null,
-    "activity_level": "sedentary" | "light" | "moderate" | "active" | "very_active" | null,
-    "goal_type": "cut" | "maintain" | "bulk" | null,
-    "weight_target": 74.0 | null,
-    "target_rate_kg_week": -0.5 | null
-  },
-  "todayUpdates": {
-    "weight_kg": 76.5 | null,
-    "sleep_hours": 7.5 | null,
-    "sleep_quality": 4 | null,
-    "steps": 9000 | null,
-    "diary_complete": "yes" | "partial" | "no" | null,
-    "session_rpe": 7.5 | null
-  },
-  "backfillWorkoutsRpe": true | false,
-  "explanation": "Breve spiegazione in italiano (max 25 parole) dei valori estratti o stimati."
+  "sex": "M" | "F" | null,
+  "dob": "YYYY-MM-DD" | null,
+  "height": 178 | null,
+  "activity_level": "sedentary" | "light" | "moderate" | "active" | "very_active" | null,
+  "goal_type": "cut" | "maintain" | "bulk" | null,
+  "weight_target": 74.0 | null,
+  "target_rate_kg_week": -0.5 | null,
+  "today_weight_kg": 76.5 | null,
+  "today_sleep_hours": 7.5 | null,
+  "today_diary_complete": "yes" | "partial" | "no" | null,
+  "ai_note": "Spiegazione chiara in italiano (max 25 parole) di cosa è stato estratto dal testo e cosa resta da inserire manualmente."
 }`;
 
   try {
     const res = await callGemini(key, prompt, {
-      temperature: 0.15,
-      maxOutputTokens: 650,
+      temperature: 0.1,
+      maxOutputTokens: 500,
       jsonMode: true,
       models: GEMINI_MODELS,
       tag: 'parseMissingDataWithAI'
@@ -2200,10 +2194,7 @@ Regole:
     }
     return {
       success: true,
-      profileUpdates: parsed.profileUpdates || {},
-      todayUpdates: parsed.todayUpdates || {},
-      backfillWorkoutsRpe: !!parsed.backfillWorkoutsRpe,
-      explanation: parsed.explanation || 'Valori estratti e pre-compilati con successo.'
+      parsed
     };
   } catch (e) {
     return { success: false, error: e.message };

@@ -27,19 +27,19 @@
   <!-- PANNELLO EVENTI (nascosto) -->
   <div id="events-panel" style="display:none"></div>
 
-  <!-- PROSSIMA SESSIONE -->
-  <div id="next-session"></div>
-
-  <!-- FOCUS DI OGGI -->
-  <div id="recent-recap" style="margin-bottom: 20px;"></div>
-
   <!-- TAB SWITCHER -->
-  <div class="tab-sw" style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px">
+  <div class="tab-sw" style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:14px">
     <button class="tab-btn tab-active" data-tab="andamento" onclick="window.showTab('andamento')" style="font-size:11px;padding:8px 4px"><i class="ri-line-chart-line"></i> Andamento</button>
     <button class="tab-btn" data-tab="allenamento" onclick="window.showTab('allenamento')" style="font-size:11px;padding:8px 4px"><i class="ri-pulse-line"></i> Carico &amp; 1RM</button>
     <button class="tab-btn" data-tab="week" onclick="window.showTab('week')" style="font-size:11px;padding:8px 4px"><i class="ri-bar-chart-2-line"></i> 7 Giorni</button>
     <button class="tab-btn" data-tab="cal" onclick="window.showTab('cal')" style="font-size:11px;padding:8px 4px"><i class="ri-calendar-line"></i> Calendario</button>
   </div>
+
+  <!-- PROSSIMA SESSIONE (visibile solo in Calendario / 7 Giorni) -->
+  <div id="next-session" style="display:none"></div>
+
+  <!-- FOCUS DI OGGI (visibile solo in Calendario / 7 Giorni) -->
+  <div id="recent-recap" style="display:none;margin-bottom: 20px;"></div>
 
   <!-- DASHBOARD ANDAMENTO (Modello 1 + Coach + Regole) -->
   <div id="andamento-view" style="display:block">

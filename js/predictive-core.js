@@ -758,20 +758,46 @@ export function inspectMissingAndSmartDefaults(pipelineResult, rawLogs = []) {
   }
 
   const smartDefaults = {
-    sex: profile.sex || 'M',
-    height: Number(profile.height) || 176,
-    dob: profile.dob || '1994-06-15',
-    activity_level: profile.activity_level || inferredActivity,
+    sex: profile.sex || '',
+    height: profile.height ? Number(profile.height) : '',
+    dob: profile.dob || '',
+    activity_level: profile.activity_level || (cntSteps >= 3 ? inferredActivity : 'moderate'),
     goal_type: inferredGoal,
-    weight_target: inferredTargetW,
+    weight_target: profile.weight_target ? Number(profile.weight_target) : inferredTargetW,
     target_rate_kg_week: inferredRate,
-    today_weight_kg: todayLog.weight_kg != null ? Number(todayLog.weight_kg) : Number(curW.toFixed(1)),
-    today_sleep_hours: todayLog.sleep_hours != null ? Number(todayLog.sleep_hours) : 7.5,
+    today_weight_kg: todayLog.weight_kg != null ? Number(todayLog.weight_kg) : (lastKnownWeight ? Number(curW.toFixed(1)) : ''),
+    today_sleep_hours: todayLog.sleep_hours != null ? Number(todayLog.sleep_hours) : '',
     today_diary_complete: todayLog.diary_complete || todayLog.nutrition?.diary_complete || 'yes',
     default_session_rpe: 7.5
   };
 
-  const hasAnyMissing = missingProfileFields.length > 0 || missingTodayFields.length > 0 || workoutsMissingRpeCount > 0;
+  // Controllo Bias Metodologici e Diagnostica Trasparenza
+  const biasChecks = [
+    {
+      id: 'water_noise',
+      title: 'Filtro Acqua & Glicogeno (Attivo)',
+      status: 'protected',
+      desc: 'Il peso sulla bilancia oscilla di ±1–2 kg per acqua, sale, stress o ricariche di carboidrati. Il modello ignora i picchi singoli e calcola il Peso Reale (linea arancione).'
+    },
+    {
+      id: 'under_reporting',
+      title: 'Bias da Diario Incompleto',
+      status: (en.adherence14Pct ?? 100) < 80 ? 'warning' : 'protected',
+      desc: (en.adherence14Pct ?? 100) < 80
+        ? `Aderenza ultimi 14gg al ${en.adherence14Pct}%: se dimentichi di segnare uno sgarro o un pasto ma lasci la giornata come "Completa", il modello sottostima il tuo metabolismo. Segna sempre "Parziale" nei giorni incompleti.`
+        : 'I giorni segnati come "Parziali" o senza pasti vengono esclusi dal calcolo del metabolismo per non falsare il TDEE al ribasso.'
+    },
+    {
+      id: 'prior_anchoring',
+      title: 'Ancoraggio alla Formula Teorica (Prior)',
+      status: en.isPreliminary ? 'warning' : 'protected',
+      desc: en.isPreliminary
+        ? 'Hai meno di 14 giorni completi (peso + calorie): il metabolismo mostrato è ancora ancorato alla stima teorica iniziale (Mifflin-St Jeor). Man mano che registri i giorni, il tuo metabolismo reale sostituirà la formula.'
+        : 'Superati i 14 giorni di dati: il tuo metabolismo (TDEE) è ora guidato dai tuoi dati reali e non più dalla formula teorica.'
+    }
+  ];
+
+  const hasAnyMissing = missingProfileFields.length > 0 || missingTodayFields.length > 0;
 
   return {
     hasAnyMissing,
@@ -779,20 +805,21 @@ export function inspectMissingAndSmartDefaults(pipelineResult, rawLogs = []) {
     missingTodayFields,
     workoutsMissingRpeCount,
     smartDefaults,
-    avgStepsInferred: avgSteps
+    avgStepsInferred: cntSteps > 0 ? avgSteps : null,
+    biasChecks
   };
 }
 
 /**
  * Usa Gemini Flash + euristiche sullo storico dell'utente per compilare i dati mancanti
- * (da testo libero dell'utente oppure in modalità 100% automatica con 1 click).
+ * senza inventare dati anagrafici non dichiarati.
  */
 export async function compileMissingDataWithAI(userText = '', pipelineResult = null, rawLogs = []) {
   const info = inspectMissingAndSmartDefaults(pipelineResult, rawLogs);
   const base = { ...info.smartDefaults };
 
   const contextSummary = {
-    currentTrendWeightKg: pipelineResult?.energyOutput?.trendWeight || base.today_weight_kg,
+    currentTrendWeightKg: pipelineResult?.energyOutput?.trendWeight || base.today_weight_kg || null,
     avgIntake7dKcal: pipelineResult?.energyOutput?.avgIntake7d || null,
     avgSteps: info.avgStepsInferred,
     existingProfile: {
@@ -802,10 +829,7 @@ export async function compileMissingDataWithAI(userText = '', pipelineResult = n
       activity_level: pipelineResult?.profile?.activity_level || null,
       goal_type: pipelineResult?.profile?.goal_type || null,
       weight_target: pipelineResult?.profile?.weight_target || null
-    },
-    missingProfileFields: info.missingProfileFields,
-    missingTodayFields: info.missingTodayFields,
-    workoutsMissingRpeCount: info.workoutsMissingRpeCount
+    }
   };
 
   try {
@@ -834,31 +858,26 @@ export async function compileMissingDataWithAI(userText = '', pipelineResult = n
       if (['yes', 'partial', 'no'].includes(p.today_diary_complete)) {
         base.today_diary_complete = p.today_diary_complete;
       }
-      if (p.default_session_rpe != null && Number(p.default_session_rpe) >= 5 && Number(p.default_session_rpe) <= 10) {
-        base.default_session_rpe = Number(Number(p.default_session_rpe).toFixed(1));
-      }
       return {
         compiled: base,
-        aiNote: p.ai_note || 'Campi compilati con Gemini Flash a partire dal tuo storico.',
+        aiNote: p.ai_note || 'Campi estratti dal testo. Verifica i dati prima di salvare.',
         source: 'gemini_flash'
       };
     }
   } catch (e) {
-    console.warn('[PredictiveCore] Fallback euristico locale per compilazione AI:', e?.message);
+    console.warn('[PredictiveCore] Fallback locale per compilazione AI:', e?.message);
   }
 
   return {
     compiled: base,
-    aiNote: 'Campi pre-compilati automaticamente analizzando il tuo storico di pesate, passi e allenamenti.',
+    aiNote: 'Attività e obiettivo dedotti dal tuo storico; inserisci altezza/data di nascita reali se mancanti.',
     source: 'smart_heuristic'
   };
 }
 
 /**
- * Salva su Firestore i dati compilati tramite l'Assistente Guidato / Auto-Compilazione AI:
- * 1. Aggiorna `users/{uid}/settings/app` (profilo e target).
- * 2. Aggiorna `users/{uid}/daily_logs/{today}` (peso di oggi, sonno, completezza diario).
- * 3. Opzionalmente stima e completa RPE/RIR mancanti negli allenamenti passati (`backfillWorkoutsRpe`).
+ * Salva su Firestore SOLO i dati effettivamente compilati o confermati dall'utente
+ * (nessun sovrascrivere con valori fittizi che introdurrebbero bias nel BMR/TDEE).
  */
 export async function saveGuidedMissingData({
   profileUpdates = {},
@@ -870,15 +889,26 @@ export async function saveGuidedMissingData({
   const uid = getUid();
   const todayStr = getTodayStr();
 
-  const cleanProfile = {
-    sex: profileUpdates.sex || 'M',
-    height: Number(profileUpdates.height) || 176,
-    dob: profileUpdates.dob || '1994-06-15',
-    activity_level: profileUpdates.activity_level || 'moderate',
-    goal_type: profileUpdates.goal_type || 'cut',
-    weight_target: Number(profileUpdates.weight_target) || 75.0,
-    target_rate_kg_week: Number(profileUpdates.target_rate_kg_week ?? -0.45)
-  };
+  const cleanProfile = {};
+  if (profileUpdates.sex === 'M' || profileUpdates.sex === 'F') cleanProfile.sex = profileUpdates.sex;
+  if (profileUpdates.height && Number(profileUpdates.height) >= 120 && Number(profileUpdates.height) <= 230) {
+    cleanProfile.height = Number(profileUpdates.height);
+  }
+  if (profileUpdates.dob && /^\d{4}-\d{2}-\d{2}$/.test(profileUpdates.dob)) {
+    cleanProfile.dob = profileUpdates.dob;
+  }
+  if (['sedentary', 'light', 'moderate', 'active', 'very_active'].includes(profileUpdates.activity_level)) {
+    cleanProfile.activity_level = profileUpdates.activity_level;
+  }
+  if (['cut', 'maintain', 'bulk'].includes(profileUpdates.goal_type)) {
+    cleanProfile.goal_type = profileUpdates.goal_type;
+  }
+  if (profileUpdates.weight_target && Number(profileUpdates.weight_target) >= 35) {
+    cleanProfile.weight_target = Number(profileUpdates.weight_target);
+  }
+  if (profileUpdates.target_rate_kg_week != null && !isNaN(Number(profileUpdates.target_rate_kg_week))) {
+    cleanProfile.target_rate_kg_week = Number(profileUpdates.target_rate_kg_week);
+  }
 
   const settingsPayload = {
     ...cleanProfile,
