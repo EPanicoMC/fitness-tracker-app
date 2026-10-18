@@ -62,6 +62,9 @@ async function init() {
     setTimeout(() => window.showTab(hashTab), 0);
   }
 
+  // Render immediato (sincrono/offline) per evitare qualsiasi spinner bloccato mentre Firestore risponde
+  refreshPredictiveDashboards({ persist: false }).catch(() => {});
+
   const refs = [
     collection(db, 'users', userId, 'programs'),
     query(
@@ -95,7 +98,7 @@ async function init() {
       try { renderNextSession(lastCompleted); } catch(e) { console.error('renderNextSession error:', e); }
       try { buildWeekView(); } catch(e) { console.error('buildWeekView error:', e); }
       try { loadCalendar(); } catch(e) { console.error('loadCalendar error:', e); }
-      try { refreshPredictiveDashboards(); } catch(e) { console.error('refreshPredictiveDashboards error:', e); }
+      try { refreshPredictiveDashboards({ persist: true }); } catch(e) { console.error('refreshPredictiveDashboards error:', e); }
     });
 
 
@@ -111,22 +114,25 @@ async function init() {
       renderGrid(currentMonth.getFullYear(), currentMonth.getMonth());
     } catch(e) { /* non-critical */ }
 
-    // Load latest body check weight in background
+    // Load latest body checks in background
     try {
       const userId = getUserId();
       const checkSnap = await getDocs(query(
         collection(db, 'users', userId, 'body_checks'),
         orderBy('date', 'desc'),
-        limit(1)
+        limit(30)
       ));
       if (!checkSnap.empty) {
         latestCheckWeight = checkSnap.docs[0].data().weight || null;
+        window._recentBodyChecks = checkSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        refreshPredictiveDashboards({ persist: false }).catch(() => {});
       }
     } catch(e) { /* non-critical */ }
 
   } catch (e) {
     console.error('diary init error:', e);
     showToast('Errore caricamento diario dal cloud', 'err');
+    refreshPredictiveDashboards({ persist: false }).catch(() => {});
   }
 }
 
@@ -686,7 +692,7 @@ window.showTab = function(tab) {
 };
 
 // ── Dashboards Predittive (Modello 1, Modello 2, Regole & Coach) ──
-async function refreshPredictiveDashboards() {
+async function refreshPredictiveDashboards({ persist = true } = {}) {
   try {
     if (_isDemo90Active) {
       _predictiveState = await generateDemo90DaysData({ persistToFirestore: false });
@@ -698,9 +704,9 @@ async function refreshPredictiveDashboards() {
     const logsArray = Object.values(allRecentLogs || {});
     _predictiveState = await runPredictivePipeline({
       dailyLogs: logsArray,
-      checks: [],
+      checks: window._recentBodyChecks || [],
       settings: settingsData || {},
-      persistToFirestore: true
+      persistToFirestore: persist
     });
 
     // Imposta subito il Coach deterministico (sincrono/offline)
@@ -708,16 +714,22 @@ async function refreshPredictiveDashboards() {
     renderPredictiveViews();
 
     // Avvia in background il check settimanale automatico Gemini Flash (max 1/settimana, cached per hash)
-    getOrGenerateCoachReport(_predictiveState, { manualTrigger: false })
-      .then(rep => {
-        if (rep) {
-          _predictiveCoachReport = rep;
-          renderPredictiveViews();
-        }
-      })
-      .catch(() => {});
+    if (persist) {
+      getOrGenerateCoachReport(_predictiveState, { manualTrigger: false })
+        .then(rep => {
+          if (rep) {
+            _predictiveCoachReport = rep;
+            renderPredictiveViews();
+          }
+        })
+        .catch(() => {});
+    }
   } catch (err) {
-    console.warn('refreshPredictiveDashboards error:', err);
+    console.error('refreshPredictiveDashboards error:', err);
+    const andEl = document.getElementById('andamento-view');
+    if (andEl) {
+      andEl.innerHTML = `<div class="card" style="padding:16px;text-align:center"><p style="color:var(--t2);font-size:13px">Impossibile inizializzare la vista predittiva: ${err?.message || 'Errore sconosciuto'}</p><button class="btn btn-v btn-sm" style="margin-top:8px" onclick="window.toggleDemo90Days()">🌱 Avvia Demo 90gg</button></div>`;
+    }
   }
 }
 

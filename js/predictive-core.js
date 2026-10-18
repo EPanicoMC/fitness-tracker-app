@@ -15,9 +15,8 @@
  *   • `users/{uid}/coach_reports/{hash}`
  */
 
-import { db, doc, setDoc, getDoc, getDocs, collection } from './firebase-config.js';
-import { getCurrentUser } from './auth.js';
-import { getTodayStr } from './app.js';
+import { db, doc, setDoc, getDoc, getDocs, collection, getUserId } from './firebase-config.js';
+import { getTodayString as getTodayStr } from './app.js';
 import { runEnergyBalanceModel, addDaysISO, diffDaysISO } from './energy-model.js';
 import { runTrainingModel, DEFAULT_EXERCISE_CATALOG } from './training-model.js';
 import { evaluateCrossRules, buildDeterministicCoachFallback } from './coach-rules.js';
@@ -27,7 +26,7 @@ const LOCAL_SNAPSHOT_CACHE_KEY = 'fittracker_predictive_state_v1';
 const LOCAL_COACH_WEEKLY_KEY = 'fittracker_coach_weekly_meta_v1';
 
 function getUid() {
-  return getCurrentUser() || 'default_user';
+  return getUserId() || 'default_user';
 }
 
 /**
