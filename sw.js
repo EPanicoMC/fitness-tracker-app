@@ -1,4 +1,4 @@
-const CACHE = 'ft-v100';
+const CACHE = 'ft-v101';
 // Cache separata per librerie CDN con URL versionato (contenuto immutabile):
 // non viene svuotata ai bump di CACHE, così l'SDK Firebase non va riscaricato a ogni deploy.
 const CDN_CACHE = 'ft-cdn-v1';
@@ -37,6 +37,11 @@ const FILES = [
   'js/firebase-config.js',
   'js/phase-config.js',
   'js/widgets.js',
+  'js/energy-model.js',
+  'js/training-model.js',
+  'js/coach-rules.js',
+  'js/predictive-core.js',
+  'js/predictive-ui.js',
   'icon.svg',
   'img/anatomy.png'
 ].map(path => BASE + path);

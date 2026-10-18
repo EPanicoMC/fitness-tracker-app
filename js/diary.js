@@ -6,6 +6,8 @@ import { getTodayString, getDayOfWeek, formatDateIT, formatDateShort, showToast,
 import { generateWeeklyCoachReportAI, calcMacrosFromText, analyzeFoodImageAI } from './gemini.js';
 import { analyzeWeeklyData, buildAISummary, generateLocalFallback, buildExportModel, validateAIResponse } from './insights-engine.js';
 import { generatePDF, generateCSV } from './export-engine.js';
+import { runPredictivePipeline, getOrGenerateCoachReport, generateDemo90DaysData } from './predictive-core.js';
+import { renderAndamentoDashboardHTML, renderAllenamentoDashboardHTML } from './predictive-ui.js';
 
 const TODAY = getTodayString();
 let currentMonth = new Date(TODAY + 'T12:00:00');
@@ -18,6 +20,10 @@ let settingsData = null;
 let _dietPlanCache = null;
 let latestCheckWeight = null;
 let calendarEvents = [];
+let _predictiveState = null;
+let _predictiveCoachReport = null;
+let _isDemo90Active = false;
+let _isLoadingCoachAI = false;
 
 const EVENTO_COLORI = {
   micro_check: '#3a86ff', check_completo: '#3a86ff',
@@ -44,12 +50,18 @@ async function init() {
     return;
   }
 
+  // Se l'URL ha #andamento o #allenamento apri direttamente quella tab
+  const hashTab = (window.location.hash || '').replace('#', '');
+  if (['andamento', 'allenamento', 'week', 'cal'].includes(hashTab)) {
+    setTimeout(() => window.showTab(hashTab), 0);
+  }
+
   const refs = [
     collection(db, 'users', userId, 'programs'),
     query(
       collection(db, 'users', userId, 'daily_logs'),
       orderBy('date', 'desc'),
-      limit(60)
+      limit(120)
     ),
     doc(db, 'users', userId, 'settings', 'app'),
     collection(db, 'users', userId, 'diet_plans')
@@ -77,6 +89,7 @@ async function init() {
       try { renderNextSession(lastCompleted); } catch(e) { console.error('renderNextSession error:', e); }
       try { buildWeekView(); } catch(e) { console.error('buildWeekView error:', e); }
       try { loadCalendar(); } catch(e) { console.error('loadCalendar error:', e); }
+      try { refreshPredictiveDashboards(); } catch(e) { console.error('refreshPredictiveDashboards error:', e); }
     });
 
 
@@ -650,11 +663,104 @@ function computeDayBadge(log, plan, isOn) {
 
 // ── Tab switcher ───────────────────────────────────────────
 window.showTab = function(tab) {
-  document.getElementById('week-view').style.display = tab === 'week' ? 'block' : 'none';
-  document.getElementById('cal-view').style.display  = tab === 'cal'  ? 'block' : 'none';
-  document.querySelectorAll('.tab-btn').forEach((btn, i) => {
-    btn.classList.toggle('tab-active', (i === 0 && tab === 'week') || (i === 1 && tab === 'cal'));
+  const andEl = document.getElementById('andamento-view');
+  const allEl = document.getElementById('allenamento-view');
+  const wkEl  = document.getElementById('week-view');
+  const calEl = document.getElementById('cal-view');
+
+  if (andEl) andEl.style.display = tab === 'andamento'   ? 'block' : 'none';
+  if (allEl) allEl.style.display = tab === 'allenamento' ? 'block' : 'none';
+  if (wkEl)  wkEl.style.display  = tab === 'week'        ? 'block' : 'none';
+  if (calEl) calEl.style.display = tab === 'cal'         ? 'block' : 'none';
+
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    const t = btn.getAttribute('data-tab');
+    btn.classList.toggle('tab-active', t === tab);
   });
+};
+
+// ── Dashboards Predittive (Modello 1, Modello 2, Regole & Coach) ──
+async function refreshPredictiveDashboards() {
+  try {
+    if (_isDemo90Active) {
+      _predictiveState = await generateDemo90DaysData({ persistToFirestore: false });
+      _predictiveCoachReport = _predictiveState.deterministicCoach;
+      renderPredictiveViews();
+      return;
+    }
+
+    const logsArray = Object.values(allRecentLogs || {});
+    _predictiveState = await runPredictivePipeline({
+      dailyLogs: logsArray,
+      checks: [],
+      settings: settingsData || {},
+      persistToFirestore: true
+    });
+
+    // Imposta subito il Coach deterministico (sincrono/offline)
+    _predictiveCoachReport = _predictiveState.deterministicCoach;
+    renderPredictiveViews();
+
+    // Avvia in background il check settimanale automatico Gemini Flash (max 1/settimana, cached per hash)
+    getOrGenerateCoachReport(_predictiveState, { manualTrigger: false })
+      .then(rep => {
+        if (rep) {
+          _predictiveCoachReport = rep;
+          renderPredictiveViews();
+        }
+      })
+      .catch(() => {});
+  } catch (err) {
+    console.warn('refreshPredictiveDashboards error:', err);
+  }
+}
+
+function renderPredictiveViews() {
+  const andEl = document.getElementById('andamento-view');
+  const allEl = document.getElementById('allenamento-view');
+  if (!_predictiveState) return;
+
+  if (andEl) {
+    andEl.innerHTML = renderAndamentoDashboardHTML(_predictiveState, _predictiveCoachReport, {
+      isDemo: _isDemo90Active,
+      isLoadingCoach: _isLoadingCoachAI
+    });
+  }
+  if (allEl) {
+    allEl.innerHTML = renderAllenamentoDashboardHTML(_predictiveState);
+  }
+}
+
+window.askPredictiveCoach = async function() {
+  if (!_predictiveState || _isLoadingCoachAI) return;
+  const qInput = document.getElementById('coach-free-question');
+  const question = qInput ? qInput.value.trim() : '';
+
+  _isLoadingCoachAI = true;
+  renderPredictiveViews();
+
+  try {
+    const rep = await getOrGenerateCoachReport(_predictiveState, {
+      userQuestion: question,
+      manualTrigger: true,
+      forceRefresh: true
+    });
+    if (rep) {
+      _predictiveCoachReport = rep;
+      showToast(rep.source === 'gemini_flash' ? '🤖 Risposta Coach aggiornata!' : '⚙️ Risposta calcolata dal motore di regole (offline)');
+    }
+  } catch (err) {
+    showToast('Uso insight deterministici (rete non disponibile)', 'info');
+  } finally {
+    _isLoadingCoachAI = false;
+    renderPredictiveViews();
+  }
+};
+
+window.toggleDemo90Days = async function() {
+  _isDemo90Active = !_isDemo90Active;
+  await refreshPredictiveDashboards();
+  showToast(_isDemo90Active ? '🌱 Caricati 90 giorni di dati demo!' : '🔄 Ripristinati i tuoi dati reali');
 };
 
 // ── WeeklySmartScore algorithm ─────────────────────────────

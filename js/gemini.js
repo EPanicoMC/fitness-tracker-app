@@ -1909,3 +1909,232 @@ Rispondi SOLO con un JSON valido:
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// FASE 5: STRATO COACH PREDITTIVO (Modello 1 + Modello 2 + Regole → Gemini Flash)
+// ═══════════════════════════════════════════════════════════════════════════
+
+import { buildDeterministicCoachFallback } from './coach-rules.js';
+
+/**
+ * Calcola un hash deterministico (FNV-1a 32-bit esadecimale) del payload di input del Coach
+ * per evitare chiamate duplicate a Gemini se i dati non sono cambiati.
+ */
+export function computeCoachInputHash(payloadObj, userQuestion = '') {
+  const str = JSON.stringify({ p: payloadObj, q: (userQuestion || '').trim().toLowerCase() });
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return 'coach_' + h.toString(16).padStart(8, '0');
+}
+
+/**
+ * Costruisce il riassunto JSON compatto (< 2k token) da inviare a Gemini:
+ * include SOLO output sintetici dei due modelli, insight delle regole, obiettivo,
+ * aderenza e ultime 4 settimane aggregate per settimana (MAI lo storico giornaliero grezzo).
+ */
+export function buildCompactCoachPayload({
+  energyOutput = {},
+  trainingOutput = {},
+  insights = [],
+  weeklySummary4w = [],
+  profile = {}
+} = {}) {
+  return {
+    goal: {
+      goalType: energyOutput.goalType || profile.goal_type || 'cut',
+      targetWeightKg: profile.weight_target || null,
+      targetRateKgWeek: energyOutput.targetRateKgWeek || null
+    },
+    energyModel: {
+      date: energyOutput.date,
+      trendWeightKg: energyOutput.trendWeight,
+      weeklyRateKg: energyOutput.weeklyRateKg,
+      weeklyRatePct: energyOutput.weeklyRatePct,
+      tdeeEstimateKcal: energyOutput.tdeeEstimate,
+      tdeeCI95: energyOutput.tdeeCI,
+      avgIntake7dKcal: energyOutput.avgIntake7d,
+      energyBalance7dKcal: energyOutput.energyBalance7d,
+      recommendedKcal: energyOutput.recommendedKcal,
+      recommendedMacros: energyOutput.recommendedMacros,
+      etaGoalDate: energyOutput.etaGoalDate,
+      forecast4_8_12w: (energyOutput.forecast || []).map(f => ({
+        w: f.horizonWeeks,
+        weight: f.weight,
+        ci: [f.low, f.high]
+      })),
+      adherence14Pct: energyOutput.adherence14Pct,
+      confidence: energyOutput.confidence,
+      isPreliminary: energyOutput.isPreliminary
+    },
+    trainingModel: {
+      ctl: trainingOutput.ctl,
+      atl: trainingOutput.atl,
+      tsb: trainingOutput.tsb,
+      acwrEwma: trainingOutput.acwr,
+      acwrZone: trainingOutput.acwrZone,
+      readiness: trainingOutput.readiness,
+      predictedPerformanceIdx: trainingOutput.predictedPerformance,
+      deloadSuggested: trainingOutput.deloadSuggested,
+      topLifts: (trainingOutput.lifts || []).slice(0, 6).map(l => ({
+        id: l.exerciseId,
+        e1rm: l.e1rm,
+        slopePctWeek: l.trendSlopePctWeek,
+        forecast4w: l.forecast4w,
+        status: l.status
+      })),
+      weeklySetsByMuscle: trainingOutput.weeklySetsByMuscle
+    },
+    deterministicInsights: (insights || []).slice(0, 6).map(i => ({
+      id: i.id,
+      area: i.area,
+      severity: i.severity,
+      message: i.message,
+      action: i.action
+    })),
+    last4WeeksAggregated: (weeklySummary4w || []).slice(-4)
+  };
+}
+
+/**
+ * Interroga Gemini Flash come interprete ("Strato Coach") dei modelli deterministici,
+ * forzando lo schema JSON richiesto e ripiegando automaticamente sugli insight delle regole
+ * se offline, senza chiave, in timeout o errore.
+ */
+export async function generatePredictiveCoachAI({
+  energyOutput = {},
+  trainingOutput = {},
+  insights = [],
+  weeklySummary4w = [],
+  profile = {},
+  userQuestion = '',
+  forceRefresh = false
+} = {}) {
+  const compactPayload = buildCompactCoachPayload({
+    energyOutput,
+    trainingOutput,
+    insights,
+    weeklySummary4w,
+    profile
+  });
+  const inputHash = computeCoachInputHash(compactPayload, userQuestion);
+  const cacheKey = `fittracker_predictive_coach_${inputHash}`;
+
+  if (!forceRefresh && typeof localStorage !== 'undefined') {
+    try {
+      const cachedRaw = localStorage.getItem(cacheKey);
+      if (cachedRaw) {
+        const cached = JSON.parse(cachedRaw);
+        if (cached && cached.status && cached.headline) {
+          return { ...cached, inputHash, cached: true };
+        }
+      }
+    } catch (_) {}
+  }
+
+  const fallbackReport = {
+    ...buildDeterministicCoachFallback({ energyOutput, trainingOutput, insights }),
+    inputHash,
+    generatedAt: new Date().toISOString()
+  };
+
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return fallbackReport;
+  }
+
+  const key = await getKey();
+  if (!key) {
+    return fallbackReport;
+  }
+
+  const systemDirective = `Non inventare numeri: usa solo quelli forniti. Non fare diagnosi mediche. Rispetta i limiti di sicurezza. Rispondi in italiano, tono diretto da coach.`;
+  const questionBlock = userQuestion && userQuestion.trim()
+    ? `\nDOMANDA SPECIFICA DELL'ATLETA (rispondi integrandola in summary e corrections senza cambiare lo schema JSON):\n"${userQuestion.trim().slice(0, 350)}"\n`
+    : '';
+
+  const prompt = `${systemDirective}
+
+DATI DETERMINISTICI DEI MODELLI (JSON compatto):
+${JSON.stringify(compactPayload)}
+${questionBlock}
+Produci ESCLUSIVAMENTE un oggetto JSON conforme a questo schema esatto (nessun testo fuori dal JSON):
+{
+  "status": "on_track" | "attention" | "off_track",
+  "headline": "Titolo sintetico e diretto con i numeri chiave (max 14 parole)",
+  "summary": "Analisi chiara dello stato attuale e della risposta alla eventuale domanda (MASSIMO 80 PAROLE)",
+  "corrections": [
+    {
+      "area": "diet" | "training" | "recovery",
+      "action": "Azione pratica immediata con i numeri già calcolati dai modelli",
+      "why": "Motivazione basata sulle evidenze fornite"
+    }
+  ],
+  "focusNextWeek": "Priorità operativa numero 1 per i prossimi 7 giorni",
+  "motivationalNote": "Nota motivazionale asciutta da coach (1 frase)"
+}
+Vincolo: "corrections" deve contenere da 1 a massimo 3 elementi.`;
+
+  try {
+    const res = await callGemini(key, prompt, {
+      temperature: 0.25,
+      maxOutputTokens: 900,
+      jsonMode: true,
+      models: GEMINI_MODELS,
+      tag: 'predictiveCoach'
+    });
+
+    if (!res.success) {
+      return fallbackReport;
+    }
+
+    const parsed = extractJsonLoose(res.text);
+    if (!parsed || typeof parsed !== 'object') {
+      return fallbackReport;
+    }
+
+    const validStatus = ['on_track', 'attention', 'off_track'].includes(parsed.status)
+      ? parsed.status
+      : fallbackReport.status;
+
+    // Tronca summary a <= 80 parole se il modello sfora
+    let summaryText = String(parsed.summary || fallbackReport.summary).trim();
+    const words = summaryText.split(/\s+/);
+    if (words.length > 80) {
+      summaryText = words.slice(0, 80).join(' ') + '…';
+    }
+
+    const rawCorrections = Array.isArray(parsed.corrections) ? parsed.corrections : fallbackReport.corrections;
+    const corrections = rawCorrections.slice(0, 3).map(c => ({
+      area: ['diet', 'training', 'recovery'].includes(c?.area) ? c.area : 'diet',
+      action: String(c?.action || '').trim() || fallbackReport.corrections[0]?.action || '',
+      why: String(c?.why || '').trim() || fallbackReport.corrections[0]?.why || ''
+    })).filter(c => c.action);
+
+    const finalReport = {
+      status: validStatus,
+      headline: String(parsed.headline || fallbackReport.headline).trim(),
+      summary: summaryText,
+      corrections: corrections.length > 0 ? corrections : fallbackReport.corrections,
+      focusNextWeek: String(parsed.focusNextWeek || fallbackReport.focusNextWeek).trim(),
+      motivationalNote: String(parsed.motivationalNote || fallbackReport.motivationalNote).trim(),
+      source: 'gemini_flash',
+      model: res.model,
+      inputHash,
+      userQuestion: userQuestion ? userQuestion.trim() : null,
+      generatedAt: new Date().toISOString()
+    };
+
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify(finalReport));
+      } catch (_) {}
+    }
+
+    return finalReport;
+  } catch (_) {
+    return fallbackReport;
+  }
+}
+
+

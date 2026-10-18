@@ -35,6 +35,26 @@ async function loadSettings() {
   if (s.profile?.height)        document.getElementById('s-height').value     = s.profile.height;
   if (s.profile?.weight_target) document.getElementById('s-wtarget').value    = s.profile.weight_target;
   if (s.profile?.fat_target)    document.getElementById('s-ftarget').value    = s.profile.fat_target;
+  if (s.profile?.body_fat != null || s.body_fat != null) {
+    const bfEl = document.getElementById('s-body-fat');
+    if (bfEl) bfEl.value = s.profile?.body_fat ?? s.body_fat;
+  }
+  if (s.profile?.activity_level || s.activity_level) {
+    const actEl = document.getElementById('s-activity-level');
+    if (actEl) actEl.value = s.profile?.activity_level || s.activity_level;
+  }
+  if (s.profile?.goal_type || s.goal_type) {
+    const gEl = document.getElementById('s-goal-type');
+    if (gEl) gEl.value = s.profile?.goal_type || s.goal_type;
+  }
+  if (s.profile?.target_rate_kg_week != null || s.target_rate_kg_week != null) {
+    const rEl = document.getElementById('s-target-rate');
+    if (rEl) rEl.value = s.profile?.target_rate_kg_week ?? s.target_rate_kg_week;
+  }
+  if (s.morning_weighin_reminder !== undefined) {
+    const wRemEl = document.getElementById('s-weighin-reminder');
+    if (wRemEl) wRemEl.checked = !!s.morning_weighin_reminder;
+  }
   if (s.steps_goal)             document.getElementById('s-steps-goal').value = s.steps_goal;
   
   if (s.friend_email) {
@@ -76,15 +96,29 @@ async function loadGeminiKey() {
 }
 
 window.saveSettings = async function() {
+  const bodyFatVal = parseFloat(document.getElementById('s-body-fat')?.value);
+  const targetRateVal = parseFloat(document.getElementById('s-target-rate')?.value);
+  const actLevelVal = document.getElementById('s-activity-level')?.value || 'moderate';
+  const goalTypeVal = document.getElementById('s-goal-type')?.value || 'cut';
+  const weighinRemVal = document.getElementById('s-weighin-reminder') ? !!document.getElementById('s-weighin-reminder').checked : true;
+
   const data = {
     profile: {
-      name:          document.getElementById('s-name').value.trim(),
-      sex:           document.getElementById('s-sex').value,
-      dob:           document.getElementById('s-dob').value,
-      height:        parseInt(document.getElementById('s-height').value)  || null,
-      weight_target: parseFloat(document.getElementById('s-wtarget').value) || null,
-      fat_target:    parseFloat(document.getElementById('s-ftarget').value) || null
+      name:                document.getElementById('s-name').value.trim(),
+      sex:                 document.getElementById('s-sex').value,
+      dob:                 document.getElementById('s-dob').value,
+      height:              parseInt(document.getElementById('s-height').value)  || null,
+      weight_target:       parseFloat(document.getElementById('s-wtarget').value) || null,
+      fat_target:          parseFloat(document.getElementById('s-ftarget').value) || null,
+      body_fat:            !isNaN(bodyFatVal) ? bodyFatVal : null,
+      activity_level:      actLevelVal,
+      goal_type:           goalTypeVal,
+      target_rate_kg_week: !isNaN(targetRateVal) ? targetRateVal : null
     },
+    activity_level:      actLevelVal,
+    goal_type:           goalTypeVal,
+    target_rate_kg_week: !isNaN(targetRateVal) ? targetRateVal : null,
+    morning_weighin_reminder: weighinRemVal,
     steps_goal: parseInt(document.getElementById('s-steps-goal').value) || null,
     friend_email: document.getElementById('s-friend-email').value?.trim().toLowerCase() || null
   };

@@ -60,10 +60,59 @@
       </div>
     </div>
     <div class="s-row">
+      <div>
+        <div class="s-lbl">Massa Grassa attuale</div>
+        <div class="s-sub">Opzionale (per BMR Katch-McArdle)</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:4px">
+        <input type="number" class="fi-in" id="s-body-fat" style="width:60px" step="0.5" placeholder="--"> <span style="color:var(--t2);font-size:13px">%</span>
+      </div>
+    </div>
+    <div class="s-row">
+      <div>
+        <div class="s-lbl">Livello attività base</div>
+        <div class="s-sub">Per stima TDEE a priori (Mifflin-St Jeor)</div>
+      </div>
+      <select class="fi" id="s-activity-level" style="width:140px;text-align:right;background:transparent;border:none;border-bottom:1px solid var(--border);border-radius:0;padding:4px 8px;color:var(--t1)">
+        <option value="sedentary">Sedentario (×1.2)</option>
+        <option value="light">Leggero (×1.375)</option>
+        <option value="moderate" selected>Moderato (×1.55)</option>
+        <option value="active">Attivo (×1.725)</option>
+        <option value="very_active">Molto attivo (×1.9)</option>
+      </select>
+    </div>
+    <div class="s-row">
+      <div>
+        <div class="s-lbl">Obiettivo attuale</div>
+        <div class="s-sub">Guida target kcal e macro (Helms 2014)</div>
+      </div>
+      <select class="fi" id="s-goal-type" style="width:140px;text-align:right;background:transparent;border:none;border-bottom:1px solid var(--border);border-radius:0;padding:4px 8px;color:var(--t1)">
+        <option value="cut">Definizione (Cut)</option>
+        <option value="maintain">Mantenimento</option>
+        <option value="bulk">Massa (Lean Bulk)</option>
+      </select>
+    </div>
+    <div class="s-row">
+      <div>
+        <div class="s-lbl">Velocità target</div>
+        <div class="s-sub">Consigliato: -0.5..1% peso/sett in cut</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:4px">
+        <input type="number" class="fi-in" id="s-target-rate" style="width:68px" step="0.05" placeholder="-0.5"> <span style="color:var(--t2);font-size:13px">kg/sett</span>
+      </div>
+    </div>
+    <div class="s-row">
       <div><div class="s-lbl">Obiettivo passi</div></div>
       <div style="display:flex;align-items:center;gap:4px">
         <input type="number" class="fi-in" id="s-steps-goal" style="width:80px" placeholder="10000"> <span style="color:var(--t2);font-size:13px">passi/giorno</span>
       </div>
+    </div>
+    <div class="s-row">
+      <div>
+        <div class="s-lbl">Promemoria pesata mattutina</div>
+        <div class="s-sub">A digiuno dopo il bagno per ridurre il rumore</div>
+      </div>
+      <input type="checkbox" id="s-weighin-reminder" checked style="width:18px;height:18px;accent-color:var(--accent)">
     </div>
   </div>
 

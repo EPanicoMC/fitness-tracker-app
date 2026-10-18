@@ -1643,27 +1643,69 @@ window.openStepsModal = function() {
   const steps = logData.steps || '';
   const burned = logData.burned_kcal || '';
   const weight = logData.weight_kg != null ? logData.weight_kg : '';
+  const sleepH = logData.sleep_hours != null ? logData.sleep_hours : '';
+  const sleepQ = logData.sleep_quality != null ? logData.sleep_quality : '';
+  const waistCm = logData.waist_cm != null ? logData.waist_cm : '';
+  const diaryComp = logData.diary_complete || 'yes';
+  const anomalous = !!logData.anomalous_day;
 
   const bg = document.createElement('div');
   bg.className = 'modal-bg';
   bg.id = 'steps-modal';
   bg.innerHTML = `
-    <div class="modal">
+    <div class="modal" style="max-height:86vh;overflow-y:auto">
       <div class="modal-handle"></div>
-      <h3>🏃 Attivit&agrave; &amp; Peso Oggi</h3>
-      <p style="color:var(--t2);font-size:13px;margin-bottom:20px">Inserisci i dati di peso, passi e attivit&agrave; per oggi</p>
-      <div class="fg">
-        <label class="fl">&#9878;&#65039; Peso di oggi (kg)</label>
-        <input type="number" class="fi" id="sm-weight" placeholder="Es. 74.5" step="0.1" value="${weight}" inputmode="decimal">
+      <h3>🏃 Attivit&agrave;, Peso &amp; Diario Oggi</h3>
+      <p style="color:var(--t2);font-size:12px;margin-bottom:16px">Pesata consigliata al mattino a digiuno dopo il bagno per alimentare il filtro di Kalman.</p>
+      <div class="grid2">
+        <div class="fg">
+          <label class="fl">&#9878;&#65039; Peso (kg)</label>
+          <input type="number" class="fi" id="sm-weight" placeholder="Es. 74.5" step="0.1" value="${weight}" inputmode="decimal">
+        </div>
+        <div class="fg">
+          <label class="fl">&#128694; Passi</label>
+          <input type="number" class="fi" id="sm-steps" placeholder="Es. 8500" value="${steps}" inputmode="numeric">
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="fg">
+          <label class="fl">😴 Ore di sonno</label>
+          <input type="number" class="fi" id="sm-sleep" placeholder="Es. 7.5" step="0.5" value="${sleepH}" inputmode="decimal">
+        </div>
+        <div class="fg">
+          <label class="fl">⭐ Qualit&agrave; sonno (1–5)</label>
+          <select class="fi" id="sm-sleep-quality">
+            <option value="" ${sleepQ === '' ? 'selected' : ''}>--</option>
+            <option value="5" ${sleepQ == 5 ? 'selected' : ''}>5 — Ottimo</option>
+            <option value="4" ${sleepQ == 4 ? 'selected' : ''}>4 — Buono</option>
+            <option value="3" ${sleepQ == 3 ? 'selected' : ''}>3 — Sufficiente</option>
+            <option value="2" ${sleepQ == 2 ? 'selected' : ''}>2 — Scarso</option>
+            <option value="1" ${sleepQ == 1 ? 'selected' : ''}>1 — Pessimo</option>
+          </select>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="fg">
+          <label class="fl">📏 Vita cm (opz.)</label>
+          <input type="number" class="fi" id="sm-waist" placeholder="Es. 81.0" step="0.5" value="${waistCm}" inputmode="decimal">
+        </div>
+        <div class="fg">
+          <label class="fl">&#128293; Kcal attive (opz.)</label>
+          <input type="number" class="fi" id="sm-burned" placeholder="Es. 350" value="${burned}" inputmode="numeric">
+        </div>
       </div>
       <div class="fg">
-        <label class="fl">&#128694; Passi</label>
-        <input type="number" class="fi" id="sm-steps" placeholder="Es. 8500" value="${steps}" inputmode="numeric">
+        <label class="fl">📋 Giornata registrata completamente (Diario alimentare)</label>
+        <select class="fi" id="sm-diary-complete">
+          <option value="yes" ${diaryComp === 'yes' ? 'selected' : ''}>✅ S&igrave; — tutti i pasti registrati</option>
+          <option value="partial" ${diaryComp === 'partial' ? 'selected' : ''}>⚠️ Parziale — stima incompleta</option>
+          <option value="no" ${diaryComp === 'no' ? 'selected' : ''}>❌ No — giornata non tracciata</option>
+        </select>
       </div>
-      <div class="fg">
-        <label class="fl">&#128293; Kcal bruciate (opzionale)</label>
-        <input type="number" class="fi" id="sm-burned" placeholder="Es. 350" value="${burned}" inputmode="numeric">
-      </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2);margin:8px 0 14px;cursor:pointer">
+        <input type="checkbox" id="sm-anomalous" ${anomalous ? 'checked' : ''} style="width:16px;height:16px;accent-color:var(--orange)">
+        <span>🤒 Giornata anomala (malattia, viaggio, forte ritenzione/stress)</span>
+      </label>
       <div class="modal-btns">
         <button class="btn btn-flat" onclick="document.getElementById('steps-modal').remove()">Annulla</button>
         <button class="btn btn-v" onclick="window.saveStepsModal()">&#10003; Salva</button>
@@ -1680,10 +1722,20 @@ window.saveStepsModal = function() {
   const weightInput = document.getElementById('sm-weight')?.value;
   const weightVal = parseFloat(weightInput);
   const weight = !isNaN(weightVal) && weightVal > 0 ? weightVal : null;
+  const sleepVal = parseFloat(document.getElementById('sm-sleep')?.value);
+  const sleepQVal = parseInt(document.getElementById('sm-sleep-quality')?.value);
+  const waistVal = parseFloat(document.getElementById('sm-waist')?.value);
+  const diaryCompVal = document.getElementById('sm-diary-complete')?.value || 'yes';
+  const anomalousVal = !!document.getElementById('sm-anomalous')?.checked;
 
   if (steps !== null) logData.steps = steps;
   if (burned !== null) logData.burned_kcal = burned;
   logData.weight_kg = weight;
+  if (!isNaN(sleepVal) && sleepVal > 0) logData.sleep_hours = sleepVal;
+  if (!isNaN(sleepQVal) && sleepQVal >= 1) logData.sleep_quality = sleepQVal;
+  if (!isNaN(waistVal) && waistVal > 30) logData.waist_cm = waistVal;
+  logData.diary_complete = diaryCompVal;
+  logData.anomalous_day = anomalousVal;
 
   const sf = document.getElementById('steps-in');
   const kf = document.getElementById('burned-in');
@@ -1767,6 +1819,7 @@ async function syncToFirebase() {
   if(mof && mof.value !== '') logData.meals_out = parseInt(mof.value) || 0;
 
   const tots = calcTotals();
+  const diaryCompleteStatus = logData.diary_complete || (tots.kcal >= 800 ? 'yes' : (tots.kcal > 0 ? 'partial' : 'no'));
 
   const data = {
     date:            TODAY,
@@ -1774,7 +1827,8 @@ async function syncToFirebase() {
     steps:           logData.steps || null,
     burned_kcal:     logData.burned_kcal || null,
     daily_note:      logData.daily_note || '',
-    nutrition:       { totals: tots },
+    diary_complete:  diaryCompleteStatus,
+    nutrition:       { totals: tots, diary_complete: diaryCompleteStatus },
     streak:          logData.streak || 1,
     meals_state:     logData.meals_state     || {},
     meals_overrides: logData.meals_overrides || {},
@@ -1782,9 +1836,12 @@ async function syncToFirebase() {
     smart_advice:    logData.smart_advice    || {},
     last_updated:    logData.last_updated    || Date.now()
   };
-  // Campi giornalieri Fase 3 — solo se valorizzati
+  // Campi giornalieri Fase 3 & Modelli Predittivi — solo se valorizzati
   if (logData.weight_kg != null) data.weight_kg = logData.weight_kg;
   if (logData.sleep_hours != null) data.sleep_hours = logData.sleep_hours;
+  if (logData.sleep_quality != null) data.sleep_quality = logData.sleep_quality;
+  if (logData.waist_cm != null) data.waist_cm = logData.waist_cm;
+  if (logData.anomalous_day != null) data.anomalous_day = !!logData.anomalous_day;
   if (logData.drinks != null) data.drinks = logData.drinks;
   if (logData.meals_out != null) data.meals_out = logData.meals_out;
   
