@@ -21,7 +21,7 @@ import { getTodayStr } from './app.js';
 import { runEnergyBalanceModel, addDaysISO, diffDaysISO } from './energy-model.js';
 import { runTrainingModel, DEFAULT_EXERCISE_CATALOG } from './training-model.js';
 import { evaluateCrossRules, buildDeterministicCoachFallback } from './coach-rules.js';
-import { generatePredictiveCoachAI } from './gemini.js';
+import { generatePredictiveCoachAI, parseMissingDataWithAI } from './gemini.js';
 
 const LOCAL_SNAPSHOT_CACHE_KEY = 'fittracker_predictive_state_v1';
 const LOCAL_COACH_WEEKLY_KEY = 'fittracker_coach_weekly_meta_v1';
@@ -335,6 +335,8 @@ export async function runPredictivePipeline({
     normalizedDaysCount: normalizedDays.length,
     computedAt: new Date().toISOString()
   };
+
+  result.missingAssistant = inspectMissingAndSmartDefaults(result, logsArr);
 
   // Salva in localStorage per funzionamento 100% offline
   if (typeof localStorage !== 'undefined') {
@@ -687,3 +689,279 @@ export async function generateDemo90DaysData({ persistToFirestore = false } = {}
     persistToFirestore: false
   });
 }
+
+/**
+ * Analizza tutti i campi mancanti o parziali (Profilo, Oggi, Allenamenti passati senza RPE/RIR)
+ * e calcola valori pre-compilati intelligenti basati sullo storico reale dell'utente.
+ */
+export function inspectMissingAndSmartDefaults(pipelineResult, rawLogs = []) {
+  const todayStr = pipelineResult?.date || getTodayStr();
+  const profile = pipelineResult?.profile || {};
+  const en = pipelineResult?.energyOutput || {};
+
+  // Trova log di oggi
+  const todayLog = (rawLogs || []).find(l => (l.date || l.id) === todayStr) || {};
+
+  // Statistiche storiche per inferenza intelligente
+  let sumSteps = 0, cntSteps = 0;
+  let lastKnownWeight = en.trendWeight || en.rawWeight || null;
+  let workoutsMissingRpeCount = 0;
+
+  for (const l of (rawLogs || [])) {
+    if (l.steps != null && Number(l.steps) > 0) {
+      sumSteps += Number(l.steps);
+      cntSteps++;
+    }
+    if (!lastKnownWeight && l.weight_kg != null && Number(l.weight_kg) > 30) {
+      lastKnownWeight = Number(l.weight_kg);
+    }
+    if (l.workout?.completed) {
+      const hasSessionRpe = l.workout.session_rpe != null && Number(l.workout.session_rpe) > 0;
+      const exs = Array.isArray(l.workout.exercises) ? l.workout.exercises : [];
+      const hasExRpe = exs.some(ex => ex.rpe != null || (ex.sets || []).some(s => s.rir != null));
+      if (!hasSessionRpe || !hasExRpe) {
+        workoutsMissingRpeCount++;
+      }
+    }
+  }
+
+  const avgSteps = cntSteps > 0 ? Math.round(sumSteps / cntSteps) : 8500;
+  const inferredActivity = avgSteps >= 11500
+    ? 'active'
+    : avgSteps >= 7500
+      ? 'moderate'
+      : avgSteps >= 4500
+        ? 'light'
+        : 'moderate';
+
+  const curW = Number(lastKnownWeight || profile.current_weight || 78.0);
+  const inferredGoal = profile.goal_type || (en.energyBalance7d != null && en.energyBalance7d > 100 ? 'bulk' : 'cut');
+  const inferredTargetW = profile.weight_target != null && Number(profile.weight_target) > 30
+    ? Number(profile.weight_target)
+    : Number((inferredGoal === 'cut' ? curW - 4.0 : inferredGoal === 'bulk' ? curW + 3.0 : curW).toFixed(1));
+  const inferredRate = profile.target_rate_kg_week != null && !isNaN(Number(profile.target_rate_kg_week))
+    ? Number(profile.target_rate_kg_week)
+    : (inferredGoal === 'cut' ? -0.45 : inferredGoal === 'bulk' ? 0.25 : 0);
+
+  const missingProfileFields = [];
+  if (!profile.sex) missingProfileFields.push('Sesso biologico');
+  if (!profile.height) missingProfileFields.push('Altezza (cm)');
+  if (!profile.dob && !profile.age) missingProfileFields.push('Data di nascita');
+  if (!profile.activity_level) missingProfileFields.push('Livello attività (PAL)');
+  if (!profile.goal_type) missingProfileFields.push('Obiettivo (Cut/Maintain/Bulk)');
+  if (!profile.weight_target) missingProfileFields.push('Peso Obiettivo (kg)');
+
+  const missingTodayFields = [];
+  if (todayLog.weight_kg == null) missingTodayFields.push('Peso di oggi (kg)');
+  if (todayLog.sleep_hours == null) missingTodayFields.push('Ore di sonno oggi');
+  if (!todayLog.diary_complete && !todayLog.nutrition?.diary_complete) {
+    missingTodayFields.push('Conferma completezza diario oggi');
+  }
+
+  const smartDefaults = {
+    sex: profile.sex || 'M',
+    height: Number(profile.height) || 176,
+    dob: profile.dob || '1994-06-15',
+    activity_level: profile.activity_level || inferredActivity,
+    goal_type: inferredGoal,
+    weight_target: inferredTargetW,
+    target_rate_kg_week: inferredRate,
+    today_weight_kg: todayLog.weight_kg != null ? Number(todayLog.weight_kg) : Number(curW.toFixed(1)),
+    today_sleep_hours: todayLog.sleep_hours != null ? Number(todayLog.sleep_hours) : 7.5,
+    today_diary_complete: todayLog.diary_complete || todayLog.nutrition?.diary_complete || 'yes',
+    default_session_rpe: 7.5
+  };
+
+  const hasAnyMissing = missingProfileFields.length > 0 || missingTodayFields.length > 0 || workoutsMissingRpeCount > 0;
+
+  return {
+    hasAnyMissing,
+    missingProfileFields,
+    missingTodayFields,
+    workoutsMissingRpeCount,
+    smartDefaults,
+    avgStepsInferred: avgSteps
+  };
+}
+
+/**
+ * Usa Gemini Flash + euristiche sullo storico dell'utente per compilare i dati mancanti
+ * (da testo libero dell'utente oppure in modalità 100% automatica con 1 click).
+ */
+export async function compileMissingDataWithAI(userText = '', pipelineResult = null, rawLogs = []) {
+  const info = inspectMissingAndSmartDefaults(pipelineResult, rawLogs);
+  const base = { ...info.smartDefaults };
+
+  const contextSummary = {
+    currentTrendWeightKg: pipelineResult?.energyOutput?.trendWeight || base.today_weight_kg,
+    avgIntake7dKcal: pipelineResult?.energyOutput?.avgIntake7d || null,
+    avgSteps: info.avgStepsInferred,
+    existingProfile: {
+      sex: pipelineResult?.profile?.sex || null,
+      height: pipelineResult?.profile?.height || null,
+      dob: pipelineResult?.profile?.dob || null,
+      activity_level: pipelineResult?.profile?.activity_level || null,
+      goal_type: pipelineResult?.profile?.goal_type || null,
+      weight_target: pipelineResult?.profile?.weight_target || null
+    },
+    missingProfileFields: info.missingProfileFields,
+    missingTodayFields: info.missingTodayFields,
+    workoutsMissingRpeCount: info.workoutsMissingRpeCount
+  };
+
+  try {
+    const aiRes = await parseMissingDataWithAI(userText, contextSummary);
+    if (aiRes?.success && aiRes.parsed) {
+      const p = aiRes.parsed;
+      if (p.sex === 'M' || p.sex === 'F') base.sex = p.sex;
+      if (p.height != null && Number(p.height) >= 120 && Number(p.height) <= 230) base.height = Math.round(Number(p.height));
+      if (p.dob && /^\d{4}-\d{2}-\d{2}$/.test(p.dob)) base.dob = p.dob;
+      if (['sedentary', 'light', 'moderate', 'active', 'very_active'].includes(p.activity_level)) {
+        base.activity_level = p.activity_level;
+      }
+      if (['cut', 'maintain', 'bulk'].includes(p.goal_type)) base.goal_type = p.goal_type;
+      if (p.weight_target != null && Number(p.weight_target) >= 35 && Number(p.weight_target) <= 200) {
+        base.weight_target = Number(Number(p.weight_target).toFixed(1));
+      }
+      if (p.target_rate_kg_week != null && Math.abs(Number(p.target_rate_kg_week)) <= 1.5) {
+        base.target_rate_kg_week = Number(Number(p.target_rate_kg_week).toFixed(2));
+      }
+      if (p.today_weight_kg != null && Number(p.today_weight_kg) >= 35 && Number(p.today_weight_kg) <= 220) {
+        base.today_weight_kg = Number(Number(p.today_weight_kg).toFixed(1));
+      }
+      if (p.today_sleep_hours != null && Number(p.today_sleep_hours) >= 2 && Number(p.today_sleep_hours) <= 14) {
+        base.today_sleep_hours = Number(Number(p.today_sleep_hours).toFixed(1));
+      }
+      if (['yes', 'partial', 'no'].includes(p.today_diary_complete)) {
+        base.today_diary_complete = p.today_diary_complete;
+      }
+      if (p.default_session_rpe != null && Number(p.default_session_rpe) >= 5 && Number(p.default_session_rpe) <= 10) {
+        base.default_session_rpe = Number(Number(p.default_session_rpe).toFixed(1));
+      }
+      return {
+        compiled: base,
+        aiNote: p.ai_note || 'Campi compilati con Gemini Flash a partire dal tuo storico.',
+        source: 'gemini_flash'
+      };
+    }
+  } catch (e) {
+    console.warn('[PredictiveCore] Fallback euristico locale per compilazione AI:', e?.message);
+  }
+
+  return {
+    compiled: base,
+    aiNote: 'Campi pre-compilati automaticamente analizzando il tuo storico di pesate, passi e allenamenti.',
+    source: 'smart_heuristic'
+  };
+}
+
+/**
+ * Salva su Firestore i dati compilati tramite l'Assistente Guidato / Auto-Compilazione AI:
+ * 1. Aggiorna `users/{uid}/settings/app` (profilo e target).
+ * 2. Aggiorna `users/{uid}/daily_logs/{today}` (peso di oggi, sonno, completezza diario).
+ * 3. Opzionalmente stima e completa RPE/RIR mancanti negli allenamenti passati (`backfillWorkoutsRpe`).
+ */
+export async function saveGuidedMissingData({
+  profileUpdates = {},
+  todayUpdates = {},
+  backfillWorkoutsRpe = false,
+  defaultSessionRpe = 7.5,
+  rawLogs = []
+} = {}) {
+  const uid = getUid();
+  const todayStr = getTodayStr();
+
+  const cleanProfile = {
+    sex: profileUpdates.sex || 'M',
+    height: Number(profileUpdates.height) || 176,
+    dob: profileUpdates.dob || '1994-06-15',
+    activity_level: profileUpdates.activity_level || 'moderate',
+    goal_type: profileUpdates.goal_type || 'cut',
+    weight_target: Number(profileUpdates.weight_target) || 75.0,
+    target_rate_kg_week: Number(profileUpdates.target_rate_kg_week ?? -0.45)
+  };
+
+  const settingsPayload = {
+    ...cleanProfile,
+    profile: cleanProfile,
+    updated_at: new Date().toISOString()
+  };
+
+  const todayPayload = {
+    date: todayStr,
+    updated_at: new Date().toISOString()
+  };
+  if (todayUpdates.weight_kg != null && Number(todayUpdates.weight_kg) > 30) {
+    todayPayload.weight_kg = Number(todayUpdates.weight_kg);
+  }
+  if (todayUpdates.sleep_hours != null && Number(todayUpdates.sleep_hours) > 0) {
+    todayPayload.sleep_hours = Number(todayUpdates.sleep_hours);
+  }
+  if (['yes', 'partial', 'no'].includes(todayUpdates.diary_complete)) {
+    todayPayload.diary_complete = todayUpdates.diary_complete;
+    todayPayload.nutrition = { diary_complete: todayUpdates.diary_complete };
+  }
+
+  const writes = [
+    setDoc(doc(db, 'users', uid, 'settings', 'app'), settingsPayload, { merge: true }),
+    setDoc(doc(db, 'users', uid, 'daily_logs', todayStr), todayPayload, { merge: true })
+  ];
+
+  let backfilledWorkouts = 0;
+  const updatedLogsMap = {};
+
+  if (backfillWorkoutsRpe && Array.isArray(rawLogs)) {
+    for (const log of rawLogs) {
+      const dt = log.date || log.id;
+      if (!dt || !log.workout?.completed) continue;
+
+      const w = { ...log.workout };
+      let changed = false;
+
+      if (w.session_rpe == null || Number(w.session_rpe) <= 0) {
+        w.session_rpe = Number(defaultSessionRpe) || 7.5;
+        changed = true;
+      }
+      if (!w.duration_minutes && !w.duration_seconds) {
+        w.duration_minutes = 60;
+        w.duration_seconds = 3600;
+        changed = true;
+      }
+      if (Array.isArray(w.exercises)) {
+        w.exercises = w.exercises.map(ex => {
+          const exCopy = { ...ex };
+          if (exCopy.rpe == null) {
+            exCopy.rpe = Math.round(Number(defaultSessionRpe) || 8);
+            changed = true;
+          }
+          if (Array.isArray(exCopy.sets)) {
+            exCopy.sets = exCopy.sets.map((s, idx, arr) => {
+              if (s.rir != null) return s;
+              changed = true;
+              return { ...s, rir: idx === arr.length - 1 ? 1 : 2 };
+            });
+          }
+          return exCopy;
+        });
+      }
+
+      if (changed) {
+        backfilledWorkouts++;
+        updatedLogsMap[dt] = { ...log, workout: w };
+        if (backfilledWorkouts <= 30) {
+          writes.push(setDoc(doc(db, 'users', uid, 'daily_logs', dt), { workout: w }, { merge: true }));
+        }
+      }
+    }
+  }
+
+  await Promise.all(writes);
+
+  return {
+    settingsPayload,
+    todayPayload,
+    backfilledWorkouts,
+    updatedLogsMap
+  };
+}
+

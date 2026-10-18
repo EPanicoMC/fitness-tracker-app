@@ -344,23 +344,157 @@ export function renderAndamentoDashboardHTML(pipelineResult, coachReport, { isDe
     isLoading: isLoadingCoach
   });
 
-  // Box requisiti dati mancanti ("Per attivare X servono ancora N giorni di Y")
+  // Box requisiti dati mancanti + Assistente Guidato & Auto-Compilazione AI
   const allMissing = [
     ...(en.missingDataRequirements || []),
     ...(tr.missingDataRequirements || [])
   ];
-  const missingBannerHtml = allMissing.length > 0 ? `
-    <div class="card" style="margin-bottom:14px;background:rgba(255,195,0,0.06);border:1px solid rgba(255,195,0,0.3)">
-      <div style="font-size:11px;font-weight:800;color:#ffc300;letter-spacing:0.6px;margin-bottom:6px">
-        📡 CALIBRAZIONE MODELLI IN CORSO (${en.isPreliminary ? 'STIMA PRELIMINARE CON PRIOR MIFFLIN-ST JEOR' : 'ATTIVO'})
+  const ma = pipelineResult?.missingAssistant || {
+    hasAnyMissing: allMissing.length > 0,
+    missingProfileFields: [],
+    missingTodayFields: [],
+    workoutsMissingRpeCount: 0,
+    smartDefaults: {
+      sex: profile.sex || 'M',
+      height: profile.height || 176,
+      dob: profile.dob || '1994-06-15',
+      activity_level: profile.activity_level || 'moderate',
+      goal_type: profile.goal_type || 'cut',
+      weight_target: profile.weight_target || 75,
+      target_rate_kg_week: profile.target_rate_kg_week ?? -0.45,
+      today_weight_kg: en.rawWeight || en.trendWeight || 78,
+      today_sleep_hours: 7.5,
+      today_diary_complete: 'yes',
+      default_session_rpe: 7.5
+    }
+  };
+  const sd = ma.smartDefaults;
+
+  const missingTags = [
+    ...ma.missingProfileFields.map(f => `<span style="font-size:10px;background:rgba(255,195,0,0.16);color:#ffc300;padding:2px 7px;border-radius:8px;font-weight:700">Profilo: ${esc(f)}</span>`),
+    ...ma.missingTodayFields.map(f => `<span style="font-size:10px;background:rgba(58,134,255,0.16);color:#3a86ff;padding:2px 7px;border-radius:8px;font-weight:700">Oggi: ${esc(f)}</span>`),
+    ...(ma.workoutsMissingRpeCount > 0 ? [`<span style="font-size:10px;background:rgba(124,111,255,0.18);color:var(--accent);padding:2px 7px;border-radius:8px;font-weight:700">${ma.workoutsMissingRpeCount} workout senza RPE/RIR</span>`] : [])
+  ].join(' ');
+
+  const missingBannerHtml = (allMissing.length > 0 || ma.hasAnyMissing) && !isDemo ? `
+    <div class="card" id="guided-missing-card" style="margin-bottom:14px;background:linear-gradient(145deg,rgba(255,195,0,0.08),rgba(124,111,255,0.06));border:1px solid rgba(255,195,0,0.35)">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+        <div style="font-size:11px;font-weight:800;color:#ffc300;letter-spacing:0.6px">
+          🧭 ASSISTENTE DATI MANCANTI &amp; AUTO-COMPILAZIONE AI
+        </div>
+        <span style="font-size:9px;background:rgba(255,195,0,0.2);color:#ffc300;padding:2px 7px;border-radius:10px;font-weight:800">
+          ${en.isPreliminary ? 'MODALITÀ PRIOR ATTIVA' : 'DATI PARZIALI RILEVATI'}
+        </span>
       </div>
+
+      <div style="font-size:11.5px;color:var(--t2);line-height:1.45;margin-bottom:8px">
+        Alcune informazioni sono parziali: i modelli stanno già funzionando usando stime a priori, ma puoi <b>completarle qui sotto in modo guidato</b> oppure farle <b>compilare direttamente all'AI</b> dal tuo storico:
+      </div>
+
+      ${missingTags ? `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px">${missingTags}</div>` : ''}
+
       ${allMissing.map(m => `
-        <div style="font-size:12px;color:var(--t2);margin-bottom:4px;line-height:1.4">
-          • Per attivare al 100% <b>${esc(m.feature)}</b>: ${m.daysNeeded > 0 ? `servono ancora <b>${m.daysNeeded} giorni</b> di` : 'completa'} <i>${esc(m.missing)}</i>.
+        <div style="font-size:11px;color:var(--t3);margin-bottom:3px;line-height:1.35">
+          • <b>${esc(m.feature)}</b>: ${m.daysNeeded > 0 ? `servono ancora <b>${m.daysNeeded} giorni</b> di` : 'richiede'} <i>${esc(m.missing)}</i>.
         </div>`).join('')}
-      <div style="margin-top:6px">
-        <a href="settings.html" style="font-size:11px;color:var(--accent);font-weight:700;text-decoration:none">⚙️ Completa Profilo →</a>
+
+      <!-- COMPILAZIONE RAPIDA CON AI (TESTO LIBERO O 1-CLICK AUTOMATICO) -->
+      <div style="background:rgba(0,0,0,0.25);border:1px solid rgba(124,111,255,0.3);border-radius:10px;padding:10px;margin-top:10px">
+        <div style="font-size:10px;font-weight:800;color:var(--accent);letter-spacing:0.5px;margin-bottom:5px">
+          🤖 COMPILAZIONE INTELLIGENTE CON GEMINI FLASH
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:7px;flex-wrap:wrap">
+          <input type="text" id="guided-ai-text" class="fi" placeholder="Es: 'Uomo 178cm nato 1995, obiettivo 74kg, oggi 77.2kg e 7.5h sonno' (o lascia vuoto per stima da storico)" style="flex:1;min-width:190px;font-size:11.5px;padding:7px 9px">
+          <button class="btn btn-ghost btn-sm" onclick="window.autoFillMissingWithAI(false)" style="font-size:11px;padding:7px 10px;white-space:nowrap">
+            🪄 Compila Campi con AI
+          </button>
+          <button class="btn btn-v btn-sm" onclick="window.autoFillMissingWithAI(true)" style="font-size:11px;padding:7px 10px;white-space:nowrap;font-weight:800">
+            ⚡ Auto-Compila e Salva (AI)
+          </button>
+        </div>
+        <div id="guided-ai-note" style="font-size:10.5px;color:var(--t3)">
+          💡 I campi qui sotto sono già pre-compilati con le migliori stime ricavate dal tuo storico (pesate, passi medi e allenamenti).
+        </div>
       </div>
+
+      <!-- PROCEDURA GUIDATA INLINE (PASSO 1: PROFILO, PASSO 2: OGGI, PASSO 3: STORICO RPE) -->
+      <details open style="margin-top:10px">
+        <summary style="cursor:pointer;font-size:11px;font-weight:800;color:var(--t1);padding:4px 0">
+          📝 Verifica o modifica i campi guidati passo-passo
+        </summary>
+        <div style="margin-top:8px;display:grid;grid-template-columns:repeat(2,1fr);gap:8px">
+          <div>
+            <label style="font-size:10px;color:var(--t3);font-weight:700;display:block;margin-bottom:2px">1. Sesso Biologico (BMR)</label>
+            <select id="gm-sex" class="fi" style="font-size:12px;padding:6px 8px;width:100%">
+              <option value="M" ${sd.sex === 'M' ? 'selected' : ''}>Uomo (M)</option>
+              <option value="F" ${sd.sex === 'F' ? 'selected' : ''}>Donna (F)</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:10px;color:var(--t3);font-weight:700;display:block;margin-bottom:2px">2. Altezza (cm)</label>
+            <input type="number" id="gm-height" class="fi" value="${sd.height}" min="120" max="230" style="font-size:12px;padding:6px 8px;width:100%">
+          </div>
+          <div>
+            <label style="font-size:10px;color:var(--t3);font-weight:700;display:block;margin-bottom:2px">3. Data di Nascita</label>
+            <input type="date" id="gm-dob" class="fi" value="${sd.dob}" style="font-size:12px;padding:6px 8px;width:100%">
+          </div>
+          <div>
+            <label style="font-size:10px;color:var(--t3);font-weight:700;display:block;margin-bottom:2px">4. Attività (PAL Prior)</label>
+            <select id="gm-activity" class="fi" style="font-size:12px;padding:6px 8px;width:100%">
+              <option value="sedentary" ${sd.activity_level === 'sedentary' ? 'selected' : ''}>Sedentario (×1.2)</option>
+              <option value="light" ${sd.activity_level === 'light' ? 'selected' : ''}>Leggero (×1.375)</option>
+              <option value="moderate" ${sd.activity_level === 'moderate' ? 'selected' : ''}>Moderato (×1.55)</option>
+              <option value="active" ${sd.activity_level === 'active' ? 'selected' : ''}>Attivo (×1.725)</option>
+              <option value="very_active" ${sd.activity_level === 'very_active' ? 'selected' : ''}>Molto Attivo (×1.9)</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:10px;color:var(--t3);font-weight:700;display:block;margin-bottom:2px">5. Obiettivo</label>
+            <select id="gm-goal" class="fi" style="font-size:12px;padding:6px 8px;width:100%">
+              <option value="cut" ${sd.goal_type === 'cut' ? 'selected' : ''}>Definizione (Cut)</option>
+              <option value="maintain" ${sd.goal_type === 'maintain' ? 'selected' : ''}>Mantenimento</option>
+              <option value="bulk" ${sd.goal_type === 'bulk' ? 'selected' : ''}>Massa (Lean Bulk)</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:10px;color:var(--t3);font-weight:700;display:block;margin-bottom:2px">6. Peso Target (kg)</label>
+            <input type="number" step="0.1" id="gm-target-w" class="fi" value="${sd.weight_target}" style="font-size:12px;padding:6px 8px;width:100%">
+          </div>
+          <div>
+            <label style="font-size:10px;color:var(--t3);font-weight:700;display:block;margin-bottom:2px">7. Ritmo Target (kg/sett)</label>
+            <input type="number" step="0.05" id="gm-rate" class="fi" value="${sd.target_rate_kg_week}" style="font-size:12px;padding:6px 8px;width:100%">
+          </div>
+          <div>
+            <label style="font-size:10px;color:var(--t3);font-weight:700;display:block;margin-bottom:2px">8. Peso di Oggi (kg)</label>
+            <input type="number" step="0.1" id="gm-today-w" class="fi" value="${sd.today_weight_kg}" style="font-size:12px;padding:6px 8px;width:100%">
+          </div>
+          <div>
+            <label style="font-size:10px;color:var(--t3);font-weight:700;display:block;margin-bottom:2px">9. Ore Sonno Oggi</label>
+            <input type="number" step="0.5" id="gm-today-sleep" class="fi" value="${sd.today_sleep_hours}" style="font-size:12px;padding:6px 8px;width:100%">
+          </div>
+          <div>
+            <label style="font-size:10px;color:var(--t3);font-weight:700;display:block;margin-bottom:2px">10. Diario Oggi Completo?</label>
+            <select id="gm-today-complete" class="fi" style="font-size:12px;padding:6px 8px;width:100%">
+              <option value="yes" ${sd.today_diary_complete === 'yes' ? 'selected' : ''}>✅ Sì, registrato tutto</option>
+              <option value="partial" ${sd.today_diary_complete === 'partial' ? 'selected' : ''}>⚠️ Parziale (usa media)</option>
+              <option value="no" ${sd.today_diary_complete === 'no' ? 'selected' : ''}>❌ Non registrato</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="margin-top:8px;display:flex;align-items:center;gap:8px;background:rgba(255,255,255,0.03);padding:7px 10px;border-radius:8px">
+          <input type="checkbox" id="gm-backfill-rpe" checked style="width:15px;height:15px;accent-color:var(--accent)">
+          <label for="gm-backfill-rpe" style="font-size:11px;color:var(--t2);cursor:pointer;flex:1">
+            Stima e compila automaticamente <b>Session RPE (~${sd.default_session_rpe}) e RIR</b> negli allenamenti passati con info parziali (${ma.workoutsMissingRpeCount} sessioni rilevate)
+          </label>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="btn btn-g btn-sm" onclick="window.saveGuidedMissingForm()" style="flex:1;font-weight:800;padding:9px">
+            💾 Salva Dati e Ricalibra Modelli
+          </button>
+        </div>
+      </details>
     </div>` : '';
 
   const rateSign = (en.weeklyRateKg || 0) > 0 ? '+' : '';

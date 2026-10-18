@@ -6,7 +6,13 @@ import { getTodayString, getDayOfWeek, formatDateIT, formatDateShort, showToast,
 import { generateWeeklyCoachReportAI, calcMacrosFromText, analyzeFoodImageAI } from './gemini.js';
 import { analyzeWeeklyData, buildAISummary, generateLocalFallback, buildExportModel, validateAIResponse } from './insights-engine.js';
 import { generatePDF, generateCSV } from './export-engine.js';
-import { runPredictivePipeline, getOrGenerateCoachReport, generateDemo90DaysData } from './predictive-core.js';
+import {
+  runPredictivePipeline,
+  getOrGenerateCoachReport,
+  generateDemo90DaysData,
+  compileMissingDataWithAI,
+  saveGuidedMissingData
+} from './predictive-core.js';
 import { renderAndamentoDashboardHTML, renderAllenamentoDashboardHTML } from './predictive-ui.js';
 
 const TODAY = getTodayString();
@@ -761,6 +767,97 @@ window.toggleDemo90Days = async function() {
   _isDemo90Active = !_isDemo90Active;
   await refreshPredictiveDashboards();
   showToast(_isDemo90Active ? '🌱 Caricati 90 giorni di dati demo!' : '🔄 Ripristinati i tuoi dati reali');
+};
+
+window.autoFillMissingWithAI = async function(saveImmediately = false) {
+  const txtEl = document.getElementById('guided-ai-text');
+  const noteEl = document.getElementById('guided-ai-note');
+  const userText = txtEl ? txtEl.value.trim() : '';
+
+  showToast('🤖 L\'AI sta analizzando storico e parametri mancanti...', 'info');
+  if (noteEl) noteEl.textContent = '⏳ Elaborazione con Gemini Flash + analisi dello storico in corso...';
+
+  try {
+    const rawLogs = Object.values(allRecentLogs || {});
+    const res = await compileMissingDataWithAI(userText, _predictiveState, rawLogs);
+    const c = res.compiled || {};
+
+    const setVal = (id, val) => {
+      const el = document.getElementById(id);
+      if (el && val != null) el.value = val;
+    };
+    setVal('gm-sex', c.sex);
+    setVal('gm-height', c.height);
+    setVal('gm-dob', c.dob);
+    setVal('gm-activity', c.activity_level);
+    setVal('gm-goal', c.goal_type);
+    setVal('gm-target-w', c.weight_target);
+    setVal('gm-rate', c.target_rate_kg_week);
+    setVal('gm-today-w', c.today_weight_kg);
+    setVal('gm-today-sleep', c.today_sleep_hours);
+    setVal('gm-today-complete', c.today_diary_complete);
+
+    if (noteEl) {
+      noteEl.innerHTML = `<span style="color:#30d158;font-weight:700">✅ ${res.aiNote || 'Campi compilati con successo!'}</span>`;
+    }
+
+    if (saveImmediately) {
+      await window.saveGuidedMissingForm(c.default_session_rpe || 7.5);
+    } else {
+      showToast('🪄 Campi compilati dall\'AI! Clicca "Salva Dati e Ricalibra Modelli" per confermare.');
+    }
+  } catch (e) {
+    console.error('autoFillMissingWithAI error:', e);
+    showToast('Errore durante la compilazione AI', 'err');
+  }
+};
+
+window.saveGuidedMissingForm = async function(defaultSessionRpe = 7.5) {
+  const val = (id) => document.getElementById(id)?.value;
+  const profileUpdates = {
+    sex: val('gm-sex') || 'M',
+    height: parseFloat(val('gm-height')) || 176,
+    dob: val('gm-dob') || '1994-06-15',
+    activity_level: val('gm-activity') || 'moderate',
+    goal_type: val('gm-goal') || 'cut',
+    weight_target: parseFloat(val('gm-target-w')) || 75.0,
+    target_rate_kg_week: parseFloat(val('gm-rate')) || -0.45
+  };
+  const todayUpdates = {
+    weight_kg: parseFloat(val('gm-today-w')) || null,
+    sleep_hours: parseFloat(val('gm-today-sleep')) || null,
+    diary_complete: val('gm-today-complete') || 'yes'
+  };
+  const backfillWorkoutsRpe = document.getElementById('gm-backfill-rpe')?.checked !== false;
+
+  try {
+    showToast('💾 Salvataggio dati e calibrazione modelli...', 'info');
+    const rawLogs = Object.values(allRecentLogs || {});
+    const saved = await saveGuidedMissingData({
+      profileUpdates,
+      todayUpdates,
+      backfillWorkoutsRpe,
+      defaultSessionRpe,
+      rawLogs
+    });
+
+    // Aggiorna la cache locale in memoria per ricalcolo istantaneo
+    settingsData = { ...(settingsData || {}), ...saved.settingsPayload };
+    if (allRecentLogs[TODAY]) {
+      allRecentLogs[TODAY] = { ...allRecentLogs[TODAY], ...saved.todayPayload };
+    } else {
+      allRecentLogs[TODAY] = saved.todayPayload;
+    }
+    if (saved.updatedLogsMap) {
+      Object.assign(allRecentLogs, saved.updatedLogsMap);
+    }
+
+    await refreshPredictiveDashboards();
+    showToast(`✅ Profilo, giornata e ${saved.backfilledWorkouts || 0} allenamenti calibrati!`);
+  } catch (e) {
+    console.error('saveGuidedMissingForm error:', e);
+    showToast('Errore salvataggio dati guidati', 'err');
+  }
 };
 
 // ── WeeklySmartScore algorithm ─────────────────────────────

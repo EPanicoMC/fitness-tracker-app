@@ -35,14 +35,14 @@
 
   <!-- TAB SWITCHER -->
   <div class="tab-sw" style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px">
-    <button class="tab-btn" data-tab="andamento" onclick="window.showTab('andamento')" style="font-size:11px;padding:8px 4px"><i class="ri-line-chart-line"></i> Andamento</button>
+    <button class="tab-btn tab-active" data-tab="andamento" onclick="window.showTab('andamento')" style="font-size:11px;padding:8px 4px"><i class="ri-line-chart-line"></i> Andamento</button>
     <button class="tab-btn" data-tab="allenamento" onclick="window.showTab('allenamento')" style="font-size:11px;padding:8px 4px"><i class="ri-pulse-line"></i> Carico &amp; 1RM</button>
     <button class="tab-btn" data-tab="week" onclick="window.showTab('week')" style="font-size:11px;padding:8px 4px"><i class="ri-bar-chart-2-line"></i> 7 Giorni</button>
-    <button class="tab-btn tab-active" data-tab="cal" onclick="window.showTab('cal')" style="font-size:11px;padding:8px 4px"><i class="ri-calendar-line"></i> Calendario</button>
+    <button class="tab-btn" data-tab="cal" onclick="window.showTab('cal')" style="font-size:11px;padding:8px 4px"><i class="ri-calendar-line"></i> Calendario</button>
   </div>
 
   <!-- DASHBOARD ANDAMENTO (Modello 1 + Coach + Regole) -->
-  <div id="andamento-view" style="display:none">
+  <div id="andamento-view" style="display:block">
     <div class="spin"></div>
   </div>
 
@@ -57,7 +57,7 @@
   </div>
 
   <!-- CALENDAR VIEW -->
-  <div id="cal-view" style="display:block">
+  <div id="cal-view" style="display:none">
     <!-- MONTH NAV -->
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
       <button class="btn-icon" onclick="window.changeMonth(-1)">←</button>

@@ -2137,4 +2137,77 @@ Vincolo: "corrections" deve contenere da 1 a massimo 3 elementi.`;
   }
 }
 
+/**
+ * Analizza una frase in linguaggio naturale dell'utente E/O il contesto storico dell'utente
+ * per compilare o stimare automaticamente i campi mancanti richiesti dai Modelli Predittivi
+ * (Profilo: sesso, data nascita, altezza, attività, obiettivo, peso target, velocità;
+ *  Oggi: peso, ore sonno, qualità sonno, passi, completezza diario, RPE sessione).
+ */
+export async function parseMissingDataWithAI(userText = '', contextSummary = {}) {
+  const key = await getKey();
+  if (!key) {
+    return { success: false, error: 'Chiave Gemini non configurata' };
+  }
+
+  const prompt = `Sei l'assistente di configurazione dati di KOVA (app di fitness e nutrizione).
+L'utente vuole completare o stimare i dati mancanti per attivare i modelli predittivi (Filtro di Kalman TDEE e Modello Banister Fitness-Fatigue).
+
+CONTESTO STORICO RILEVATO DALL'APP:
+${JSON.stringify(contextSummary)}
+
+TESTO INSERITO DALL'UTENTE (può essere vuoto se chiede una stima automatica dal contesto):
+"${(userText || '').trim()}"
+
+Regole:
+1. Estrai dal testo dell'utente qualsiasi dato esplicito (sesso M/F, data di nascita YYYY-MM-DD o anno/età, altezza in cm, peso di oggi in kg, peso target in kg, % massa grassa, ore di sonno, qualità sonno 1-5, passi, RPE sessione 1-10, completezza diario yes/partial/no).
+2. Per i campi NON specificati nel testo ma mancanti nel profilo, proponi una stima ragionevole basata sul CONTESTO STORICO (es. se media passi > 9000 e 4 workout/sett → activity_level: "moderate" o "active"; se la dieta attiva è ipocalorica → goal_type: "cut" e target_rate_kg_week: -0.5).
+3. Rispondi ESCLUSIVAMENTE con JSON valido conforme a questo schema:
+{
+  "profileUpdates": {
+    "sex": "M" | "F" | null,
+    "dob": "YYYY-MM-DD" | null,
+    "height": 178 | null,
+    "body_fat": 15.0 | null,
+    "activity_level": "sedentary" | "light" | "moderate" | "active" | "very_active" | null,
+    "goal_type": "cut" | "maintain" | "bulk" | null,
+    "weight_target": 74.0 | null,
+    "target_rate_kg_week": -0.5 | null
+  },
+  "todayUpdates": {
+    "weight_kg": 76.5 | null,
+    "sleep_hours": 7.5 | null,
+    "sleep_quality": 4 | null,
+    "steps": 9000 | null,
+    "diary_complete": "yes" | "partial" | "no" | null,
+    "session_rpe": 7.5 | null
+  },
+  "backfillWorkoutsRpe": true | false,
+  "explanation": "Breve spiegazione in italiano (max 25 parole) dei valori estratti o stimati."
+}`;
+
+  try {
+    const res = await callGemini(key, prompt, {
+      temperature: 0.15,
+      maxOutputTokens: 650,
+      jsonMode: true,
+      models: GEMINI_MODELS,
+      tag: 'parseMissingDataWithAI'
+    });
+    if (!res.success) return { success: false, error: res.error };
+    const parsed = extractJsonLoose(res.text);
+    if (!parsed || typeof parsed !== 'object') {
+      return { success: false, error: 'Risposta JSON non valida' };
+    }
+    return {
+      success: true,
+      profileUpdates: parsed.profileUpdates || {},
+      todayUpdates: parsed.todayUpdates || {},
+      backfillWorkoutsRpe: !!parsed.backfillWorkoutsRpe,
+      explanation: parsed.explanation || 'Valori estratti e pre-compilati con successo.'
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
 
