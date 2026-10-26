@@ -216,8 +216,8 @@ export function renderBanisterPmcSVG(trainingOutput) {
 
   const xOf = (i) => padL + (i / Math.max(1, history.length - 1)) * plotW;
   const allVals = [0];
-  history.forEach(d => allVals.push(d.ctl, d.atl, d.tsb));
-  const minV = Math.floor(Math.min(...allVals, -20) - 5);
+  history.forEach(d => allVals.push(d.ctl, d.atl));
+  const minV = Math.floor(Math.min(...allVals, 0) - 2);
   const maxV = Math.ceil(Math.max(...allVals, 40) + 5);
   const spanV = Math.max(30, maxV - minV);
   const yOf = (v) => padT + (1 - (v - minV) / spanV) * plotH;
@@ -234,11 +234,9 @@ export function renderBanisterPmcSVG(trainingOutput) {
 
   return `
     <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block">
-      <line x1="${padL}" y1="${yZero}" x2="${W - padR}" y2="${yZero}" stroke="rgba(255,255,255,0.18)" stroke-dasharray="3 3"/>
       <text x="${padL - 5}" y="${Number(yZero) + 3}" text-anchor="end" font-size="8.5" fill="var(--t2)">0</text>
       <text x="${padL - 5}" y="${padT + 6}" text-anchor="end" font-size="8.5" fill="var(--t3)">${maxV}</text>
       <text x="${padL - 5}" y="${H - padB}" text-anchor="end" font-size="8.5" fill="var(--t3)">${minV}</text>
-      <polyline points="${tsbPts.join(' ')}" fill="none" stroke="#ffc300" stroke-width="1.6" stroke-dasharray="3 2"/>
       <polyline points="${atlPts.join(' ')}" fill="none" stroke="#ff453a" stroke-width="1.9"/>
       <polyline points="${ctlPts.join(' ')}" fill="none" stroke="#3a86ff" stroke-width="2.4"/>
       <text x="${padL}" y="${H - 6}" font-size="9" fill="var(--t3)">${fmtShortDate(history[0].date)}</text>
@@ -246,542 +244,363 @@ export function renderBanisterPmcSVG(trainingOutput) {
     </svg>`;
 }
 
-/**
- * Card "Il Punto del Coach" — chiara, diretta, senza duplicazioni.
- */
-export function renderCoachCardHTML(coachReport, { isDemo = false, isLoading = false } = {}) {
-  const rep = coachReport || {
-    status: 'on_track',
-    headline: 'Analisi in corso…',
-    summary: 'Sto analizzando il tuo peso e le tue calorie.',
-    corrections: [],
-    focusNextWeek: 'Continua a registrare peso e pasti con costanza.',
-    motivationalNote: ''
-  };
 
-  const statusMeta = {
-    on_track:  { icon: '🟢', label: 'TUTTO IN LINEA',       col: '#30d158', bg: 'rgba(48,209,88,0.12)' },
-    attention: { icon: '🟡', label: 'DA MONITORARE',        col: '#ffc300', bg: 'rgba(255,195,0,0.12)' },
-    off_track: { icon: '🔴', label: 'CORREZIONE CONSIGLIATA', col: '#ff453a', bg: 'rgba(255,69,58,0.12)' }
-  }[rep.status] || { icon: '🟢', label: 'IN LINEA', col: '#30d158', bg: 'rgba(48,209,88,0.12)' };
+// ───────────────────────────────────────────────────────────
+// Componenti di base, pensati per essere capiti al volo:
+//  • Un "verdetto" in parole semplici in cima
+//  • Ogni grafico ha una mini-spiegazione fissa in 3 righe: COSA VEDI · DA QUALI DATI · COSA TI DICE
+//  • Tutto il resto (dettagli tecnici, bias, form) è chiuso in un solo cassetto
+// ───────────────────────────────────────────────────────────
 
-  const areaBadges = {
-    diet:     { icon: '🥗', label: 'Alimentazione', col: '#30d158' },
-    training: { icon: '🏋️', label: 'Allenamento',   col: '#3a86ff' },
-    recovery: { icon: '😴', label: 'Recupero',      col: '#ffc300' }
-  };
-
-  const correctionsHtml = (rep.corrections || []).slice(0, 3).map(c => {
-    const ab = areaBadges[c.area] || areaBadges.diet;
-    return `
-      <div style="background:rgba(255,255,255,0.035);border-left:3px solid ${ab.col};border-radius:10px;padding:10px 12px;margin-bottom:8px">
-        <div style="font-size:10px;font-weight:800;color:${ab.col};text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px">${ab.icon} ${ab.label}</div>
-        <div style="font-size:13px;font-weight:700;color:var(--t1);line-height:1.35">${esc(c.action)}</div>
-        <div style="font-size:11.5px;color:var(--t2);margin-top:3px;line-height:1.4">${esc(c.why)}</div>
-      </div>`;
-  }).join('');
-
+function explainBox(see, data, out) {
+  const row = (ico, t, txt) => `
+    <div style="display:flex;gap:8px;margin-bottom:5px;align-items:flex-start">
+      <span style="font-size:13px;line-height:1.3">${ico}</span>
+      <div style="font-size:12px;line-height:1.4;color:var(--t2)"><b style="color:var(--t1)">${t}:</b> ${txt}</div>
+    </div>`;
   return `
-    <div class="card" style="margin-bottom:14px;border:1px solid ${statusMeta.col}40">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-        <div style="display:flex;align-items:center;gap:6px">
-          <span style="font-size:11px;font-weight:800;padding:4px 10px;border-radius:12px;background:${statusMeta.bg};color:${statusMeta.col}">
-            ${statusMeta.icon} ${statusMeta.label}
-          </span>
-          ${isDemo ? `<span style="font-size:10px;background:rgba(255,107,53,0.2);color:#ff6b35;padding:3px 8px;border-radius:10px;font-weight:800">ESEMPIO 90 GIORNI</span>` : ''}
+    <div style="background:rgba(255,255,255,0.035);border-radius:10px;padding:10px 12px;margin-top:10px">
+      ${row('👀', 'Cosa vedi', see)}
+      ${row('🧮', 'Da quali dati', data)}
+      ${row('🎯', 'Cosa ti dice', out)}
+    </div>`;
+}
+
+function verdictCard({ icon, color, title, text }) {
+  return `
+    <div class="card" style="margin-bottom:12px;border:1px solid ${color}55;background:${color}12">
+      <div style="display:flex;gap:12px;align-items:center">
+        <div style="font-size:34px;line-height:1">${icon}</div>
+        <div>
+          <div style="font-size:17px;font-weight:800;color:var(--t1);line-height:1.25">${esc(title)}</div>
+          <div style="font-size:13px;color:var(--t2);margin-top:3px;line-height:1.4">${esc(text)}</div>
         </div>
-        <button class="btn btn-ghost btn-xs" onclick="window.toggleDemo90Days()" style="font-size:10.5px;padding:4px 9px">
-          ${isDemo ? '🔄 Torna ai tuoi dati' : '🌱 Vedi esempio con 90gg'}
-        </button>
-      </div>
-
-      <div style="font-size:16px;font-weight:800;color:var(--t1);line-height:1.3;margin-bottom:6px">
-        ${esc(rep.headline)}
-      </div>
-      <div style="font-size:13px;color:var(--t2);line-height:1.5;margin-bottom:12px">
-        ${esc(rep.summary)}
-      </div>
-
-      ${correctionsHtml ? `<div style="margin-bottom:10px">${correctionsHtml}</div>` : ''}
-
-      <div style="background:rgba(124,111,255,0.08);border:1px solid rgba(124,111,255,0.22);border-radius:10px;padding:10px 12px;margin-bottom:10px">
-        <div style="font-size:10px;font-weight:800;color:var(--accent);letter-spacing:0.5px">🎯 SU COSA CONCENTRARTI QUESTA SETTIMANA</div>
-        <div style="font-size:12.5px;font-weight:700;color:var(--t1);margin-top:3px">${esc(rep.focusNextWeek)}</div>
-      </div>
-
-      <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
-        <input type="text" id="coach-free-question" class="fi" placeholder="Fai una domanda al Coach (es. Posso mangiare una pizza sabato?)" style="flex:1;font-size:12px;padding:9px 11px" onkeydown="if(event.key==='Enter')window.askPredictiveCoach()">
-        <button class="btn btn-v btn-sm" onclick="window.askPredictiveCoach()" ${isLoading ? 'disabled' : ''} style="white-space:nowrap;padding:9px 13px;font-size:12px;font-weight:700">
-          ${isLoading ? '⏳…' : 'Chiedi'}
-        </button>
       </div>
     </div>`;
 }
 
+function sectionTitle(t, sub) {
+  return `<div style="font-size:15px;font-weight:800;color:var(--t1)">${t}</div>` +
+    (sub ? `<div style="font-size:11.5px;color:var(--t3);margin-top:1px">${sub}</div>` : '');
+}
+
 /**
- * Dashboard 1: "Andamento" (Peso Reale, Metabolismo & Obiettivo) — ordinata, spiegata in modo semplice e attenta ai bias.
+ * Coach: titolo + 1 frase + massimo 1 azione. La domanda libera sta dentro un cassetto.
+ */
+export function renderCoachCardHTML(coachReport, { isDemo = false, isLoading = false } = {}) {
+  const rep = coachReport || {
+    status: 'on_track', headline: 'Sto analizzando i tuoi dati…', summary: '', corrections: [], focusNextWeek: ''
+  };
+  const col = { on_track: '#30d158', attention: '#ffc300', off_track: '#ff453a' }[rep.status] || '#30d158';
+  const ico = { on_track: '🟢', attention: '🟡', off_track: '🔴' }[rep.status] || '🟢';
+  const first = (rep.corrections || [])[0];
+
+  return `
+    <div class="card" style="margin-bottom:12px;border-left:4px solid ${col}">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px">
+        <div style="font-size:11px;font-weight:800;color:${col};letter-spacing:.5px">${ico} IL CONSIGLIO DEL COACH</div>
+        ${isDemo ? `<span style="font-size:10px;background:rgba(255,107,53,0.2);color:#ff6b35;padding:2px 8px;border-radius:10px;font-weight:800">ESEMPIO</span>` : ''}
+      </div>
+      <div style="font-size:15px;font-weight:800;color:var(--t1);line-height:1.3">${esc(rep.headline)}</div>
+      ${rep.summary ? `<div style="font-size:12.5px;color:var(--t2);line-height:1.5;margin-top:4px">${esc(rep.summary)}</div>` : ''}
+      ${first ? `
+        <div style="background:rgba(255,255,255,0.04);border-radius:10px;padding:9px 11px;margin-top:10px">
+          <div style="font-size:10px;font-weight:800;color:var(--accent)">👉 COSA FARE</div>
+          <div style="font-size:13px;font-weight:700;color:var(--t1);margin-top:2px">${esc(first.action)}</div>
+        </div>` : ''}
+      <details style="margin-top:10px">
+        <summary style="cursor:pointer;font-size:11.5px;color:var(--accent);font-weight:700">💬 Fai una domanda al coach</summary>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <input type="text" id="coach-free-question" class="fi" placeholder="Es. Posso mangiare una pizza sabato?" style="flex:1;font-size:12px;padding:9px 11px" onkeydown="if(event.key==='Enter')window.askPredictiveCoach()">
+          <button class="btn btn-v btn-sm" onclick="window.askPredictiveCoach()" ${isLoading ? 'disabled' : ''} style="padding:9px 13px;font-size:12px;font-weight:700">${isLoading ? '⏳' : 'Chiedi'}</button>
+        </div>
+      </details>
+    </div>`;
+}
+
+function missingFormHTML(ma) {
+  const sd = ma.smartDefaults || {};
+  const missing = [...(ma.missingProfileFields || []), ...(ma.missingTodayFields || [])];
+  if (!missing.length) return '';
+  const lab = 'font-size:11px;color:var(--t2);font-weight:700;display:block;margin-bottom:3px';
+  const inp = 'font-size:13px;padding:8px;width:100%';
+  const needProfile = (ma.missingProfileFields || []).length > 0;
+  const needWeightToday = (ma.missingTodayFields || []).some(f => f.startsWith('Peso'));
+  return `
+    <div class="card" id="guided-missing-card" style="margin-bottom:12px;border:1px dashed rgba(255,195,0,0.5)">
+      <details>
+        <summary style="cursor:pointer;list-style:none">
+          <div style="font-size:13px;font-weight:800;color:#ffc300">✨ Rendi i calcoli più precisi</div>
+          <div style="font-size:11.5px;color:var(--t2);margin-top:2px">Mancano pochi dati: ${esc(missing.slice(0, 3).join(', '))}. Tocca per inserirli.</div>
+        </summary>
+        <div style="margin-top:12px">
+          <div style="display:flex;gap:6px;margin-bottom:10px">
+            <input type="text" id="guided-ai-text" class="fi" placeholder="Oppure scrivi: Uomo, 178 cm, nato nel 1995" style="flex:1;font-size:12px;padding:8px 10px">
+            <button class="btn btn-v btn-sm" onclick="window.autoFillMissingWithAI(false)" style="font-size:11.5px;padding:8px 11px;white-space:nowrap">🪄 AI</button>
+          </div>
+          <div id="guided-ai-note" style="font-size:10.5px;color:var(--t3);margin-bottom:8px">L'AI legge solo ciò che scrivi, non inventa numeri.</div>
+          <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">
+            <div><label style="${lab}">Sesso</label>
+              <select id="gm-sex" class="fi" style="${inp}">
+                <option value="" ${!sd.sex ? 'selected' : ''}>—</option>
+                <option value="M" ${sd.sex === 'M' ? 'selected' : ''}>Uomo</option>
+                <option value="F" ${sd.sex === 'F' ? 'selected' : ''}>Donna</option>
+              </select></div>
+            <div><label style="${lab}">Altezza (cm)</label>
+              <input type="number" id="gm-height" class="fi" value="${sd.height ?? ''}" min="120" max="230" style="${inp}"></div>
+            <div><label style="${lab}">Data di nascita</label>
+              <input type="date" id="gm-dob" class="fi" value="${sd.dob ?? ''}" style="${inp}"></div>
+            <div><label style="${lab}">Peso obiettivo (kg)</label>
+              <input type="number" step="0.1" id="gm-target-w" class="fi" value="${sd.weight_target ?? ''}" style="${inp}"></div>
+            ${needWeightToday ? `<div><label style="${lab}">Peso di oggi (kg)</label>
+              <input type="number" step="0.1" id="gm-today-w" class="fi" value="${sd.today_weight_kg ?? ''}" style="${inp}"></div>` :
+              `<input type="hidden" id="gm-today-w" value="">`}
+          </div>
+          <input type="hidden" id="gm-activity" value="${sd.activity_level ?? 'moderate'}">
+          <input type="hidden" id="gm-goal" value="${sd.goal_type ?? 'cut'}">
+          <input type="hidden" id="gm-rate" value="${sd.target_rate_kg_week ?? -0.45}">
+          <input type="hidden" id="gm-today-sleep" value="${sd.today_sleep_hours ?? ''}">
+          <input type="hidden" id="gm-today-complete" value="${needProfile ? (sd.today_diary_complete || 'yes') : (sd.today_diary_complete || 'yes')}">
+          <button class="btn btn-g btn-sm" onclick="window.saveGuidedMissingForm()" style="width:100%;margin-top:10px;font-weight:800;padding:10px">💾 Salva</button>
+        </div>
+      </details>
+    </div>`;
+}
+
+/**
+ * Pagina 1: ANDAMENTO — "Sto dimagrendo? Quanto devo mangiare?"
  */
 export function renderAndamentoDashboardHTML(pipelineResult, coachReport, { isDemo = false, isLoadingCoach = false } = {}) {
   const en = pipelineResult?.energyOutput || {};
   const profile = pipelineResult?.profile || {};
-  const ma = pipelineResult?.missingAssistant || {
-    hasAnyMissing: false,
-    missingProfileFields: [],
-    missingTodayFields: [],
-    workoutsMissingRpeCount: 0,
-    smartDefaults: {},
-    biasChecks: []
-  };
-  const sd = ma.smartDefaults || {};
+  const ma = pipelineResult?.missingAssistant || { missingProfileFields: [], missingTodayFields: [], smartDefaults: {}, biasChecks: [] };
+  const goal = profile.goal_type || 'cut';
 
-  // 1. Card Coach (unificata con gli insight, niente doppioni)
-  const coachCard = renderCoachCardHTML(coachReport || pipelineResult?.deterministicCoach, {
-    isDemo,
-    isLoading: isLoadingCoach
-  });
+  // ── 1. VERDETTO ─────────────────────────────────────────
+  const rate = Number(en.weeklyRateKg ?? 0);
+  const absRate = Math.abs(rate).toFixed(2);
+  const need = (en.missingDataRequirements || [])[0];
+  let verdict;
+  if (en.trendWeight == null) {
+    verdict = { icon: '⚖️', color: '#8e8e93', title: 'Inserisci il tuo peso', text: 'Pesati al mattino e segna il peso: bastano pochi giorni per vedere il tuo andamento.' };
+  } else if (en.isPreliminary) {
+    verdict = { icon: '🌱', color: '#ffc300', title: 'Sto ancora imparando a conoscerti',
+      text: `Servono circa 2 settimane di peso e pasti registrati${need?.daysNeeded > 0 ? ` (ancora ${need.daysNeeded} giorni)` : ''}. Per ora i numeri sono stime.` };
+  } else if (Math.abs(rate) < 0.1) {
+    const ok = goal === 'maintain';
+    verdict = { icon: ok ? '✅' : '⏸️', color: ok ? '#30d158' : '#ffc300', title: 'Il tuo peso è stabile', text: ok ? 'Perfetto per il mantenimento.' : 'Non stai né salendo né scendendo in modo apprezzabile.' };
+  } else if (rate < 0) {
+    const ok = goal !== 'bulk';
+    verdict = { icon: ok ? '✅' : '⚠️', color: ok ? '#30d158' : '#ffc300', title: `Stai scendendo: circa ${absRate} kg a settimana`, text: ok ? 'Sei nella direzione giusta.' : 'Il tuo obiettivo è salire: servirebbe mangiare un po\' di più.' };
+  } else {
+    const ok = goal === 'bulk';
+    verdict = { icon: ok ? '✅' : '⚠️', color: ok ? '#30d158' : '#ffc300', title: `Stai salendo: circa ${absRate} kg a settimana`, text: ok ? 'Sei nella direzione giusta.' : 'Il tuo obiettivo non è salire: servirebbe mangiare un po\' meno.' };
+  }
 
-  // 2. Banner compatto per completare i dati mancanti (chiuso di default così non invade lo schermo!)
-  const missingList = [...(ma.missingProfileFields || []), ...(ma.missingTodayFields || [])];
-  const missingBannerHtml = (ma.hasAnyMissing && !isDemo) ? `
-    <div class="card" id="guided-missing-card" style="margin-bottom:14px;background:rgba(255,195,0,0.06);border:1px solid rgba(255,195,0,0.3)">
-      <details>
-        <summary style="cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px">
-          <div>
-            <div style="font-size:12px;font-weight:800;color:#ffc300">
-              ✨ Personalizza il modello (${missingList.length} ${missingList.length === 1 ? 'dato mancante' : 'dati mancanti'})
-            </div>
-            <div style="font-size:11.5px;color:var(--t2);margin-top:2px">
-              Manca: <b>${esc(missingList.slice(0, 3).join(', '))}${missingList.length > 3 ? '…' : ''}</b>. Tocca qui per completare (anche con AI).
-            </div>
-          </div>
-          <span style="font-size:11px;font-weight:800;color:var(--accent);background:rgba(124,111,255,0.15);padding:5px 10px;border-radius:8px;white-space:nowrap">
-            Compila ↓
-          </span>
-        </summary>
-
-        <div style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.08)">
-          <div style="font-size:11.5px;color:var(--t2);line-height:1.45;margin-bottom:10px">
-            <b>Perché ti chiediamo questi dati (Controllo Bias):</b> senza la tua altezza, età e sesso reali, il calcolo del metabolismo parte da una media generica. Inseriscili una sola volta (o scrivi qui sotto) senza usare valori inventati.
-          </div>
-
-          <!-- Input rapido in linguaggio naturale -->
-          <div style="background:rgba(0,0,0,0.25);border:1px solid rgba(124,111,255,0.28);border-radius:10px;padding:10px;margin-bottom:12px">
-            <div style="font-size:10.5px;font-weight:800;color:var(--accent);margin-bottom:6px">
-              🤖 SCRIVI IN UNA FRASE E LASCIA COMPILARE ALL'AI
-            </div>
-            <div style="display:flex;gap:6px;flex-wrap:wrap">
-              <input type="text" id="guided-ai-text" class="fi" placeholder="Es: Uomo, 178cm, nato 1995-05-10, obiettivo 74kg, oggi peso 77.2kg" style="flex:1;min-width:180px;font-size:12px;padding:8px 10px">
-              <button class="btn btn-v btn-sm" onclick="window.autoFillMissingWithAI(false)" style="font-size:11.5px;padding:8px 12px;white-space:nowrap">
-                🪄 Estrai con AI
-              </button>
-            </div>
-            <div id="guided-ai-note" style="font-size:10.5px;color:var(--t3);margin-top:5px">
-              L'AI estrae solo ciò che scrivi davvero, senza inventare numeri a caso.
-            </div>
-          </div>
-
-          <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">
-            <div>
-              <label style="font-size:10.5px;color:var(--t2);font-weight:700;display:block;margin-bottom:3px">Sesso biologico</label>
-              <select id="gm-sex" class="fi" style="font-size:12px;padding:7px 8px;width:100%">
-                <option value="" ${!sd.sex ? 'selected' : ''}>— Seleziona —</option>
-                <option value="M" ${sd.sex === 'M' ? 'selected' : ''}>Uomo</option>
-                <option value="F" ${sd.sex === 'F' ? 'selected' : ''}>Donna</option>
-              </select>
-            </div>
-            <div>
-              <label style="font-size:10.5px;color:var(--t2);font-weight:700;display:block;margin-bottom:3px">Altezza (cm)</label>
-              <input type="number" id="gm-height" class="fi" value="${sd.height ?? ''}" placeholder="Es. 178" min="120" max="230" style="font-size:12px;padding:7px 8px;width:100%">
-            </div>
-            <div>
-              <label style="font-size:10.5px;color:var(--t2);font-weight:700;display:block;margin-bottom:3px">Data di nascita</label>
-              <input type="date" id="gm-dob" class="fi" value="${sd.dob ?? ''}" style="font-size:12px;padding:7px 8px;width:100%">
-            </div>
-            <div>
-              <label style="font-size:10.5px;color:var(--t2);font-weight:700;display:block;margin-bottom:3px">Stile di vita</label>
-              <select id="gm-activity" class="fi" style="font-size:12px;padding:7px 8px;width:100%">
-                <option value="sedentary" ${sd.activity_level === 'sedentary' ? 'selected' : ''}>Sedentario (ufficio)</option>
-                <option value="light" ${sd.activity_level === 'light' ? 'selected' : ''}>Leggermente attivo</option>
-                <option value="moderate" ${sd.activity_level === 'moderate' ? 'selected' : ''}>Moderato (3–4 allen./sett)</option>
-                <option value="active" ${sd.activity_level === 'active' ? 'selected' : ''}>Molto attivo (>10k passi)</option>
-              </select>
-            </div>
-            <div>
-              <label style="font-size:10.5px;color:var(--t2);font-weight:700;display:block;margin-bottom:3px">Obiettivo</label>
-              <select id="gm-goal" class="fi" style="font-size:12px;padding:7px 8px;width:100%">
-                <option value="cut" ${sd.goal_type === 'cut' ? 'selected' : ''}>Dimagrimento (Definizione)</option>
-                <option value="maintain" ${sd.goal_type === 'maintain' ? 'selected' : ''}>Mantenimento</option>
-                <option value="bulk" ${sd.goal_type === 'bulk' ? 'selected' : ''}>Aumento Massa (Lean Bulk)</option>
-              </select>
-            </div>
-            <div>
-              <label style="font-size:10.5px;color:var(--t2);font-weight:700;display:block;margin-bottom:3px">Peso Obiettivo (kg)</label>
-              <input type="number" step="0.1" id="gm-target-w" class="fi" value="${sd.weight_target ?? ''}" placeholder="Es. 74.0" style="font-size:12px;padding:7px 8px;width:100%">
-            </div>
-            <div>
-              <label style="font-size:10.5px;color:var(--t2);font-weight:700;display:block;margin-bottom:3px">Peso di Oggi (kg)</label>
-              <input type="number" step="0.1" id="gm-today-w" class="fi" value="${sd.today_weight_kg ?? ''}" placeholder="Es. 77.5" style="font-size:12px;padding:7px 8px;width:100%">
-            </div>
-            <div>
-              <label style="font-size:10.5px;color:var(--t2);font-weight:700;display:block;margin-bottom:3px">Diario pasti di oggi</label>
-              <select id="gm-today-complete" class="fi" style="font-size:12px;padding:7px 8px;width:100%">
-                <option value="yes" ${sd.today_diary_complete === 'yes' ? 'selected' : ''}>✅ Completo (tutti i pasti)</option>
-                <option value="partial" ${sd.today_diary_complete === 'partial' ? 'selected' : ''}>⚠️ Parziale (manca qualcosa)</option>
-                <option value="no" ${sd.today_diary_complete === 'no' ? 'selected' : ''}>❌ Non registrato</option>
-              </select>
-            </div>
-          </div>
-
-          <input type="hidden" id="gm-rate" value="${sd.target_rate_kg_week ?? -0.45}">
-          <input type="hidden" id="gm-today-sleep" value="${sd.today_sleep_hours ?? ''}">
-
-          ${ma.workoutsMissingRpeCount > 0 ? `
-          <div style="margin-top:10px;display:flex;align-items:flex-start;gap:8px;background:rgba(255,255,255,0.03);padding:8px 10px;border-radius:8px">
-            <input type="checkbox" id="gm-backfill-rpe" style="width:15px;height:15px;margin-top:2px;accent-color:var(--accent)">
-            <label for="gm-backfill-rpe" style="font-size:11px;color:var(--t2);cursor:pointer;line-height:1.35">
-              <b>Opzionale (${ma.workoutsMissingRpeCount} allenamenti passati senza voto di fatica):</b> assegna uno sforzo medio (RPE 7.5) alle sessioni passate. <i>Lascia deselezionato se vuoi evitare stime uniformi sullo storico.</i>
-            </label>
-          </div>` : ''}
-
-          <button class="btn btn-g btn-sm" onclick="window.saveGuidedMissingForm()" style="width:100%;margin-top:10px;font-weight:800;padding:10px">
-            💾 Salva i tuoi dati reali
-          </button>
-        </div>
-      </details>
-    </div>` : '';
-
-  const rateSign = (en.weeklyRateKg || 0) > 0 ? '+' : '';
-  const confCol = en.confidence >= 70 ? '#30d158' : en.confidence >= 45 ? '#ffc300' : '#ff6b35';
-  const confLabel = en.isPreliminary
-    ? 'Stima Iniziale (servono 14gg per calibrazione completa)'
-    : en.confidence >= 70 ? 'Calibrato sui tuoi dati reali' : 'In fase di affinamento';
-
-  const forecastRows = (en.forecast || []).map(f => `
-    <div style="flex:1;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:10px;padding:9px 6px;text-align:center">
-      <div style="font-size:10px;color:var(--t3);font-weight:700">Tra ${f.horizonWeeks} sett.</div>
-      <div style="font-size:15px;font-weight:800;color:var(--t1);margin:3px 0">${f.weight} kg</div>
-      <div style="font-size:9.5px;color:var(--t3)">tra ${f.low} e ${f.high}</div>
+  // ── 2. PREVISIONI (solo 4 e 12 settimane) ───────────────
+  const fc = (en.forecast || []).filter(f => f.horizonWeeks === 4 || f.horizonWeeks === 12);
+  const forecastRows = fc.map(f => `
+    <div style="flex:1;background:rgba(255,255,255,0.04);border-radius:10px;padding:9px 6px;text-align:center">
+      <div style="font-size:10.5px;color:var(--t3);font-weight:700">Tra ${f.horizonWeeks} settimane</div>
+      <div style="font-size:17px;font-weight:800;color:var(--t1);margin:2px 0">${f.weight} kg</div>
+      <div style="font-size:10px;color:var(--t3)">probabile tra ${f.low} e ${f.high}</div>
     </div>`).join('');
 
-  const recMacros = en.recommendedMacros || { protein: 160, carbs: 200, fats: 60, proteinPerKg: 2.0 };
-  const biasChecks = ma.biasChecks || [];
+  const m = en.recommendedMacros || {};
+  const tdeeTxt = en.tdeeEstimate != null ? `${en.tdeeEstimate} kcal` : '—';
+
+  // ── 3. DETTAGLI + BIAS (un solo cassetto) ───────────────
+  const bias = (ma.biasChecks || []).map(b => {
+    const col = b.status === 'warning' ? '#ffc300' : '#30d158';
+    return `<div style="border-left:3px solid ${col};padding:4px 0 4px 10px;margin-bottom:8px">
+      <div style="font-size:12px;font-weight:800;color:var(--t1)">${b.status === 'warning' ? '⚠️' : '✅'} ${esc(b.title)}</div>
+      <div style="font-size:11.5px;color:var(--t2);line-height:1.4">${esc(b.desc)}</div></div>`;
+  }).join('');
 
   return `
-    ${coachCard}
-    ${missingBannerHtml}
+    ${verdictCard(verdict)}
+    ${renderCoachCardHTML(coachReport || pipelineResult?.deterministicCoach, { isDemo, isLoading: isLoadingCoach })}
+    ${isDemo ? '' : missingFormHTML(ma)}
 
-    <!-- CARD UNICA: PESO REALE, METABOLISMO & GRAFICO PREVISIONE -->
-    <div class="card" style="margin-bottom:14px">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-        <div>
-          <div style="font-size:14px;font-weight:800;color:var(--t1)">⚖️ Il tuo Peso Reale &amp; Metabolismo</div>
-          <div style="font-size:11px;color:var(--t3)">Filtra via le oscillazioni d'acqua per mostrarti la vera direzione</div>
+    <!-- GRAFICO PESO -->
+    <div class="card" style="margin-bottom:12px">
+      ${sectionTitle('⚖️ Il tuo peso nel tempo', 'Il peso "vero", senza gli sbalzi di acqua')}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0">
+        <div style="background:rgba(255,107,53,0.1);border-radius:12px;padding:10px;text-align:center">
+          <div style="font-size:10.5px;color:#ff6b35;font-weight:800">PESO VERO</div>
+          <div style="font-size:22px;font-weight:900;color:var(--t1)">${en.trendWeight ?? '—'}<span style="font-size:12px"> kg</span></div>
+          <div style="font-size:10.5px;color:var(--t3)">bilancia oggi: ${en.rawWeight != null ? en.rawWeight + ' kg' : '—'}</div>
         </div>
-        <span style="font-size:10px;font-weight:800;padding:3px 9px;border-radius:10px;background:${confCol}18;color:${confCol}">
-          ${confLabel}
-        </span>
-      </div>
-
-      <!-- 3 NUMERI CHIAVE SPIEGATI SEMPLICEMENTE -->
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px">
-        <div style="background:rgba(255,107,53,0.08);border:1px solid rgba(255,107,53,0.25);border-radius:12px;padding:10px 8px;text-align:center">
-          <div style="font-size:10px;color:#ff6b35;font-weight:800">PESO REALE</div>
-          <div style="font-size:19px;font-weight:900;color:var(--t1);margin:3px 0">${en.trendWeight ?? '—'} <span style="font-size:11px;font-weight:600">kg</span></div>
-          <div style="font-size:10px;color:var(--t2)">Bilancia: ${en.rawWeight != null ? en.rawWeight + ' kg' : '—'}</div>
-        </div>
-        <div style="background:rgba(58,134,255,0.08);border:1px solid rgba(58,134,255,0.25);border-radius:12px;padding:10px 8px;text-align:center">
-          <div style="font-size:10px;color:#3a86ff;font-weight:800">CONSUMO (TDEE)</div>
-          <div style="font-size:19px;font-weight:900;color:var(--t1);margin:3px 0">${en.tdeeEstimate ?? '—'}</div>
-          <div style="font-size:10px;color:var(--t2)">kcal bruciate/giorno</div>
-        </div>
-        <div style="background:rgba(124,111,255,0.08);border:1px solid rgba(124,111,255,0.25);border-radius:12px;padding:10px 8px;text-align:center">
-          <div style="font-size:10px;color:var(--accent);font-weight:800">RITMO ATTUALE</div>
-          <div style="font-size:18px;font-weight:900;color:var(--t1);margin:3px 0">${rateSign}${en.weeklyRateKg ?? 0} <span style="font-size:11px;font-weight:600">kg</span></div>
-          <div style="font-size:10px;color:var(--t2)">a settimana</div>
+        <div style="background:rgba(58,134,255,0.1);border-radius:12px;padding:10px;text-align:center">
+          <div style="font-size:10.5px;color:#3a86ff;font-weight:800">CALORIE CHE BRUCI</div>
+          <div style="font-size:22px;font-weight:900;color:var(--t1)">${en.tdeeEstimate ?? '—'}</div>
+          <div style="font-size:10.5px;color:var(--t3)">al giorno (stima)</div>
         </div>
       </div>
 
-      <!-- LEGENDA IMMEDIATA SOPRA IL GRAFICO -->
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:6px;font-size:10.5px;color:var(--t2)">
-        <div style="display:flex;gap:10px;flex-wrap:wrap">
-          <span>⚪ <b>Pallini:</b> Bilancia</span>
-          <span style="color:#ff6b35">━ <b>Linea continua:</b> Peso Reale</span>
-          <span style="color:var(--accent)">┄ <b>Tratteggio:</b> Previsione</span>
-        </div>
-        ${en.etaGoalDate ? `<span style="color:#30d158;font-weight:700">🏁 Traguardo: ~${fmtShortDate(en.etaGoalDate)}</span>` : ''}
+      <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--t2);margin-bottom:4px">
+        <span>⚪ pesate sulla bilancia</span>
+        <span style="color:#ff6b35">━ peso vero</span>
+        <span style="color:var(--accent)">┄ previsione</span>
+        ${profile.weight_target ? `<span style="color:#30d158">┄ obiettivo</span>` : ''}
       </div>
-
       ${renderWeightForecastSVG(en, profile.weight_target)}
 
-      <div style="display:flex;gap:8px;margin-top:10px">
-        ${forecastRows}
-      </div>
-
-      <!-- SPIEGAZIONE SEMPLICE PER CHI NON È ESPERTO -->
-      <details style="margin-top:12px;background:rgba(255,255,255,0.025);border:1px solid var(--border);border-radius:10px;padding:10px 12px">
-        <summary style="cursor:pointer;font-size:11.5px;font-weight:700;color:var(--t1)">
-          📖 Come funziona questo modello e come leggere il grafico? (Spiegazione semplice)
-        </summary>
-        <div style="margin-top:8px;font-size:12px;color:var(--t2);line-height:1.55">
-          <p style="margin:0 0 6px">
-            • <b>Perché la bilancia inganna (Pallini grigi):</b> se mangi una pizza, dormi male o ti alleni duramente, il giorno dopo puoi pesare <b>+1 kg</b>. Non è grasso (per mettere 1 kg di grasso servirebbero 7.700 kcal in più!), è solo acqua legata al sale e ai carboidrati.
-          </p>
-          <p style="margin:0 0 6px">
-            • <b>Cosa fa il Peso Reale (Linea arancione):</b> usa un filtro matematico (<i>Filtro di Kalman</i>) che separa l'acqua dal peso vero incrociando quanto hai mangiato con quanto pesi. Guarda <b>solo la linea arancione</b> per capire se stai dimagrendo o crescendo.
-          </p>
-          <p style="margin:0">
-            • <b>Come calcola il tuo Consumo Reale (TDEE):</b> invece di fidarsi di una formula fissa da internet, osserva come cambia il tuo Peso Reale rispetto alle calorie che mangi. Se mangi 2.000 kcal e perdi 0,5 kg a settimana, deduce che il tuo corpo consuma davvero circa 2.500 kcal al giorno.
-          </p>
-        </div>
-      </details>
+      ${explainBox(
+        'I pallini sono il numero sulla bilancia, che sale e scende ogni giorno per acqua e sale. La linea arancione è il tuo peso vero. Il tratteggio viola è dove andrai se continui così.',
+        'Le tue pesate e le calorie che segni nel diario.',
+        `Se la linea arancione scende, stai dimagrendo, anche se la bilancia ogni tanto sale.${en.etaGoalDate ? ` Di questo passo arrivi all'obiettivo verso il <b>${fmtShortDate(en.etaGoalDate)}</b>.` : ''}`
+      )}
+      ${forecastRows ? `<div style="display:flex;gap:8px;margin-top:10px">${forecastRows}</div>` : ''}
     </div>
 
-    <!-- CARD CONSIGLIO PRATICO: QUANTE CALORIE E MACRO MANGIARE -->
-    <div class="card" style="margin-bottom:14px">
-      <div style="font-size:14px;font-weight:800;color:var(--t1);margin-bottom:4px">
-        🍽️ Quante Calorie e Macro ti servono adesso
+    <!-- COSA MANGIARE -->
+    <div class="card" style="margin-bottom:12px">
+      ${sectionTitle('🍽️ Quanto mangiare', 'Il consiglio per proseguire con calma e in sicurezza')}
+      <div style="background:rgba(124,111,255,0.1);border-radius:12px;padding:12px;margin:12px 0 8px;text-align:center">
+        <div style="font-size:26px;font-weight:900;color:var(--t1)">${en.recommendedKcal ?? '—'} <span style="font-size:13px;font-weight:600;color:var(--t2)">kcal al giorno</span></div>
+        <div style="font-size:11.5px;color:var(--t3)">negli ultimi 7 giorni hai mangiato in media ${en.avgIntake7d != null ? en.avgIntake7d + ' kcal' : '—'}</div>
       </div>
-      <div style="font-size:11.5px;color:var(--t2);margin-bottom:12px">
-        Calcolato sul tuo metabolismo reale per procedere al ritmo sicuro consigliato.
+      <div style="font-size:12.5px;color:var(--t2);text-align:center">
+        di cui circa <b style="color:#30d158">${m.protein ?? '—'} g di proteine</b> · ${m.carbs ?? '—'} g carboidrati · ${m.fats ?? '—'} g grassi
       </div>
-
-      <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(124,111,255,0.08);border:1px solid rgba(124,111,255,0.25);border-radius:12px;padding:12px;margin-bottom:10px">
-        <div>
-          <div style="font-size:10px;color:var(--accent);font-weight:800">TARGET GIORNALIERO CONSIGLIATO</div>
-          <div style="font-size:22px;font-weight:900;color:var(--t1);margin-top:2px">${en.recommendedKcal} <span style="font-size:13px;font-weight:600;color:var(--t2)">kcal / giorno</span></div>
-        </div>
-        <div style="text-align:right">
-          <div style="font-size:10px;color:var(--t3)">Tua media ultimi 7gg</div>
-          <div style="font-size:15px;font-weight:800;color:var(--t1)">${en.avgIntake7d != null ? `${en.avgIntake7d} kcal` : 'N/D'}</div>
-        </div>
-      </div>
-
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center">
-        <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:9px 6px">
-          <div style="font-size:10px;color:var(--t3);font-weight:700">Proteine</div>
-          <div style="font-size:16px;font-weight:800;color:#30d158;margin-top:2px">${recMacros.protein}g</div>
-          <div style="font-size:9.5px;color:var(--t3)">${recMacros.proteinPerKg}g per kg</div>
-        </div>
-        <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:9px 6px">
-          <div style="font-size:10px;color:var(--t3);font-weight:700">Carboidrati</div>
-          <div style="font-size:16px;font-weight:800;color:#3a86ff;margin-top:2px">${recMacros.carbs}g</div>
-          <div style="font-size:9.5px;color:var(--t3)">Energia allenamento</div>
-        </div>
-        <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:9px 6px">
-          <div style="font-size:10px;color:var(--t3);font-weight:700">Grassi</div>
-          <div style="font-size:16px;font-weight:800;color:#ffc300;margin-top:2px">${recMacros.fats}g</div>
-          <div style="font-size:9.5px;color:var(--t3)">Equilibrio ormonale</div>
-        </div>
-      </div>
+      ${explainBox(
+        'Il numero di calorie giornaliere consigliato.',
+        `Quante calorie bruci davvero (${tdeeKcalSafe(tdeeTxt)}) e il ritmo di cambiamento che vuoi.`,
+        'Mangiare vicino a questo valore ti porta al tuo obiettivo senza fare diete troppo dure.'
+      )}
     </div>
 
-    <!-- SEZIONE ESPANDIBILE: CONTROLLO BIAS E DETTAGLI TECNICI -->
-    <div class="card" style="margin-bottom:14px">
+    <!-- DETTAGLI -->
+    <div class="card" style="margin-bottom:12px">
       <details>
-        <summary style="cursor:pointer;font-size:12px;font-weight:800;color:var(--t2);display:flex;justify-content:space-between;align-items:center">
-          <span>🛡️ Controllo Bias &amp; Dettagli Tecnici (Affidabilità ${en.confidence || 0}/100)</span>
-          <span style="font-size:10px;color:var(--accent)">Approfondisci ↓</span>
-        </summary>
-        <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
-          <div style="font-size:11.5px;color:var(--t2);margin-bottom:10px;line-height:1.45">
-            Ogni modello matematico può sbagliare se i dati in ingresso contengono <b>distorsioni (bias)</b>. Ecco come KOVA ti protegge e a cosa devi fare attenzione:
+        <summary style="cursor:pointer;font-size:12.5px;font-weight:800;color:var(--t2)">🔍 Quanto sono affidabili questi numeri? (${en.confidence || 0}/100)</summary>
+        <div style="margin-top:10px">
+          <div style="font-size:12px;color:var(--t2);line-height:1.5;margin-bottom:10px">
+            Più giorni registri (peso + tutti i pasti), più i numeri diventano precisi. Ecco cosa può falsarli:
           </div>
-          ${biasChecks.map(b => {
-            const col = b.status === 'warning' ? '#ffc300' : '#30d158';
-            const badge = b.status === 'warning' ? '⚠️ Fai attenzione' : '✅ Protetto';
-            return `
-              <div style="background:rgba(255,255,255,0.025);border-left:3px solid ${col};border-radius:8px;padding:9px 11px;margin-bottom:8px">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
-                  <span style="font-size:11.5px;font-weight:800;color:var(--t1)">${esc(b.title)}</span>
-                  <span style="font-size:9.5px;font-weight:800;color:${col}">${badge}</span>
-                </div>
-                <div style="font-size:11px;color:var(--t2);line-height:1.4">${esc(b.desc)}</div>
-              </div>`;
-          }).join('')}
-
-          <div style="margin-top:12px;font-size:11px;font-weight:700;color:var(--t2);margin-bottom:4px">
-            Storico Stima Metabolismo (TDEE ± margine d'incertezza)
-          </div>
-          ${renderTdeeHistorySVG(en)}
-          <div style="font-size:10px;color:var(--t3);margin-top:4px;display:flex;justify-content:space-between">
-            <span>BMR base: ${en.bmrEstimate || '—'} kcal · Stima iniziale: ${en.priorTdee || '—'} kcal</span>
-            <span>Aderenza diario 14gg: <b>${en.adherence14Pct ?? 0}%</b></span>
-          </div>
+          ${bias}
+          <div style="font-size:11px;color:var(--t3);margin-top:6px">Aderenza al diario ultimi 14 giorni: <b>${en.adherence14Pct ?? 0}%</b></div>
         </div>
       </details>
     </div>
   `;
 }
 
+function tdeeKcalSafe(t) { return t; }
+
 /**
- * Dashboard 2: "Carico & 1RM" — tradotta in linguaggio chiaro, con guida alla lettura e note sui bias.
+ * Pagina 2: ALLENAMENTO — "Sono fresco o stanco? Sto diventando più forte?"
  */
 export function renderAllenamentoDashboardHTML(pipelineResult) {
   const tr = pipelineResult?.trainingOutput || {};
   const lifts = tr.lifts || [];
-  const setsByMuscle = tr.weeklySetsByMuscle || {};
+  const sets = tr.weeklySetsByMuscle || {};
+  const n = tr.totalCompletedSessions || 0;
 
-  const acwrVal = tr.acwr;
-  const acwrCol = acwrVal == null ? 'var(--t3)'
-    : acwrVal < 0.8 ? '#3a86ff'
-    : acwrVal <= 1.3 ? '#30d158'
-    : acwrVal <= 1.5 ? '#ffc300'
-    : '#ff453a';
-  const acwrLabel = acwrVal == null ? 'Servono più allenamenti'
-    : acwrVal < 0.8 ? 'Carico basso / Settimana leggera'
-    : acwrVal <= 1.3 ? 'Equilibrio ideale (Costruzione)'
-    : acwrVal <= 1.5 ? 'Carico in rapido aumento'
-    : 'Attenzione: Aumento troppo brusco';
+  // ── VERDETTO ────────────────────────────────────────────
+  let verdict;
+  if (n < 3) {
+    verdict = { icon: '🌱', color: '#8e8e93', title: 'Servono ancora alcuni allenamenti', text: `Ne hai registrati ${n}. Dopo 3-4 sedute inizio a dirti come stai.` };
+  } else if (tr.deloadSuggested) {
+    verdict = { icon: '🛌', color: '#ff453a', title: 'Ti conviene una settimana più leggera', text: 'Sei molto stanco e i carichi non salgono: riduci le serie di circa un terzo per 5-7 giorni.' };
+  } else if (tr.tsb != null && tr.tsb < -15) {
+    verdict = { icon: '😮‍💨', color: '#ffc300', title: 'Sei piuttosto stanco', text: 'Stai spingendo forte. Dormi bene e non aumentare i carichi questa settimana.' };
+  } else if (tr.tsb != null && tr.tsb > 10) {
+    verdict = { icon: '⚡', color: '#3a86ff', title: 'Sei molto riposato', text: 'Hai margine: è un buon momento per spingere un po\' di più.' };
+  } else {
+    verdict = { icon: '✅', color: '#30d158', title: 'Stai andando bene', text: 'Allenamento e recupero sono in equilibrio.' };
+  }
 
-  const deloadBanner = tr.deloadSuggested ? `
-    <div class="card" style="margin-bottom:14px;background:rgba(255,69,58,0.12);border:1px solid #ff453a">
-      <div style="font-size:13px;font-weight:800;color:#ff453a;margin-bottom:4px">🛑 Consiglio del Modello: Settimana di Scarico (Deload)</div>
-      <div style="font-size:12px;color:var(--t1);line-height:1.45">
-        Hai accumulato molta fatica recente rispetto alla tua abitudine e i carichi negli esercizi stanno rallentando. Riduci le serie del 30–40% per 5–7 giorni per supercompensare.
-      </div>
-    </div>` : '';
-
-  const muscleEntries = Object.entries(setsByMuscle).sort((a, b) => b[1] - a[1]);
-  const muscleBarsHtml = muscleEntries.length > 0 ? muscleEntries.map(([mKey, sets]) => {
-    const label = MUSCLE_LABELS_IT[mKey] || mKey;
-    const pct = Math.min(100, Math.round((sets / 22) * 100));
-    const col = sets < 8 ? '#3a86ff' : sets <= 20 ? '#30d158' : '#ffc300';
-    const zoneTxt = sets < 8 ? 'Mantenimento' : sets <= 20 ? 'Zona crescita (10–20)' : 'Volume molto alto';
+  // ── FORZA (max 5 esercizi) ──────────────────────────────
+  const st = {
+    progress: { t: '📈 Più forte', c: '#30d158' },
+    plateau:  { t: '⏸️ Fermo', c: '#ffc300' },
+    regress:  { t: '📉 In calo', c: '#ff453a' }
+  };
+  const liftsHtml = lifts.length ? lifts.slice(0, 5).map(l => {
+    const s = st[l.status] || { t: '—', c: 'var(--t2)' };
     return `
-      <div style="margin-bottom:10px">
-        <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;margin-bottom:4px">
-          <span>${esc(label)}</span>
-          <span style="color:${col}">${sets} serie <span style="font-size:10px;color:var(--t3);font-weight:500">· ${zoneTxt}</span></span>
-        </div>
-        <div style="height:7px;background:rgba(255,255,255,0.07);border-radius:4px;overflow:hidden">
-          <div style="height:100%;width:${pct}%;background:${col};border-radius:4px"></div>
-        </div>
-      </div>`;
-  }).join('') : `<div style="font-size:12.5px;color:var(--t3);padding:12px 0;text-align:center">Completa almeno un allenamento negli ultimi 7 giorni per vedere le serie per muscolo.</div>`;
-
-  const hasAssumedRir = lifts.some(l => l.assumedZeroRir);
-
-  const liftsHtml = lifts.length > 0 ? lifts.slice(0, 8).map(l => {
-    const stMeta = {
-      progress: { label: '📈 In aumento', col: '#30d158', bg: 'rgba(48,209,88,0.14)' },
-      plateau:  { label: '⏸️ Stabile / Stallo', col: '#ffc300', bg: 'rgba(255,195,0,0.14)' },
-      regress:  { label: '📉 In calo',    col: '#ff453a', bg: 'rgba(255,69,58,0.14)' }
-    }[l.status] || { label: 'Stabile', col: 'var(--t2)', bg: 'rgba(255,255,255,0.06)' };
-    const slopeSign = l.trendSlopePctWeek > 0 ? '+' : '';
-
-    return `
-      <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,0.06)">
+        <div style="min-width:0">
           <div style="font-size:13px;font-weight:800;color:var(--t1)">${esc(l.exerciseId)}</div>
-          <span style="font-size:10px;font-weight:800;padding:3px 8px;border-radius:10px;background:${stMeta.bg};color:${stMeta.col}">
-            ${stMeta.label}
-          </span>
+          <div style="font-size:11px;color:var(--t3)">tra 4 settimane: circa <b style="color:var(--accent)">${l.forecast4w} kg</b></div>
         </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:12px;color:var(--t2)">
-          <span>Massimale teorico (1RM): <b style="color:var(--t1)">${l.e1rm} kg</b> <span style="font-size:10.5px;color:var(--t3)">(da ${l.lastWeight}kg × ${l.lastReps})</span></span>
-          <span style="font-size:11px;font-weight:700;color:${stMeta.col}">${slopeSign}${l.trendSlopePctWeek}%/sett</span>
-        </div>
-        <div style="font-size:11px;color:var(--t3);margin-top:3px">
-          Stima tra 4 settimane: <b style="color:var(--accent)">${l.forecast4w} kg</b>
+        <div style="text-align:right;white-space:nowrap">
+          <div style="font-size:15px;font-weight:900;color:var(--t1)">${l.e1rm} kg</div>
+          <div style="font-size:10.5px;font-weight:800;color:${s.c}">${s.t}</div>
         </div>
       </div>`;
-  }).join('') : `<div style="font-size:12.5px;color:var(--t3);padding:12px 0;text-align:center">Nessun esercizio registrato con peso e ripetizioni.</div>`;
+  }).join('') : `<div style="font-size:12.5px;color:var(--t3);padding:10px 0;text-align:center">Registra allenamenti con peso e ripetizioni per vedere i progressi.</div>`;
+  const rirNote = lifts.some(l => l.assumedZeroRir)
+    ? `<div style="font-size:11px;color:#ffc300;margin-top:8px;line-height:1.4">⚠️ In alcune serie non hai indicato quante ripetizioni ti restavano: ho supposto "zero", quindi la tua forza reale potrebbe essere un po' più alta.</div>` : '';
+
+  // ── MUSCOLI (chiuso) ────────────────────────────────────
+  const rows = Object.entries(sets).sort((a, b) => b[1] - a[1]).map(([k, v]) => {
+    const col = v < 8 ? '#3a86ff' : v <= 20 ? '#30d158' : '#ffc300';
+    const txt = v < 8 ? 'poche' : v <= 20 ? 'giuste' : 'tante';
+    return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0">
+      <span>${esc(MUSCLE_LABELS_IT[k] || k)}</span><span style="color:${col};font-weight:700">${v} serie · ${txt}</span></div>`;
+  }).join('') || `<div style="font-size:12px;color:var(--t3)">Nessun allenamento negli ultimi 7 giorni.</div>`;
 
   return `
-    ${deloadBanner}
+    ${verdictCard(verdict)}
 
-    <!-- CARD 1: FORMA FISICA vs FATICA RECENTE -->
-    <div class="card" style="margin-bottom:14px">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-        <div>
-          <div style="font-size:14px;font-weight:800;color:var(--t1)">⚡ Forma Fisica vs Fatica Accumulata</div>
-          <div style="font-size:11px;color:var(--t3)">Capisci se ti stai allenando il giusto o se hai bisogno di recuperare</div>
+    <!-- FORMA vs STANCHEZZA -->
+    <div class="card" style="margin-bottom:12px">
+      ${sectionTitle('⚡ Allenamento accumulato e stanchezza', 'Come sta rispondendo il tuo corpo')}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0">
+        <div style="background:rgba(58,134,255,0.1);border-radius:12px;padding:10px;text-align:center">
+          <div style="font-size:10.5px;color:#3a86ff;font-weight:800">ALLENAMENTO ACCUMULATO</div>
+          <div style="font-size:22px;font-weight:900;color:var(--t1)">${tr.ctl ?? 0}</div>
+          <div style="font-size:10.5px;color:var(--t3)">ultime 6 settimane</div>
         </div>
-        <span style="font-size:10.5px;font-weight:800;padding:3px 9px;border-radius:10px;background:rgba(48,209,88,0.15);color:#30d158">
-          Prontezza ${tr.readiness ?? 75}/100
-        </span>
-      </div>
-
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;text-align:center">
-        <div style="background:rgba(58,134,255,0.09);border:1px solid rgba(58,134,255,0.22);border-radius:10px;padding:9px 6px">
-          <div style="font-size:10px;color:#3a86ff;font-weight:800">CONDIZIONE</div>
-          <div style="font-size:18px;font-weight:900;color:var(--t1);margin:2px 0">${tr.ctl ?? 0}</div>
-          <div style="font-size:9.5px;color:var(--t3)">Base 6 settimane</div>
-        </div>
-        <div style="background:rgba(255,69,58,0.09);border:1px solid rgba(255,69,58,0.22);border-radius:10px;padding:9px 6px">
-          <div style="font-size:10px;color:#ff453a;font-weight:800">FATICA RECENTE</div>
-          <div style="font-size:18px;font-weight:900;color:var(--t1);margin:2px 0">${tr.atl ?? 0}</div>
-          <div style="font-size:9.5px;color:var(--t3)">Ultimi 7 giorni</div>
-        </div>
-        <div style="background:rgba(255,195,0,0.09);border:1px solid rgba(255,195,0,0.22);border-radius:10px;padding:9px 6px">
-          <div style="font-size:10px;color:#ffc300;font-weight:800">FRESCHEZZA</div>
-          <div style="font-size:18px;font-weight:900;color:var(--t1);margin:2px 0">${(tr.tsb || 0) > 0 ? '+' : ''}${tr.tsb ?? 0}</div>
-          <div style="font-size:9.5px;color:var(--t3)">Condizione − Fatica</div>
+        <div style="background:rgba(255,69,58,0.1);border-radius:12px;padding:10px;text-align:center">
+          <div style="font-size:10.5px;color:#ff453a;font-weight:800">STANCHEZZA</div>
+          <div style="font-size:22px;font-weight:900;color:var(--t1)">${tr.atl ?? 0}</div>
+          <div style="font-size:10.5px;color:var(--t3)">ultimi 7 giorni</div>
         </div>
       </div>
-
-      <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:10.5px;color:var(--t2);margin-bottom:6px">
-        <span><b style="color:#3a86ff">━ Blu:</b> Condizione acquisita</span>
-        <span><b style="color:#ff453a">━ Rossa:</b> Fatica degli ultimi giorni</span>
-        <span><b style="color:#ffc300">┄ Gialla:</b> Freschezza</span>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--t2);margin-bottom:4px">
+        <span style="color:#3a86ff">━ allenamento accumulato</span>
+        <span style="color:#ff453a">━ stanchezza</span>
       </div>
-
       ${renderBanisterPmcSVG(tr)}
+      ${explainBox(
+        'La linea blu sale piano quando ti alleni con costanza. La rossa schizza dopo gli allenamenti duri e scende quando riposi.',
+        'Durata e fatica (voto da 1 a 10) di ogni allenamento che chiudi.',
+        'Se la rossa sta molto sopra la blu sei stanco: riposa. Se sta sotto sei fresco e puoi spingere.'
+      )}
+    </div>
 
-      <!-- EQUILIBRIO DEL CARICO -->
-      <div style="background:rgba(0,0,0,0.22);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-top:10px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
-          <span style="font-size:11.5px;font-weight:800;color:var(--t1)">Rapporto Fatica Recente / Abitudine: <span style="color:${acwrCol}">${acwrVal ?? 'N/D'}</span></span>
-          <span style="font-size:10.5px;font-weight:700;color:${acwrCol}">${acwrLabel}</span>
-        </div>
-        <div style="font-size:10.5px;color:var(--t3);line-height:1.4">
-          Indica se questa settimana hai aumentato il carico troppo bruscamente rispetto al tuo solito (ideale tra <b>0.8 e 1.3</b>). <i>Nota anti-bias: è un indicatore di cambio ritmo, non una diagnosi medica di infortunio.</i>
-        </div>
-      </div>
+    <!-- FORZA -->
+    <div class="card" style="margin-bottom:12px">
+      ${sectionTitle('🏋️ Stai diventando più forte?', 'Il peso massimo che potresti sollevare 1 volta (stima)')}
+      <div style="margin-top:6px">${liftsHtml}</div>
+      ${rirNote}
+      ${explainBox(
+        'Per ogni esercizio, la tua forza stimata e dove sarai tra 4 settimane.',
+        'Peso e ripetizioni delle tue serie (non serve fare un massimale vero).',
+        'Verde = stai migliorando. Giallo = sei fermo da un po\': prova a variare. Rosso = stai perdendo forza: controlla recupero e calorie.'
+      )}
+    </div>
 
-      <!-- GUIDA SEMPLICE ALLA LETTURA -->
-      <details style="margin-top:10px;background:rgba(255,255,255,0.025);border:1px solid var(--border);border-radius:10px;padding:10px 12px">
-        <summary style="cursor:pointer;font-size:11.5px;font-weight:700;color:var(--t1)">
-          📖 Come leggere il grafico Forma vs Fatica?
-        </summary>
-        <div style="margin-top:8px;font-size:12px;color:var(--t2);line-height:1.55">
-          <p style="margin:0 0 6px">
-            • <b>Linea Blu (Condizione):</b> sale lentamente settimana dopo settimana quando ti alleni con costanza. Più è alta, più lavoro riesci a tollerare.
-          </p>
-          <p style="margin:0 0 6px">
-            • <b>Linea Rossa (Fatica):</b> sale subito dopo i giorni di allenamento pesante e scende nei giorni di riposo.
-          </p>
-          <p style="margin:0">
-            • <b>Linea Gialla (Freschezza):</b> quando è leggermente negativa (−5 / −15) ti stai allenando in modo produttivo; se scende molto sotto −20 per tante settimane, un piccolo scarico ti farà fare un balzo di forza.
-          </p>
+    <!-- DETTAGLI -->
+    <div class="card" style="margin-bottom:12px">
+      <details>
+        <summary style="cursor:pointer;font-size:12.5px;font-weight:800;color:var(--t2)">💪 Serie per muscolo questa settimana</summary>
+        <div style="margin-top:10px">
+          ${rows}
+          <div style="font-size:11px;color:var(--t3);margin-top:8px;line-height:1.4">Per far crescere un muscolo di solito bastano <b>10-20 serie a settimana</b>.</div>
         </div>
       </details>
-    </div>
-
-    <!-- CARD 2: FORZA MASSIMALE STIMATA (1RM) -->
-    <div class="card" style="margin-bottom:14px">
-      <div style="font-size:14px;font-weight:800;color:var(--t1);margin-bottom:3px">
-        🏋️ Progressione della Forza nei tuoi Esercizi
-      </div>
-      <div style="font-size:11.5px;color:var(--t2);margin-bottom:10px;line-height:1.4">
-        Confronta serie diverse (es. 80kg×8 vs 85kg×5) calcolando il tuo <b>Massimale Teorico su 1 ripetizione (1RM)</b>.
-      </div>
-      ${hasAssumedRir ? `
-        <div style="background:rgba(255,195,0,0.08);border-left:3px solid #ffc300;border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:11px;color:var(--t2);line-height:1.4">
-          ⚠️ <b>Attenzione al Bias sulle serie a buffer:</b> in alcuni esercizi non è stato indicato quante ripetizioni avevi ancora in canna (RIR). Il modello assume prudenzialmente 0 ripetizioni di margine, quindi il tuo massimale reale potrebbe essere più alto se ti sei fermato lontano dal cedimento.
-        </div>` : ''}
-      ${liftsHtml}
-    </div>
-
-    <!-- CARD 3: SERIE SETTIMANALI PER MUSCOLO -->
-    <div class="card" style="margin-bottom:14px">
-      <div style="font-size:14px;font-weight:800;color:var(--t1);margin-bottom:3px">
-        💪 Serie Settimanali per Gruppo Muscolare
-      </div>
-      <div style="font-size:11.5px;color:var(--t2);margin-bottom:12px">
-        La fascia ottimale per la crescita muscolare è solitamente tra <b>10 e 20 serie allenanti a settimana</b> per muscolo.
-      </div>
-      ${muscleBarsHtml}
+      <details style="margin-top:10px">
+        <summary style="cursor:pointer;font-size:12.5px;font-weight:800;color:var(--t2)">ℹ️ Da sapere</summary>
+        <div style="margin-top:8px;font-size:11.5px;color:var(--t2);line-height:1.5">
+          Sono stime matematiche, non diagnosi mediche. Se senti dolore, fermati e chiedi a un professionista.
+          Più allenamenti registri (con il voto di fatica), più le stime sono affidabili.
+        </div>
+      </details>
     </div>
   `;
 }

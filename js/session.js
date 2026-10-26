@@ -42,8 +42,12 @@ function releaseWakeLock() { if (wakeLock) { wakeLock.release(); wakeLock = null
 // ── Persistenza sessione attiva (anti-kill) ─────────────────
 const ACTIVE_SESSION_KEY = 'fittracker_active_session_v1';
 let _restNextLabel = '';
+// Quando la sessione è terminata/abbandonata NON bisogna più salvarla in background
+// (altrimenti pagehide/visibilitychange la riscrivono e al riavvio risulta ancora aperta).
+let _sessionClosed = false;
 
 function saveActiveSessionState() {
+  if (_sessionClosed) return;
   if (!sessionData || !exState?.length) return;
   try {
     const cardioDone = document.getElementById('cardio-done')?.checked || false;
@@ -224,6 +228,17 @@ async function loadSessionSelect() {
       }).join('');
 
       if (!sessionData) {
+        // Se la stessa sessione risulta già completata oggi, lo stato locale è un residuo: scartalo
+        try {
+          const raw = localStorage.getItem(ACTIVE_SESSION_KEY);
+          const saved = raw ? JSON.parse(raw) : null;
+          const doneToday = todayLog?.workout?.completed && saved?.sessionData?.dayKey
+            && todayLog.workout.session_day === saved.sessionData.dayKey;
+          if (doneToday) {
+            clearActiveSessionState();
+            return;
+          }
+        } catch (e) { /* ignora */ }
         tryRestoreActiveSession();
       }
     });
@@ -489,6 +504,7 @@ function launchActive(title, sub, isRestore = false) {
     coachContainer.before(coachCard);
   }
 
+  _sessionClosed = false;
   renderExercises();
   if (!isRestore) saveActiveSessionState();
 }
@@ -961,8 +977,10 @@ window.confirmExit = function() {
     text: 'I progressi non salvati andranno persi.',
     confirmLabel: 'Esci', confirmClass: 'btn-r',
     onConfirm: () => {
+      _sessionClosed = true;
       document.removeEventListener('visibilitychange', onVisibilityChange);
       clearInterval(sessionInt); clearInterval(restInt); releaseWakeLock();
+      postToSW({ type: 'cancel-rest' });
       restEndTime = 0;
       sessionStarted = false;
       sessionData = null;
@@ -1072,6 +1090,11 @@ function calcProgressionTips() {
 
 // ── Finish session ─────────────────────────────────────────
 window.finishSession = async function() {
+  // Blocca subito ogni salvataggio in background (pagehide/visibilitychange) e pulisci lo stato locale:
+  // la sessione è conclusa. Se il salvataggio cloud fallisce, lo stato viene ripristinato più sotto.
+  _sessionClosed = true;
+  const _backupSessionState = (() => { try { return localStorage.getItem(ACTIVE_SESSION_KEY); } catch (e) { return null; } })();
+  clearActiveSessionState();
   document.removeEventListener('visibilitychange', onVisibilityChange);
   clearInterval(sessionInt); clearInterval(restInt); releaseWakeLock();
   postToSW({ type: 'cancel-rest' });
@@ -1314,6 +1337,9 @@ window.finishSession = async function() {
 
   } catch(e) {
     console.error('Errore salvataggio sessione:', e);
+    // Salvataggio fallito: ripristina lo stato locale così l'allenamento non va perso
+    _sessionClosed = false;
+    try { if (_backupSessionState) localStorage.setItem(ACTIVE_SESSION_KEY, _backupSessionState); } catch (_) {}
     showToast('Errore salvataggio: ' + e.message, 'err');
   }
 };
