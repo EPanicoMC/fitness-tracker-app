@@ -10,27 +10,29 @@
 
 const STORAGE_KEY = 'kova_flags';
 
+const IS_BROWSER = typeof window !== 'undefined';
+
 export const DEFAULT_FLAGS = {
   // Fase 2 — Modello 1 (Energia)
-  'energy.trendKalmanOnly': false,
-  'energy.normalizedGating': false,
-  'energy.dynamicRho': false,
-  'energy.stepsCovariate': false,
+  'energy.trendKalmanOnly': IS_BROWSER,
+  'energy.normalizedGating': IS_BROWSER,
+  'energy.dynamicRho': IS_BROWSER,
+  'energy.stepsCovariate': false, // sperimentale (2.1d)
 
   // Fase 2 — Modello 2 (Allenamento)
-  'training.homogeneousLoad': false,
-  'training.e1rmV2': false,
-  'training.banisterValidation': false,
-  'training.readinessV2': false,
-  'training.volumeTargets': false,
-  'training.doubleProgression': false,
+  'training.homogeneousLoad': IS_BROWSER,
+  'training.e1rmV2': IS_BROWSER,
+  'training.banisterValidation': IS_BROWSER,
+  'training.readinessV2': IS_BROWSER,
+  'training.volumeTargets': IS_BROWSER,
+  'training.doubleProgression': IS_BROWSER,
 
   // Fase 3 — Unificazione
-  'targets.unified': false,
-  'recovery.v2': false,
+  'targets.unified': IS_BROWSER,
+  'recovery.v2': IS_BROWSER,
   'insightBus': true,
 
-  // Fase 4 — Nuovi Modelli & Funzionalità Additive (attivi di default, 0 regressioni)
+  // Fase 4 — Nuovi Modelli & Funzionalità Additive
   'weeklyCheckin': true,
   'bodyComp': true,
   'dayCloser': true,
@@ -38,8 +40,8 @@ export const DEFAULT_FLAGS = {
   'nutritionQuality': true,
   'correlations': true,
   'personalCorrelations': true,
-  'dietBreak': false,
-  'coach.dietBreakRule': false
+  'dietBreak': IS_BROWSER,
+  'coach.dietBreakRule': IS_BROWSER
 };
 
 let _memoryOverrides = {};
@@ -65,7 +67,7 @@ export function getStoredFlagOverrides() {
  *   1. `explicitFlags[flagName]` (passato via config/options al modello per backtest)
  *   2. `_memoryOverrides[flagName]` (impostato in-memory nei test)
  *   3. `localStorage` (`kova_flags`)
- *   4. `DEFAULT_FLAGS[flagName]` (default `false`)
+ *   4. `DEFAULT_FLAGS[flagName]`
  */
 export function isFlagEnabled(flagName, explicitFlags = null) {
   if (explicitFlags && typeof explicitFlags === 'object' && flagName in explicitFlags) {
