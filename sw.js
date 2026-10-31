@@ -1,4 +1,4 @@
-const CACHE = 'ft-v106';
+const CACHE = 'ft-v107';
 // Cache separata per librerie CDN con URL versionato (contenuto immutabile):
 // non viene svuotata ai bump di CACHE, così l'SDK Firebase non va riscaricato a ogni deploy.
 const CDN_CACHE = 'ft-cdn-v1';
@@ -57,7 +57,15 @@ const FILES = [
 
 
 self.addEventListener('install', e => e.waitUntil(
-  caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting())
+  caches.open(CACHE).then(async c => {
+    await Promise.allSettled(
+      FILES.map(url =>
+        fetch(url, { cache: 'reload' }).then(res => {
+          if (res.ok) return c.put(url, res);
+        })
+      )
+    );
+  }).then(() => self.skipWaiting())
 ));
 
 self.addEventListener('activate', e => e.waitUntil(
@@ -108,11 +116,10 @@ function matchCached(request) {
   });
 }
 
-// Network-first con timeout: con buona rete identico a prima (si vede sempre la
-// versione più recente); con rete lenta/assente, dopo NETWORK_TIMEOUT_MS si usa la
-// copia in cache. La risposta di rete, se arriva dopo, aggiorna comunque la cache.
+// Network-first con timeout: bypassa la HTTP disk cache del browser (`cache: 'no-cache'`)
+// per avere sempre gli ultimi moduli ES (.js) e pagine (.html) pubblicati su GitHub Pages.
 function networkFirstWithTimeout(e) {
-  const networkPromise = fetch(e.request).then(res => {
+  const networkPromise = fetch(e.request, { cache: 'no-cache' }).then(res => {
     if (res.ok) {
       const clone = res.clone();
       caches.open(CACHE).then(c => c.put(e.request, clone)).catch(() => {});
