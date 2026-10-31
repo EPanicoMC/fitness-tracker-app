@@ -230,18 +230,97 @@ export const VOLUME_TARGETS = [
   { group: 'polpacci', label: 'Polpacci', target: 6, priority: 9 },
 ];
 
+// Helper: fonde in modo sicuro PHASE_CONFIG di default ("Fase 3 - Cut") con eventuali
+// override presenti in settings.phase_config o program.phase_config (campi nuovi opzionali).
+export function getPhaseConfig({ program = null, settings = null, customConfig = null } = {}) {
+  const override = customConfig || program?.phase_config || settings?.phase_config || null;
+  if (!override || typeof override !== 'object') return PHASE_CONFIG;
+
+  return {
+    ...PHASE_CONFIG,
+    ...override,
+    weight: { ...PHASE_CONFIG.weight, ...(override.weight || {}) },
+    waist: { ...PHASE_CONFIG.waist, ...(override.waist || {}) },
+    kcal: { ...PHASE_CONFIG.kcal, ...(override.kcal || {}) },
+    macro: {
+      training: { ...PHASE_CONFIG.macro.training, ...(override.macro?.training || {}) },
+      rest: { ...PHASE_CONFIG.macro.rest, ...(override.macro?.rest || {}) },
+      avg: { ...PHASE_CONFIG.macro.avg, ...(override.macro?.avg || {}) }
+    },
+    protein_band: { ...PHASE_CONFIG.protein_band, ...(override.protein_band || {}) },
+    sleep: { ...PHASE_CONFIG.sleep, ...(override.sleep || {}) },
+    symptoms: { ...PHASE_CONFIG.symptoms, ...(override.symptoms || {}) },
+    gate: { ...PHASE_CONFIG.gate, ...(override.gate || {}) },
+    early_exit: { ...PHASE_CONFIG.early_exit, ...(override.early_exit || {}) },
+    s5: { ...PHASE_CONFIG.s5, ...(override.s5 || {}) },
+    drinks: { ...PHASE_CONFIG.drinks, ...(override.drinks || {}) },
+    meals_out: { ...PHASE_CONFIG.meals_out, ...(override.meals_out || {}) },
+    increments: { ...PHASE_CONFIG.increments, ...(override.increments || {}) },
+    blocks: Array.isArray(override.blocks) && override.blocks.length ? override.blocks : PHASE_CONFIG.blocks,
+    rules: Array.isArray(override.rules) && override.rules.length ? override.rules : PHASE_CONFIG.rules,
+    reference_exercises: Array.isArray(override.reference_exercises) && override.reference_exercises.length
+      ? override.reference_exercises
+      : PHASE_CONFIG.reference_exercises
+  };
+}
+
 // Helper: settimana corrente della fase
-export function getCurrentPhaseWeek(today) {
-  const start = new Date(PHASE_CONFIG.start_date + 'T00:00:00');
+export function getCurrentPhaseWeek(today, cfg = PHASE_CONFIG) {
+  const activeCfg = cfg || PHASE_CONFIG;
+  const start = new Date(activeCfg.start_date + 'T00:00:00');
   const now = new Date(today + 'T00:00:00');
   const diff = Math.floor((now - start) / 86400000);
   if (diff < 0) return 0;
-  return Math.min(Math.floor(diff / 7) + 1, PHASE_CONFIG.weeks);
+  return Math.min(Math.floor(diff / 7) + 1, activeCfg.weeks || 12);
 }
 
 // Helper: blocco corrente per numero settimana
-export function getCurrentBlock(weekNum) {
-  return PHASE_CONFIG.blocks.find(b => b.weeks.includes(weekNum)) || null;
+export function getCurrentBlock(weekNum, cfg = PHASE_CONFIG) {
+  const activeCfg = cfg || PHASE_CONFIG;
+  return (activeCfg.blocks || []).find(b => b.weeks.includes(weekNum)) || null;
+}
+
+// Helper: verifica cancelli di successo e condizioni di uscita anticipata della fase
+export function checkSuccessCriteria(metrics = {}, cfg = PHASE_CONFIG) {
+  const activeCfg = cfg || PHASE_CONFIG;
+  const gate = activeCfg.gate || {};
+  const earlyExit = activeCfg.early_exit || {};
+
+  const waistOk = metrics.waistCm != null && gate.waist_target != null
+    ? metrics.waistCm <= gate.waist_target
+    : null;
+  const weightOk = metrics.weightKg != null && activeCfg.weight
+    ? (metrics.weightKg >= activeCfg.weight.target_min && metrics.weightKg <= activeCfg.weight.target_max)
+    : null;
+  const forceOk = metrics.maxForceDropPct != null && gate.force_max_drop_pct != null
+    ? metrics.maxForceDropPct >= gate.force_max_drop_pct
+    : true;
+
+  const earlyExitReasons = [];
+  if (
+    metrics.regressingExercisesCount != null &&
+    metrics.maxForceDropPct != null &&
+    metrics.regressingExercisesCount >= (earlyExit.force_min_exercises || 2) &&
+    metrics.maxForceDropPct <= (earlyExit.force_critical_pct || -10)
+  ) {
+    earlyExitReasons.push('Calo critico di forza sui fondamentali');
+  }
+  if (
+    metrics.criticalSleepNights != null &&
+    metrics.criticalSleepNights >= (earlyExit.sleep_critical_nights || 5)
+  ) {
+    earlyExitReasons.push('Sonno critico prolungato');
+  }
+
+  return {
+    phaseName: activeCfg.name,
+    waistOk,
+    weightOk,
+    forceOk,
+    gatePassed: Boolean((waistOk || weightOk) && forceOk),
+    earlyExitTriggered: earlyExitReasons.length > 0,
+    earlyExitReasons
+  };
 }
 
 // Helper: e1RM Epley — usato internamente per confronto, mai mostrato a schermo

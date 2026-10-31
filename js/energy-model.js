@@ -26,6 +26,8 @@
  *   • Modalità degradata automatica (priors di Mifflin-St Jeor) se i dati sono insufficienti.
  */
 
+import { isFlagEnabled } from './feature-flags.js';
+
 export const ENERGY_MODEL_DEFAULTS = {
   // ρ ≈ 7700 kcal/kg: valore classico di Wishnofsky (1958); in realtà dipende dalla frazione
   // di massa grassa/magra persa e dalla durata (Hall 2008, Lancet 2011). Configurabile.
@@ -51,6 +53,24 @@ export const ENERGY_MODEL_DEFAULTS = {
   // Giorni minimi per uscire dalla "stima preliminare"
   minDaysForReliableEstimate: 14
 };
+
+/**
+ * Calcola la densità energetica dinamica ρ (kcal/kg) secondo l'approssimazione di Forbes (Hall 2008):
+ *   FM = peso * (BF / 100)
+ *   p  = FM / (FM + 10.4)
+ *   ρ  = clamp(p * 9440 + (1 - p) * 1816, 5500, 8500)
+ */
+export function computeDynamicRho(weightKg, bfPct) {
+  const w = Number(weightKg);
+  const bf = Number(bfPct);
+  if (isNaN(w) || w <= 25 || isNaN(bf) || bf < 4 || bf > 60) {
+    return 7700;
+  }
+  const fm = w * (bf / 100);
+  const p = fm / (fm + 10.4);
+  const rho = Math.round(p * 9440 + (1 - p) * 1816);
+  return Math.max(5500, Math.min(8500, rho));
+}
 
 export const ACTIVITY_MULTIPLIERS = {
   sedentary: 1.2,
@@ -182,6 +202,7 @@ export function diffDaysISO(dateA, dateB) {
 export function kalmanStep2D(state, obs, config = ENERGY_MODEL_DEFAULTS) {
   const rho = config.rhoKcalPerKg || 7700;
   const invRho = 1 / rho;
+  const useNormalizedGating = Boolean(obs.useNormalizedGating || isFlagEnabled('energy.normalizedGating', config.flags));
 
   let [w, tdee] = state.x;
   let [[p00, p01], [p10, p11]] = state.P;
@@ -189,14 +210,17 @@ export function kalmanStep2D(state, obs, config = ENERGY_MODEL_DEFAULTS) {
   const hasIntake = obs.intakeKcal != null && obs.intakeComplete !== 'no';
   const isPartial = obs.intakeComplete === 'partial';
   const isAnomalous = !!obs.anomalous;
+  const stepsDeltaKcal = Number(obs.stepsDeltaKcal) || 0;
 
   const qWBase = Math.pow(config.processWeightSigmaKg || 0.08, 2);
-  const qTdeeBase = Math.pow(config.processTdeeSigmaKcal || 25, 2);
+  const qTdeeMult = obs.qTdeeMultiplier != null && obs.qTdeeMultiplier > 0 ? Number(obs.qTdeeMultiplier) : 1.0;
+  const qTdeeBase = Math.pow(config.processTdeeSigmaKcal || 25, 2) * qTdeeMult;
 
   let wPred, tdeePred, fp00, fp01, fp10, fp11;
   if (hasIntake) {
     const mult = isPartial ? (config.missingIntakeProcessMultiplier || 3.5) : 1.0;
-    wPred = w + (obs.intakeKcal - tdee) * invRho;
+    const effectiveTdeeForDay = tdee + stepsDeltaKcal;
+    wPred = w + (obs.intakeKcal - effectiveTdeeForDay) * invRho;
     tdeePred = tdee;
     // F * P * F^T con F = [[1, -invRho], [0, 1]]
     const a00 = p00 - invRho * p10;
@@ -219,16 +243,33 @@ export function kalmanStep2D(state, obs, config = ENERGY_MODEL_DEFAULTS) {
   // Osservazione peso
   const rawW = obs.weightKg != null && Number(obs.weightKg) > 0 ? Number(obs.weightKg) : null;
   let innovation = null;
+  let normalizedInnovation = null;
   let outlier = false;
 
   if (rawW != null && !isAnomalous) {
     innovation = rawW - wPred;
     let rVar = Math.pow(config.obsWeightSigmaKg || 0.6, 2);
-    // Huber-like robust gating per outlier (> 2.5 kg di salto giornaliero = ritenzione idrica acuta / refeed)
-    if (Math.abs(innovation) > 2.5) {
-      outlier = true;
-      rVar *= Math.pow(Math.abs(innovation) / 1.2, 2);
+
+    if (useNormalizedGating) {
+      // Gonfia R quando il giorno precedente presenta fattori di ritenzione idrica prevedibile
+      if (obs.waterRetentionRisk) {
+        rVar *= 3.0;
+      }
+      const sPre = fp00 + rVar;
+      normalizedInnovation = Math.abs(innovation) / Math.sqrt(Math.max(1e-6, sPre));
+      if (normalizedInnovation > 3.0) {
+        outlier = true;
+        rVar *= Math.pow(normalizedInnovation / 1.5, 2);
+      }
+    } else {
+      // Huber-like robust gating per outlier (> 2.5 kg di salto giornaliero = ritenzione idrica acuta / refeed)
+      if (Math.abs(innovation) > 2.5) {
+        outlier = true;
+        rVar *= Math.pow(Math.abs(innovation) / 1.2, 2);
+      }
+      normalizedInnovation = Math.abs(innovation) / Math.sqrt(Math.max(1e-6, fp00 + rVar));
     }
+
     const S = fp00 + rVar;
     const k0 = fp00 / S;
     const k1 = fp10 / S;
@@ -257,7 +298,9 @@ export function kalmanStep2D(state, obs, config = ENERGY_MODEL_DEFAULTS) {
   return {
     x: [w, tdee],
     P: [[Math.max(1e-6, p00), sym01], [sym01, Math.max(1, p11)]],
+    priorWeightPred: Number(wPred.toFixed(3)),
     innovation,
+    normalizedInnovation: normalizedInnovation != null ? Number(normalizedInnovation.toFixed(2)) : null,
     outlier
   };
 }
@@ -334,9 +377,11 @@ export function simulateWeightForecast({
     const dW = (intake - adaptiveTdee) / rho;
     w = w + dW;
 
-    // Propagazione dell'incertezza: σ_w(t)^2 = (decay^t * σ_w0)^2 + (σ_tdee * (1 - decay^t) / ε)^2 + t * σ_proc^2
+    // Propagazione dell'incertezza: σ_w(t)^2 = (decay^t * σ_w0)^2 + (σ_tdee_eff * (1 - decay^t) / ε)^2 + t * σ_proc^2
+    // Le fluttuazioni giornaliere del NEAT in tdeeSdKcal si mediano parzialmente sull'orizzonte di t giorni (τ_int ≈ 21 gg)
     const decayT = Math.pow(decay, day);
-    const weightEffectFromTdee = eps > 0 ? ((1 - decayT) / eps) * tdeeSdKcal : (day / rho) * tdeeSdKcal;
+    const effectiveTdeeSd = tdeeSdKcal / Math.sqrt(1 + day / 21);
+    const weightEffectFromTdee = eps > 0 ? ((1 - decayT) / eps) * effectiveTdeeSd : (day / rho) * effectiveTdeeSd;
     const procSd = (config.processWeightSigmaKg || 0.08) * Math.sqrt(day);
     const totalSd = Math.sqrt(
       Math.pow(decayT * weightSdKg, 2) +
@@ -470,11 +515,18 @@ export function computeCalorieAndMacroRecommendation({
 export function runEnergyBalanceModel({
   days = [],
   profile = {},
+  checks = [],
   initialParams = null,
   todayDate = null,
   config = {}
 } = {}) {
   const cfg = { ...ENERGY_MODEL_DEFAULTS, ...config };
+  const flagOverrides = cfg.flags || null;
+  const useTrendKalmanOnly = isFlagEnabled('energy.trendKalmanOnly', flagOverrides);
+  const useNormalizedGating = isFlagEnabled('energy.normalizedGating', flagOverrides);
+  const useDynamicRho = isFlagEnabled('energy.dynamicRho', flagOverrides);
+  const useStepsCovariate = isFlagEnabled('energy.stepsCovariate', flagOverrides);
+
   const sorted = [...days].sort((a, b) => a.date.localeCompare(b.date));
   const refDate = todayDate || (sorted.length ? sorted[sorted.length - 1].date : new Date().toISOString().split('T')[0]);
 
@@ -500,6 +552,28 @@ export function runEnergyBalanceModel({
     ? Number(firstWithWeight.weightKg)
     : (Number(profile.current_weight) || Number(profile.weight_target) || 75);
 
+  // Fase 2.1c: Densità energetica ρ dinamica se esiste una %BF recente (<= 60 gg) dai checks o dai giorni
+  let recentBf = null;
+  if (useDynamicRho) {
+    const validChecks = (checks || [])
+      .filter(c => c.date && (c.body_fat != null || c.bf_estimate?.value != null) && diffDaysISO(c.date, refDate) <= 60 && diffDaysISO(c.date, refDate) >= -1)
+      .sort((a, b) => a.date.localeCompare(b.date));
+    if (validChecks.length > 0) {
+      const latestCheck = validChecks[validChecks.length - 1];
+      recentBf = Number(latestCheck.bf_estimate?.value ?? latestCheck.body_fat);
+    } else {
+      const recentDaysWithBf = continuousDays.filter(d => d.bodyFat != null && diffDaysISO(d.date, refDate) <= 60);
+      if (recentDaysWithBf.length > 0) {
+        recentBf = Number(recentDaysWithBf[recentDaysWithBf.length - 1].bodyFat);
+      } else if (profile.body_fat != null && Number(profile.body_fat) > 0) {
+        recentBf = Number(profile.body_fat);
+      }
+    }
+    if (recentBf != null && recentBf > 2 && recentBf < 60) {
+      cfg.rhoKcalPerKg = computeDynamicRho(fallbackWeight, recentBf);
+    }
+  }
+
   const prior = estimatePriorTDEE(profile, fallbackWeight, refDate);
 
   // Stato iniziale Kalman
@@ -517,6 +591,11 @@ export function runEnergyBalanceModel({
   // Imputazione leggera con media mobile 7gg per giorni isolati senza diario (se ci sono ≥4 giorni negli ultimi 7)
   const snapshots = [];
   let recentValidIntakes = [];
+  let recentCarbs7 = [];
+  let recentSteps28 = [];
+  let prevDayWaterRetentionRisk = false;
+  let adaptiveQDaysRemaining = 0;
+  let modelDivergence = false;
 
   for (let i = 0; i < continuousDays.length; i++) {
     const d = continuousDays[i];
@@ -539,33 +618,73 @@ export function runEnergyBalanceModel({
       if (recentValidIntakes.length > 7) recentValidIntakes.shift();
     }
 
+    // Fase 2.1d: Passi come covariata TDEE_t = TDEE_base,t + beta * (steps_t - media28gg_steps)
+    let stepsDeltaKcal = 0;
+    if (d.steps != null && Number(d.steps) > 0) {
+      if (useStepsCovariate && recentSteps28.length >= 5) {
+        const mean28dSteps = recentSteps28.reduce((a, b) => a + b, 0) / recentSteps28.length;
+        const beta = 0.0005 * (state.x[0] || fallbackWeight);
+        stepsDeltaKcal = beta * (Number(d.steps) - mean28dSteps);
+      }
+      recentSteps28.push(Number(d.steps));
+      if (recentSteps28.length > 28) recentSteps28.shift();
+    }
+
+    const activeQMult = adaptiveQDaysRemaining > 0 ? 3.0 : 1.0;
+    if (adaptiveQDaysRemaining > 0) adaptiveQDaysRemaining--;
+
     const stepRes = i === 0 && !initialParams?.kalmanState
       ? {
           x: [d.weightKg != null && Number(d.weightKg) > 0 ? Number(d.weightKg) : state.x[0], state.x[1]],
           P: state.P,
+          priorWeightPred: d.weightKg != null && Number(d.weightKg) > 0 ? Number(d.weightKg) : state.x[0],
           innovation: 0,
+          normalizedInnovation: 0,
           outlier: false
         }
       : kalmanStep2D(state, {
           weightKg: d.weightKg,
           intakeKcal: effectiveIntake,
           intakeComplete,
-          anomalous: d.anomalous
+          anomalous: d.anomalous,
+          waterRetentionRisk: useNormalizedGating && prevDayWaterRetentionRisk,
+          useNormalizedGating,
+          stepsDeltaKcal,
+          qTdeeMultiplier: activeQMult
         }, cfg);
+
+    // Fase 2.1b: Calcola se il giorno corrente induce ritenzione idrica prevedibile per domani
+    const avgCarbs7 = recentCarbs7.length >= 3
+      ? recentCarbs7.reduce((a, b) => a + b, 0) / recentCarbs7.length
+      : null;
+    const carbsSpike = avgCarbs7 != null && d.carbsG != null && Number(d.carbsG) > avgCarbs7 * 1.4;
+    prevDayWaterRetentionRisk = Boolean(
+      (d.drinks != null && Number(d.drinks) > 0) ||
+      (d.mealsOut != null && Number(d.mealsOut) > 0) ||
+      carbsSpike ||
+      d.anomalous === true
+    );
+    if (d.carbsG != null && Number(d.carbsG) > 0) {
+      recentCarbs7.push(Number(d.carbsG));
+      if (recentCarbs7.length > 7) recentCarbs7.shift();
+    }
 
     state = { x: stepRes.x, P: stepRes.P };
 
     const kalmanWeight = state.x[0];
     const emaW = emaSeries[i]?.emaWeight ?? kalmanWeight;
-    // Trend weight combina il filtro di Kalman e l'EMA per massima robustezza agli spike d'acqua
-    const trendWeight = Number((0.7 * kalmanWeight + 0.3 * emaW).toFixed(2));
-    const tdeeSd = Math.max(110, Math.sqrt(Math.max(1, state.P[1][1])));
+    // Fase 2.1a: Con flag energy.trendKalmanOnly attivo usa solo il posteriore Kalman; l'EMA resta per i grafici
+    const trendWeight = useTrendKalmanOnly
+      ? Number(kalmanWeight.toFixed(2))
+      : Number((0.7 * kalmanWeight + 0.3 * emaW).toFixed(2));
+    const tdeeSd = Math.max(60, Math.sqrt(Math.max(1, state.P[1][1])));
 
     snapshots.push({
       date: d.date,
       rawWeight: d.weightKg != null && Number(d.weightKg) > 0 ? Number(d.weightKg) : null,
       emaWeight: emaW,
       kalmanWeight: Number(kalmanWeight.toFixed(3)),
+      priorWeightPred: stepRes.priorWeightPred,
       trendWeight,
       tdeeKalman: Math.round(state.x[1]),
       tdeeSd: Math.round(tdeeSd),
@@ -574,32 +693,46 @@ export function runEnergyBalanceModel({
       intakeComplete,
       imputed,
       proteinG: d.proteinG != null ? Number(d.proteinG) : null,
+      normalizedInnovation: stepRes.normalizedInnovation ?? 0,
       outlier: stepRes.outlier
     });
+
+    // Controllo diagnostico su finestra mobile: se |Kalman - window| > 2 * sqrt(P_tdee + var_window),
+    // emette model_divergence e attiva Q adattivo (x3 per 7 giorni) per riallineare il filtro senza doppio conteggio
+    if (snapshots.length >= 7) {
+      const winCheck = computeWindowExpenditure(snapshots, cfg.rhoKcalPerKg, 21);
+      const valid21Now = snapshots.slice(-21).filter(s => s.rawWeight != null && !s.outlier && s.intakeKcal != null && s.intakeComplete !== 'no').length;
+      if (winCheck != null && valid21Now >= 6) {
+        const L = Math.max(6, valid21Now);
+        const effWeightSd = 0.18;
+        const winVar = (12 * Math.pow(cfg.rhoKcalPerKg, 2) * Math.pow(effWeightSd, 2)) / (L * (L * L - 1));
+        const pTdee = Math.max(1, state.P[1][1]);
+        const divThreshold = 2 * Math.sqrt(pTdee + winVar);
+        if (Math.abs(state.x[1] - winCheck) > divThreshold) {
+          adaptiveQDaysRemaining = 7;
+          if (i === continuousDays.length - 1) modelDivergence = true;
+        }
+      }
+    }
   }
 
   const latest = snapshots[snapshots.length - 1];
   const windowTdee = computeWindowExpenditure(snapshots, cfg.rhoKcalPerKg, 21);
 
-  // Aggiornamento Bayesiano / Kalman dello stato TDEE con l'osservatore di pendenza su finestra 14-28gg
+  // Fase 1.3: TDEE primario = posteriore Kalman con la sua sd (niente fusione a varianza inversa con windowTdee).
+  // windowTdee resta come controllo diagnostico per verificare eventuale model_divergence finale.
   const validDays21 = snapshots.slice(-21).filter(s => s.rawWeight != null && !s.outlier && s.intakeKcal != null && s.intakeComplete !== 'no').length;
-  let tdeeEstimate = latest.tdeeKalman;
-  let tdeeSd = latest.tdeeSd;
+  const tdeeEstimate = latest.tdeeKalman;
+  const tdeeSd = latest.tdeeSd;
 
   if (windowTdee != null && validDays21 >= 6) {
-    // Varianza dell'estimatore OLS di pendenza su L giorni (con σ_res effettivo ≈ 0.18 kg)
     const L = Math.max(6, validDays21);
     const effWeightSd = 0.18;
     const winVar = (12 * Math.pow(cfg.rhoKcalPerKg, 2) * Math.pow(effWeightSd, 2)) / (L * (L * L - 1));
-    const kalVar = Math.pow(latest.tdeeSd, 2);
-    const kGainWindow = kalVar / (kalVar + winVar);
-    tdeeEstimate = Math.round(latest.tdeeKalman + kGainWindow * (windowTdee - latest.tdeeKalman));
-    tdeeSd = Math.max(45, Math.round(Math.sqrt((1 - kGainWindow) * kalVar)));
-    // Aggiorna anche lo stato finale Kalman per continuità incrementale
-    state.x[1] = tdeeEstimate;
-    state.P[1][1] = Math.pow(tdeeSd, 2);
-    latest.tdeeKalman = tdeeEstimate;
-    latest.tdeeSd = tdeeSd;
+    const kalVar = Math.pow(tdeeSd, 2);
+    if (Math.abs(tdeeEstimate - windowTdee) > 2 * Math.sqrt(kalVar + winVar)) {
+      modelDivergence = true;
+    }
   }
 
   const tdeeCI = [
@@ -693,7 +826,14 @@ export function runEnergyBalanceModel({
   const adherenceScore = Math.min(35, Math.round(((weightDays14 + intakeDays14) / 28) * 35));
   const varianceScore = Math.max(0, Math.min(25, Math.round((1 - (tdeeSd - 60) / 260) * 25)));
   const confidence = Math.max(5, Math.min(100, daysScore + adherenceScore + varianceScore));
+  const confidenceUnit = Number((confidence / 100).toFixed(2));
   const isPreliminary = Math.min(weightDaysCount, intakeDaysCount) < cfg.minDaysForReliableEstimate;
+
+  // Fase 2.1e: il TDEE stimato è il "TDEE rispetto all'intake registrato" (assorbe l'under-reporting).
+  // Segnala possibile sotto-registrazione solo se il divario rispetto al prior Mifflin supera il 20% in modo persistente.
+  const priorDiffRatio = prior.priorTdee > 0 ? (prior.priorTdee - tdeeEstimate) / prior.priorTdee : 0;
+  const underReportingSuspected = Boolean(!isPreliminary && adherence14Pct >= 70 && priorDiffRatio > 0.20);
+  const underReportingPct = underReportingSuspected ? Math.round(priorDiffRatio * 100) : 0;
 
   const warnings = [];
   const missingDataRequirements = [];
@@ -720,6 +860,9 @@ export function runEnergyBalanceModel({
   if (adherence14Pct < 70 && snapshots.length >= 7) {
     warnings.push(`Aderenza al diario negli ultimi 14 giorni bassa (${adherence14Pct}%): l'incertezza sul TDEE (±${Math.round(1.96 * tdeeSd)} kcal) è aumentata.`);
   }
+  if (modelDivergence) {
+    warnings.push(`Divergenza diagnostica tra TDEE Kalman (${tdeeEstimate} kcal) e finestra mobile (${windowTdee} kcal): attivato Q adattivo per riallineamento rapido.`);
+  }
   if (rec.floorApplied) {
     warnings.push(`Applicato limite minimo di sicurezza (${rec.safeMinKcal} kcal/giorno) per non scendere sotto il BMR o la soglia clinica.`);
   }
@@ -728,14 +871,21 @@ export function runEnergyBalanceModel({
   }
 
   return {
+    model_version: 'energy@2.0',
     date: latest.date,
     trendWeight: latest.trendWeight,
     rawWeight: latest.rawWeight,
     bmrEstimate: currentBmr,
     priorTdee: prior.priorTdee,
     tdeeEstimate,
+    tdeeSd,
     tdeeCI,
     tdeeWindowCrossCheck: windowTdee,
+    rhoKcalPerKg: cfg.rhoKcalPerKg,
+    underReportingSuspected,
+    underReportingPct,
+    model_divergence: modelDivergence,
+    modelDivergence,
     avgIntake7d,
     energyBalance7d,
     weeklyRateKg,
@@ -749,6 +899,15 @@ export function runEnergyBalanceModel({
     goalType: rec.goalType,
     targetRateKgWeek: rec.targetRateKgWeek,
     confidence,
+    confidenceScore: confidenceUnit,
+    dataQuality: {
+      daysLogged: intakeDaysCount,
+      weighIns: weightDaysCount,
+      daysLogged14: intakeDays14,
+      weighIns14: weightDays14,
+      rpeCoverage: null,
+      missingFields: missingDataRequirements.map(m => m.missing)
+    },
     isPreliminary,
     adherence14Pct,
     weightDaysCount,

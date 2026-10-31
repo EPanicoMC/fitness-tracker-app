@@ -357,3 +357,126 @@ export function forFirestore(nutrients) {
   }
   return out;
 }
+
+// ── Fase 4E: Qualità Nutrizionale & Distribuzione Proteica ────────
+
+/**
+ * Analizza la qualità nutrizionale giornaliera e settimanale:
+ *   1. Distribuzione proteica per pasto: conta i pasti che raggiungono la soglia MPS (>= 0.3 g/kg, target >= 3 pasti).
+ *   2. Fibre: target >= 14 g per 1000 kcal (se registrate).
+ *   3. Grassi saturi: < 10% delle kcal totali.
+ *   4. Alcol settimanale: somma unità alcoliche negli ultimi 7 giorni.
+ * Restituisce sia le metriche sintetiche sia un array di insight compatibili con `js/insight-bus.js`.
+ */
+export function evaluateNutritionQuality({
+  log = null,
+  todayLog = null,
+  recentLogs7d = [],
+  weightKg = null,
+  bodyWeightKg = null
+} = {}) {
+  const activeLog = (log && Object.keys(log).length > 0) ? log : (todayLog || {});
+  const wKg = Math.max(40, Number(weightKg ?? bodyWeightKg) || 75);
+  const mpsThresholdG = Number((0.3 * wKg).toFixed(1));
+
+  // Estrai proteine per singolo pasto (da activeLog.nutrition.meals o activeLog.meals_by_slot)
+  const mealsObj = activeLog?.nutrition?.meals || activeLog?.meals_by_slot || {};
+  const mealProteins = [];
+  if (mealsObj && typeof mealsObj === 'object') {
+    for (const [slotName, slotItems] of Object.entries(mealsObj)) {
+      if (Array.isArray(slotItems)) {
+        const pro = slotItems.reduce((s, it) => s + (Number(it?.protein) || 0), 0);
+        if (pro > 0) mealProteins.push({ slot: slotName, proteinG: Number(pro.toFixed(1)) });
+      } else if (slotItems && typeof slotItems === 'object' && Number(slotItems.protein) > 0) {
+        mealProteins.push({ slot: slotName, proteinG: Number(Number(slotItems.protein).toFixed(1)) });
+      }
+    }
+  }
+
+  const mpsMealsCount = mealProteins.filter(m => m.proteinG >= mpsThresholdG).length;
+  const totals = activeLog?.nutrition?.totals || activeLog || {};
+  const kcal = Number(totals.kcal) || 0;
+  const satFatG = totals.saturatedFat != null ? Number(totals.saturatedFat) : null;
+  const fiberG = totals.fiber != null ? Number(totals.fiber) : null;
+
+  const satFatPctKcal = (kcal > 0 && satFatG != null)
+    ? Number((((satFatG * 9) / kcal) * 100).toFixed(1))
+    : null;
+  const fiberTargetG = kcal > 0 ? Number(((kcal / 1000) * 14).toFixed(1)) : 25;
+
+  // Alcol negli ultimi 7 giorni
+  const logs7 = recentLogs7d.length > 0 ? recentLogs7d : (activeLog ? [activeLog] : []);
+  let weeklyDrinks = 0;
+  for (const l of logs7) {
+    const d = Number(l?.drinks ?? l?.nutrition?.totals?.alcoholDrinks ?? 0) || 0;
+    weeklyDrinks += d;
+  }
+  weeklyDrinks = Number(weeklyDrinks.toFixed(1));
+
+  const insights = [];
+
+  if (mealProteins.length >= 3 && mpsMealsCount < 3) {
+    insights.push({
+      id: 'nut_protein_distribution',
+      topic: 'protein',
+      severity: 'info',
+      confidence: 0.75,
+      title: `Distribuzione proteica: ${mpsMealsCount}/3 pasti sopra soglia`,
+      message: `Oggi solo ${mpsMealsCount} pasti hanno raggiunto almeno ${mpsThresholdG}g di proteine (0.3 g/kg). Distribuire le proteine su almeno 3 pasti massimizza la sintesi proteica muscolare.`,
+      action: `Aggiungi una fonte proteica magra nei pasti sotto i ${mpsThresholdG}g.`,
+      cooldownDays: 4
+    });
+  }
+
+  if (satFatPctKcal != null && satFatPctKcal > 11 && kcal >= 1200) {
+    insights.push({
+      id: 'nut_saturated_fat_high',
+      topic: 'nutrition_quality',
+      severity: 'warn',
+      confidence: 0.8,
+      title: `Grassi saturi al ${satFatPctKcal}% delle calorie`,
+      message: `I grassi saturi registrati (${satFatG}g) superano il limite consigliato del 10% delle calorie giornaliere.`,
+      action: 'Privilegia olio EVO, pesce o frutta secca al posto di formaggi grassi o insaccati.',
+      cooldownDays: 4
+    });
+  }
+
+  if (fiberG != null && kcal >= 1200 && fiberG < fiberTargetG * 0.7) {
+    insights.push({
+      id: 'nut_low_fiber',
+      topic: 'nutrition_quality',
+      severity: 'info',
+      confidence: 0.7,
+      title: `Fibre sotto la soglia ideale (${fiberG}g vs ${fiberTargetG}g)`,
+      message: `La densità di fibre è inferiore ai 14g per 1000 kcal raccomandati per sazietà e salute intestinale.`,
+      action: 'Aggiungi una porzione di verdura, legumi o cereali integrali.',
+      cooldownDays: 5
+    });
+  }
+
+  if (weeklyDrinks >= 4) {
+    insights.push({
+      id: 'nut_weekly_alcohol',
+      topic: 'nutrition_quality',
+      severity: weeklyDrinks >= 7 ? 'warn' : 'info',
+      confidence: 0.85,
+      title: `Consumo alcolico settimanale: ${weeklyDrinks} drink`,
+      message: `Negli ultimi 7 giorni hai registrato ${weeklyDrinks} unità alcoliche, che possono rallentare recupero muscolare, qualità del sonno e perdita di grasso.`,
+      action: 'Pianifica almeno 4-5 giorni analcolici consecutivi per ottimizzare il recupero.',
+      cooldownDays: 6
+    });
+  }
+
+  return {
+    mpsThresholdG,
+    mpsMealsCount,
+    totalMealsTracked: mealProteins.length,
+    satFatG,
+    satFatPctKcal,
+    fiberG,
+    fiberTargetG,
+    weeklyDrinks,
+    insights
+  };
+}
+

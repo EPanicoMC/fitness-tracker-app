@@ -6,6 +6,7 @@ import {
   formatNutrient, fromLegacy, forFirestore,
   detectAlcoholicDrink, estimateAlcoholGrams, per100gFrom, fromPer100g
 } from './nutrition-core.js';
+import { isFlagEnabled } from './feature-flags.js';
 
 let cachedKey = null;
 let busy = false;
@@ -27,6 +28,113 @@ const MODELS = [
   'gemini-3.6-flash',         // 20 RPD - Fallback (3.5-flash non è più nella lista modelli)
   'gemini-2.5-flash-lite'     // 20 RPD - Ultimo fallback
 ];
+const GEMINI_MODELS = MODELS;
+
+const MODEL_DAILY_LIMITS = {
+  'gemini-3.5-flash-lite': 500,
+  'gemini-3.1-flash-lite': 500,
+  'gemini-3.6-flash': 20,
+  'gemini-2.5-flash-lite': 20
+};
+
+function _getTodayRpdKey() {
+  const today = new Date().toISOString().split('T')[0];
+  return `kova_gemini_rpd_${today}`;
+}
+
+export function getDailyModelUsage() {
+  if (typeof localStorage === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(_getTodayRpdKey());
+    const parsed = raw ? JSON.parse(raw) : {};
+    return (parsed && typeof parsed === 'object') ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function _saveDailyModelUsage(usageObj) {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(_getTodayRpdKey(), JSON.stringify(usageObj));
+  } catch (_) {}
+}
+
+function _incrementModelUsage(model) {
+  const usage = getDailyModelUsage();
+  usage[model] = (Number(usage[model]) || 0) + 1;
+  _saveDailyModelUsage(usage);
+}
+
+function _markModelQuotaExhausted(model) {
+  const usage = getDailyModelUsage();
+  const cap = MODEL_DAILY_LIMITS[model] || 500;
+  usage[model] = Math.max(Number(usage[model]) || 0, cap);
+  _saveDailyModelUsage(usage);
+}
+
+function _isModelQuotaExhausted(model) {
+  const usage = getDailyModelUsage();
+  const used = Number(usage[model]) || 0;
+  const cap = MODEL_DAILY_LIMITS[model] || 500;
+  return used >= cap;
+}
+
+/**
+ * Verifica tramite l'endpoint ufficiale ListModels (GET /v1beta/models)
+ * se tutti gli ID presenti nella catena MODELS esistono realmente.
+ * NON modifica la catena MODELS di propria iniziativa: restituisce il report diagnostico.
+ */
+export async function verifyGeminiModelsList(overrideKey = null) {
+  const key = overrideKey || (await getKey());
+  if (!key) {
+    return {
+      success: false,
+      error: aiErrorMessage('no_key'),
+      checkedModels: [...MODELS],
+      availableInApi: [],
+      missingFromApi: [...MODELS]
+    };
+  }
+  try {
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
+    if (!r.ok) {
+      const txt = await r.text();
+      return {
+        success: false,
+        error: `HTTP ${r.status}: ${txt.substring(0, 200)}`,
+        checkedModels: [...MODELS],
+        availableInApi: [],
+        missingFromApi: []
+      };
+    }
+    const data = await r.json();
+    const apiNames = new Set(
+      (data.models || []).map(m => String(m.name || '').replace(/^models\//, ''))
+    );
+    const availableInApi = MODELS.filter(m => apiNames.has(m));
+    const missingFromApi = MODELS.filter(m => !apiNames.has(m));
+    if (missingFromApi.length > 0) {
+      console.warn('[Gemini ListModels] ID modello non trovati su v1beta/models:', missingFromApi);
+    }
+    return {
+      success: true,
+      allValid: missingFromApi.length === 0,
+      checkedModels: [...MODELS],
+      availableInApi,
+      missingFromApi,
+      allApiFlashModels: [...apiNames].filter(n => /gemini.*flash/i.test(n))
+    };
+  } catch (e) {
+    return {
+      success: false,
+      error: e.message,
+      checkedModels: [...MODELS],
+      availableInApi: [],
+      missingFromApi: []
+    };
+  }
+}
 
 const _delay = ms => new Promise(r => setTimeout(r, ms));
 let _lastCallTime = 0;
@@ -96,9 +204,9 @@ export function logAIError(entry = {}) {
 }
 
 async function callGemini(key, prompt, opts = {}) {
-  const { temperature = 0.7, maxOutputTokens = 1024, parts, models, jsonMode, tag = 'callGemini' } = opts;
+  const { temperature = 0.7, maxOutputTokens = 1024, parts, models, jsonMode, responseSchema, tag = 'callGemini' } = opts;
   const contentParts = parts || [{ text: prompt }];
-  const targetModels = models || MODELS;
+  const rawModels = models || MODELS;
 
   const now = Date.now();
   const wait = _THROTTLE_MS - (now - _lastCallTime);
@@ -107,14 +215,36 @@ async function callGemini(key, prompt, opts = {}) {
   const diag = [];
   const kinds = [];
   let lastRaw = null;
-  for (const model of targetModels) {
+
+  // Salta in anticipo i modelli con quota giornaliera locale esaurita
+  const availableModels = rawModels.filter(m => {
+    if (_isModelQuotaExhausted(m)) {
+      diag.push(`${m}:skipped_local_rpd_exhausted`);
+      kinds.push('quota_day');
+      return false;
+    }
+    return true;
+  });
+
+  if (availableModels.length === 0) {
+    const kind = 'quota_day';
+    const error = aiErrorMessage(kind);
+    logAIError({ fn: tag, stage: 'api', kind, userMessage: error, diag });
+    return { success: false, error, kind, diag };
+  }
+
+  for (const model of availableModels) {
     let tokens = maxOutputTokens;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         if (attempt > 0) await _delay(800);
         _lastCallTime = Date.now();
+        _incrementModelUsage(model);
         const genConfig = { temperature, maxOutputTokens: tokens };
-        if (jsonMode) genConfig.responseMimeType = 'application/json';
+        if (jsonMode) {
+          genConfig.responseMimeType = 'application/json';
+          if (responseSchema) genConfig.responseSchema = responseSchema;
+        }
         const ctrl = new AbortController();
         const to = setTimeout(() => ctrl.abort(), _FETCH_TIMEOUT_MS);
         let r;
@@ -135,7 +265,8 @@ async function callGemini(key, prompt, opts = {}) {
         if (r.status === 429) {
           let msg = '';
           try { msg = (await r.text()) || ''; } catch(_) {}
-          const perDay = /PerDay|per day|daily/i.test(msg);
+          const perDay = /PerDay|per day|daily|quota/i.test(msg);
+          if (perDay) _markModelQuotaExhausted(model);
           kinds.push(perDay ? 'quota_day' : 'rate_limit');
           diag.push(`${model}:429${perDay ? ' (giornaliera)' : ''}`);
           console.warn(`[Gemini] ${model}: 429 Rate limit → next model`);
@@ -619,6 +750,57 @@ function fixFoodTypos(text) {
     .replace(/\byoghurt\b/gi, 'yogurt');
 }
 
+/**
+ * Fase 4D: Applica Empirical Bayes shrinkage `n / (n + 5)` alle correzioni storiche dell'utente (`ai_corrections`).
+ */
+export function applyEmpiricalBayesCorrection(macros, correctionRecord) {
+  if (!macros || !correctionRecord || !correctionRecord.avg_delta) return macros;
+  const n = Math.max(0, Number(correctionRecord.count) || (correctionRecord.corrections?.length ?? 0));
+  if (n <= 0) return macros;
+
+  const shrinkage = n / (n + 5);
+  const d = correctionRecord.avg_delta;
+  const scaleMacro = (val, pct) => {
+    const num = Number(val) || 0;
+    const p = Math.max(-50, Math.min(80, Number(pct) || 0));
+    return num * (1 + (shrinkage * p) / 100);
+  };
+
+  return {
+    ...macros,
+    kcal: Math.max(0, Math.round(scaleMacro(macros.kcal, d.kcal_pct))),
+    protein: Number(Math.max(0, scaleMacro(macros.protein, d.protein_pct)).toFixed(1)),
+    carbs: Number(Math.max(0, scaleMacro(macros.carbs, d.carbs_pct)).toFixed(1)),
+    fats: Number(Math.max(0, scaleMacro(macros.fats, d.fats_pct)).toFixed(1)),
+    _calibratedWithShrinkage: Number(shrinkage.toFixed(2))
+  };
+}
+
+const MACRO_CALC_RESPONSE_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    items: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          name: { type: 'STRING' },
+          grams: { type: 'NUMBER' },
+          kcal: { type: 'NUMBER' },
+          protein: { type: 'NUMBER' },
+          carbs: { type: 'NUMBER' },
+          fats: { type: 'NUMBER' },
+          saturatedFat: { type: 'NUMBER', nullable: true },
+          alcohol: { type: 'NUMBER', nullable: true },
+          alcoholDrinks: { type: 'NUMBER', nullable: true }
+        },
+        required: ['name', 'grams', 'kcal', 'protein', 'carbs', 'fats']
+      }
+    }
+  },
+  required: ['items']
+};
+
 // ── Calcola macros da testo (ibrido: deterministico + AI) ───
 export async function calcMacrosFromText(text) {
   if (!text || !text.trim()) return { success: false, error: 'Testo vuoto.' };
@@ -633,10 +815,36 @@ export async function calcMacrosFromText(text) {
     const key = await getKey();
     if (!key) return { success: false, error: aiErrorMessage('no_key') };
 
-    // Pure AI-Native Direct Prompt — No historical bias, no fuzzy table overrides
+    const usePersonalCalibration = isFlagEnabled('aiMealCalibration');
+    let userContextBlock = '';
+    let corrMap = {};
+
+    if (usePersonalCalibration) {
+      const [foodLib, loadedCorr] = await Promise.all([
+        loadFoodLibrary().catch(() => []),
+        loadCorrections().catch(() => ({}))
+      ]);
+      corrMap = loadedCorr || {};
+      const inputTokens = normalize(cleanedText).split(/\s+/).filter(w => w.length >= 3);
+      const scoredLib = (foodLib || [])
+        .map(f => {
+          const fn = normalize(f.name || '');
+          const hits = inputTokens.filter(t => fn.includes(t)).length;
+          return { f, hits };
+        })
+        .sort((a, b) => b.hits - a.hits)
+        .slice(0, 10)
+        .map(x => x.f);
+
+      if (scoredLib.length > 0) {
+        userContextBlock += `\nRIFERIMENTI DALLA LIBRERIA PERSONALE DELL'UTENTE (valori esatti per 100g da usare se l'alimento corrisponde):\n` +
+          scoredLib.map(f => `- ${f.name}: ${f.kcal_per_100g} kcal, P:${f.protein_per_100g}g, C:${f.carbs_per_100g}g, F:${f.fats_per_100g}g per 100g`).join('\n') + '\n';
+      }
+    }
+
     const prompt = `Analizza la seguente descrizione di un pasto e stima accuratamente i macronutrienti per OGNI ingrediente.
 Pasto: "${cleanedText}"
-
+${userContextBlock}
 Regole fondamentali e VINCOLANTI:
 1. ${GENERAL_NUTRITIONAL_GUIDELINES}
 2. ${COOKING_RULE}
@@ -657,7 +865,13 @@ Formato JSON richiesto:
   ]
 }`;
 
-    const res = await callGemini(key, prompt, { temperature: 0.1, maxOutputTokens: 2048, jsonMode: true, tag: 'calcMacrosFromText' });
+    const res = await callGemini(key, prompt, {
+      temperature: 0.1,
+      maxOutputTokens: 2048,
+      jsonMode: true,
+      responseSchema: usePersonalCalibration ? MACRO_CALC_RESPONSE_SCHEMA : null,
+      tag: 'calcMacrosFromText'
+    });
     if (!res.success) return { success: false, error: res.error, kind: res.kind };
 
     let parsed = extractJsonLoose(res.text);
@@ -792,6 +1006,17 @@ Rispondi SOLO con JSON valido:
             }
           }
         } catch(e) { /* retry fallito, usa il risultato originale */ }
+      }
+    }
+
+    // Fase 4D: Applica Empirical Bayes shrinkage se l'utente ha correzioni storiche per questo piatto
+    if (usePersonalCalibration && corrMap) {
+      const corrId = cleanedText.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_àèéìòù]/g, '');
+      const matchedCorr = corrMap[corrId] || Object.values(corrMap).find(c =>
+        c.food_name && normalize(c.food_name) === normalize(cleanedText)
+      );
+      if (matchedCorr) {
+        validated = applyEmpiricalBayesCorrection(validated, matchedCorr);
       }
     }
 
@@ -1817,10 +2042,33 @@ Rispondi SOLO con un JSON valido:
   }
 }
 
+import { computeDoubleProgressionSuggestions } from './training-model.js';
+
 // ── Suggerimenti Smart per Esercizio ─────────────────────────
-export async function generateExerciseTipsAI({ exercises, previousExercises, sessionHistory, programObjective, profileWeight }) {
+export async function generateExerciseTipsAI({
+  exercises,
+  previousExercises,
+  sessionHistory,
+  programObjective,
+  profileWeight,
+  deterministicSuggestions = null
+}) {
+  // Fase 2.2g: Calcola suggerimento deterministico di doppia progressione se non già fornito
+  const detSuggestions = Array.isArray(deterministicSuggestions)
+    ? deterministicSuggestions
+    : computeDoubleProgressionSuggestions({
+        days: [{ date: new Date().toISOString().split('T')[0], workout: { completed: true, exercises: exercises || [] } }]
+      });
+  const detByEx = new Map(detSuggestions.map(s => [s.exerciseId, s]));
+
   const key = await getKey();
-  if (!key) return { success: false, error: 'API key mancante.' };
+  if (!key) {
+    return {
+      success: false,
+      error: 'API key mancante.',
+      deterministicTips: detSuggestions
+    };
+  }
 
   // Costruisci contesto per ogni esercizio
   const exContext = (exercises || []).map(ex => {
@@ -1842,13 +2090,15 @@ export async function generateExerciseTipsAI({ exercises, previousExercises, ses
     }).filter(Boolean);
 
     const stagnante = history.length >= 3 && history.every(h => Math.abs(h.peso_max - curMaxW) < 1);
+    const det = detByEx.get(ex.name);
 
     return `• ${ex.name}:
   Oggi: ${ex.sets.map(s => `${s.weight}kg×${s.reps}`).join(', ')} | RPE: ${ex.rpe || '–'}
   Precedente: ${prevEx ? prevEx.sets.map(s => `${s.weight}kg×${s.reps}`).join(', ') + ' | RPE: ' + (prevEx.rpe || '–') : 'Prima volta'}
   Trend (${history.length} sessioni): ${history.length > 0 ? history.map(h => `${h.peso_max}kg RPE${h.rpe || '?'}`).join(' → ') : 'Nessuno'}
   Serie completate: ${ex.sets.filter(s => s.done !== false).length}/${ex.sets.length}
-  Stagnazione: ${stagnante ? 'SÌ (3+ sessioni stesso peso)' : 'No'}`;
+  Stagnazione: ${stagnante ? 'SÌ (3+ sessioni stesso peso)' : 'No'}
+  Suggerimento deterministico doppia progressione: ${det ? `${det.action.toUpperCase()} → ${det.suggestedWeightKg}kg (range ${det.targetRepRange}): ${det.reason}` : 'Nessuno'}`;
   }).join('\n\n');
 
   const prompt = `Sei KOVA Coach. Per ogni esercizio, genera un suggerimento SMART per la prossima sessione.
@@ -1861,7 +2111,7 @@ Obiettivo: ${programObjective ? programObjective.toUpperCase() : 'Non specificat
 ${exContext}
 
 ═══ REGOLE VINCOLANTI ═══
-1. Incrementi peso SOLO in multipli di 2.5kg (piastre standard).
+1. Incrementi peso SOLO in multipli di 2kg o 2.5kg (in base all'attrezzo).
 2. Mai suggerire >5kg di aumento in una sessione.
 3. Se RPE >= 9: priorità RECUPERO. Suggerisci mantenere peso o ridurre, MAI aumentare.
 4. Se RPE <= 6.5 per 2+ sessioni: suggerisci aumento peso specifico (es. "Passa a 77.5kg").
@@ -1872,6 +2122,7 @@ ${exContext}
 9. Se non c'è nulla di significativo da dire → NON includere quell'esercizio. L'array può avere meno elementi degli esercizi.
 10. "maintain" è un suggerimento valido — non forzare sempre un cambiamento.
 11. Ogni suggerimento deve essere CONCRETO e NUMERICO dove possibile.
+12. RISPETTA IL SUGGERIMENTO DETERMINISTICO DI DOPPIA PROGRESSIONE indicato per ogni esercizio: NON contraddirlo mai senza motivarlo esplicitamente nel campo "detail" (es. citando RPE >= 9, dolori o stagnazione).
 
 ═══ FORMATO RISPOSTA (JSON obbligatorio) ═══
 Rispondi SOLO con un JSON valido:
@@ -1889,7 +2140,7 @@ Rispondi SOLO con un JSON valido:
 
   try {
     const result = await callGemini(key, prompt, { temperature: 0.3, maxOutputTokens: 1024 });
-    if (!result.success) return { success: false, error: result.error };
+    if (!result.success) return { success: false, error: result.error, deterministicTips: detSuggestions };
 
     const raw = result.text;
     const s1 = raw.indexOf('{');
@@ -1899,13 +2150,14 @@ Rispondi SOLO con un JSON valido:
         const parsed = JSON.parse(raw.slice(s1, s2 + 1));
         return {
           success: true,
-          tips: Array.isArray(parsed.tips) ? parsed.tips : []
+          tips: Array.isArray(parsed.tips) ? parsed.tips : [],
+          deterministicTips: detSuggestions
         };
       } catch(e) { /* fallthrough */ }
     }
-    return { success: false, error: 'Risposta AI non valida.' };
+    return { success: false, error: 'Risposta AI non valida.', deterministicTips: detSuggestions };
   } catch(e) {
-    return { success: false, error: e.message };
+    return { success: false, error: e.message, deterministicTips: detSuggestions };
   }
 }
 
@@ -2090,6 +2342,16 @@ Vincolo: "corrections" deve contenere da 1 a massimo 3 elementi.`;
 
     const parsed = extractJsonLoose(res.text);
     if (!parsed || typeof parsed !== 'object') {
+      logAIError({
+        fn: 'predictiveCoach',
+        stage: 'parse',
+        kind: 'invalid_json',
+        model: res.model,
+        finishReason: res.finishReason,
+        usage: res.usage,
+        diag: res.diag,
+        raw: res.text
+      });
       return fallbackReport;
     }
 
@@ -2132,7 +2394,13 @@ Vincolo: "corrections" deve contenere da 1 a massimo 3 elementi.`;
     }
 
     return finalReport;
-  } catch (_) {
+  } catch (e) {
+    logAIError({
+      fn: 'predictiveCoach',
+      stage: 'exception',
+      kind: 'unknown',
+      detail: e?.message || String(e)
+    });
     return fallbackReport;
   }
 }

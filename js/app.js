@@ -12,6 +12,9 @@ import {
   deleteDoc
 } from './firebase-config.js';
 import { runMigrations } from './migration.js';
+import { getDailyTargets } from './targets.js';
+import { isFlagEnabled } from './feature-flags.js';
+import { estimatePriorBMR } from './energy-model.js';
 
 // ── Boot timing ────────────────────────────────────────────────────
 // performance.now() = ms dall'inizio della navigazione (include SW + download JS).
@@ -368,8 +371,20 @@ export function calcSmartScore({
  * @param {string}   params.today         — data odierna "YYYY-MM-DD"
  * @returns {object|null}
  */
-export function calcRecoveryPlan({ weeklyLogs, activeDiet, activeProgram, appSettings, today }) {
+export function calcRecoveryPlan({
+  weeklyLogs,
+  activeDiet,
+  activeProgram,
+  appSettings,
+  today,
+  weeklyCheckin = null,
+  energyOutput = null,
+  flags = null
+}) {
   if (!weeklyLogs || weeklyLogs.length === 0 || !activeDiet) return null;
+
+  const useUnifiedTargets = isFlagEnabled('targets.unified', flags) || Boolean(weeklyCheckin);
+  const useRecoveryV2 = isFlagEnabled('recovery.v2', flags);
 
   let kcalWeeklyDelta = 0;
   let proteinWeeklyDelta = 0;
@@ -383,6 +398,7 @@ export function calcRecoveryPlan({ weeklyLogs, activeDiet, activeProgram, appSet
   let workoutsPlanned = 0;
   let lastMissedSession = '';
   let daysWithData = 0;
+  let totalActualKcal = 0;
 
   const stepsGoal = appSettings?.steps_goal || 0;
 
@@ -392,21 +408,39 @@ export function calcRecoveryPlan({ weeklyLogs, activeDiet, activeProgram, appSet
     const dayOfWeek = getDayOfWeek(dateStr);
     const scheduleDay = activeProgram?.schedule?.[dayOfWeek];
     const isTrainingDay = !!(scheduleDay && scheduleDay !== 'off' && scheduleDay !== 'rest');
-    const dayKey = isTrainingDay ? 'day_on' : 'day_off';
-    const plan = activeDiet?.[dayKey];
 
-    // ── Macro deltas ──
-    const targetKcal = plan?.kcal || 0;
-    const targetProtein = plan?.protein || 0;
-    const targetCarbs = plan?.carbs || 0;
-    const targetFats = plan?.fats || 0;
+    let targetKcal = 0, targetProtein = 0, targetCarbs = 0, targetFats = 0;
+    if (useUnifiedTargets) {
+      const dt = getDailyTargets(dateStr, {
+        activeDiet,
+        activeProgram,
+        appSettings,
+        logEntry,
+        isTrainingDay,
+        weeklyCheckin
+      });
+      targetKcal = dt.kcal;
+      targetProtein = dt.protein;
+      targetCarbs = dt.carbs;
+      targetFats = dt.fats;
+    } else {
+      const dayKey = isTrainingDay ? 'day_on' : 'day_off';
+      const plan = activeDiet?.[dayKey];
+      targetKcal = plan?.kcal || 0;
+      targetProtein = plan?.protein || 0;
+      targetCarbs = plan?.carbs || 0;
+      targetFats = plan?.fats || 0;
+    }
 
     const actualKcal = logEntry.nutrition?.totals?.kcal || logEntry.nutrition?.kcal || 0;
     const actualProtein = logEntry.nutrition?.totals?.protein || logEntry.nutrition?.protein || 0;
     const actualCarbs = logEntry.nutrition?.totals?.carbs || logEntry.nutrition?.carbs || 0;
     const actualFats = logEntry.nutrition?.totals?.fats || logEntry.nutrition?.fats || 0;
 
-    if (actualKcal > 0 || actualProtein > 0) daysWithData++;
+    if (actualKcal > 0 || actualProtein > 0) {
+      daysWithData++;
+      totalActualKcal += actualKcal;
+    }
 
     kcalWeeklyDelta += (actualKcal - targetKcal);
     proteinWeeklyDelta += (actualProtein - targetProtein);
@@ -455,32 +489,77 @@ export function calcRecoveryPlan({ weeklyLogs, activeDiet, activeProgram, appSet
   const todayDow = getDayOfWeek(today);
   const todaySchedule = activeProgram?.schedule?.[todayDow];
   const isTodayTraining = !!(todaySchedule && todaySchedule !== 'off' && todaySchedule !== 'rest');
-  const todayPlan = activeDiet?.[isTodayTraining ? 'day_on' : 'day_off'];
-  const todayBaseKcal = todayPlan?.kcal || 0;
-  const todayBaseProtein = todayPlan?.protein || 0;
 
-  // Spread deficit over remaining days — minimum 3 to avoid extreme single-day adjustments
-  const remainingDays = Math.max(3, 7 - daysWithData);
+  let todayBaseKcal = 0, todayBaseProtein = 0;
+  if (useUnifiedTargets) {
+    const todayTargets = getDailyTargets(today, {
+      activeDiet,
+      activeProgram,
+      appSettings,
+      isTrainingDay: isTodayTraining,
+      weeklyCheckin
+    });
+    todayBaseKcal = todayTargets.kcal;
+    todayBaseProtein = todayTargets.protein;
+  } else {
+    const todayPlan = activeDiet?.[isTodayTraining ? 'day_on' : 'day_off'];
+    todayBaseKcal = todayPlan?.kcal || 0;
+    todayBaseProtein = todayPlan?.protein || 0;
+  }
 
-  // Calculate raw adjustments per day
-  const rawKcalAdjust = kcalWeeklyDelta < 0 ? Math.round(Math.abs(kcalWeeklyDelta) / remainingDays) : 0;
+  // Spread deficit over remaining days — minimum 3 (and max 5 in v2) to avoid extreme single-day adjustments
+  const remainingDays = useRecoveryV2
+    ? Math.max(3, Math.min(5, 7 - daysWithData))
+    : Math.max(3, 7 - daysWithData);
+
+  const maxKcalCap = useRecoveryV2 ? 300 : 400;
+  const maxProteinCap = useRecoveryV2 ? 25 : 40;
+  const maxStepsCap = 3000;
+
+  // Pavimento sicuro: max(BMR, 1500 M / 1200 F)
+  const profile = appSettings?.profile || appSettings || {};
+  const sex = String(profile.sex || profile.gender || 'M').toUpperCase();
+  const minSafeFloor = sex === 'F' ? 1200 : 1500;
+  const bmrFloor = estimatePriorBMR(profile, profile.weight || profile.current_weight || 75, today);
+  const safeFloorKcal = Math.max(minSafeFloor, bmrFloor || minSafeFloor);
+
+  let kcalAdjustPerDay = 0;
+  if (kcalWeeklyDelta < 0) {
+    const rawKcalAdjust = Math.round(Math.abs(kcalWeeklyDelta) / remainingDays);
+    kcalAdjustPerDay = Math.min(rawKcalAdjust, maxKcalCap);
+  } else if (useRecoveryV2 && kcalWeeklyDelta > 300) {
+    // Fase 3.4: post-eccesso compensa su 3-5 giorni con tetto -300 kcal/giorno,
+    // MA non compensare se l'utente è in cut e la settimana è già in deficit rispetto al TDEE_Kalman
+    const goalObj = String(activeProgram?.objective || activeDiet?.objective || profile.goal_type || 'cut').toLowerCase();
+    const isCut = goalObj.includes('cut') || goalObj.includes('dimagr');
+    const avgWeeklyIntake = daysWithData > 0 ? totalActualKcal / daysWithData : todayBaseKcal;
+    const tdeeRef = energyOutput?.tdeeEstimate || null;
+    const alreadyInRealDeficit = isCut && (
+      (tdeeRef != null && avgWeeklyIntake < tdeeRef - 100) ||
+      (tdeeRef == null && avgWeeklyIntake <= todayBaseKcal + 150)
+    );
+    if (!alreadyInRealDeficit) {
+      const rawCut = Math.round(kcalWeeklyDelta / remainingDays);
+      kcalAdjustPerDay = -Math.min(300, rawCut);
+    }
+  }
+
   const rawProteinAdjust = proteinWeeklyDelta < 0 ? Math.round(Math.abs(proteinWeeklyDelta) / remainingDays) : 0;
   const rawStepsAdjust = stepsGoal > 0 && stepsWeeklyDelta < 0
     ? Math.round(Math.abs(stepsWeeklyDelta) / remainingDays)
     : 0;
 
-  // Apply physiological caps — these are safe daily maximums
-  const MAX_EXTRA_KCAL_PER_DAY = 400;
-  const MAX_EXTRA_PROTEIN_PER_DAY = 40;
-  const MAX_EXTRA_STEPS_PER_DAY = 3000;
+  const proteinAdjustPerDay = Math.min(rawProteinAdjust, maxProteinCap);
 
-  const kcalAdjustPerDay = Math.min(rawKcalAdjust, MAX_EXTRA_KCAL_PER_DAY);
-  const proteinAdjustPerDay = Math.min(rawProteinAdjust, MAX_EXTRA_PROTEIN_PER_DAY);
+  const rawAdjustedKcal = todayBaseKcal + kcalAdjustPerDay;
+  // Non scendere mai più di -300 kcal rispetto al base e mai sotto safeFloorKcal quando si restringe
+  const todayAdjustedKcal = kcalAdjustPerDay < 0
+    ? Math.max(safeFloorKcal, todayBaseKcal - 300, rawAdjustedKcal)
+    : rawAdjustedKcal;
 
-  const todayAdjustedKcal = todayBaseKcal + kcalAdjustPerDay;
   const todayExtraProtein = proteinAdjustPerDay;
   const todayAdjustedProtein = todayBaseProtein + todayExtraProtein;
-  const todayExtraSteps = Math.min(rawStepsAdjust, MAX_EXTRA_STEPS_PER_DAY);
+  const todayExtraSteps = Math.min(rawStepsAdjust, maxStepsCap);
 
   // ── Days to recover estimate ──
   let daysToRecover = 0;
@@ -492,12 +571,19 @@ export function calcRecoveryPlan({ weeklyLogs, activeDiet, activeProgram, appSet
   // ── Actions ──
   const actions = [];
 
-  if (kcalWeeklyDelta < -200) {
+  if (kcalWeeklyDelta < -200 && kcalAdjustPerDay > 0) {
     actions.push({
       type: 'meal',
       icon: '🥩',
       label: 'Spuntino proteico',
       value: `+${kcalAdjustPerDay} kcal`
+    });
+  } else if (kcalAdjustPerDay < 0) {
+    actions.push({
+      type: 'meal',
+      icon: '🥗',
+      label: 'Riequilibrio graduale',
+      value: `${kcalAdjustPerDay} kcal`
     });
   }
 

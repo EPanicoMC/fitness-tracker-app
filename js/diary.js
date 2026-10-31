@@ -11,7 +11,8 @@ import {
   getOrGenerateCoachReport,
   generateDemo90DaysData,
   compileMissingDataWithAI,
-  saveGuidedMissingData
+  saveGuidedMissingData,
+  confirmWeeklyCheckinDecision
 } from './predictive-core.js';
 import { renderAndamentoDashboardHTML, renderAllenamentoDashboardHTML } from './predictive-ui.js';
 
@@ -786,6 +787,38 @@ window.toggleDemo90Days = async function() {
   _isDemo90Active = !_isDemo90Active;
   await refreshPredictiveDashboards();
   showToast(_isDemo90Active ? '🌱 Caricati 90 giorni di dati demo!' : '🔄 Ripristinati i tuoi dati reali');
+};
+
+window.toggleWeeklyCheckinCustom = function() {
+  const el = document.getElementById('weekly-checkin-custom-box');
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+};
+
+window.handleWeeklyCheckinAction = async function(decision) {
+  if (!_predictiveState?.weeklyCheckinProposal) return;
+  const proposal = _predictiveState.weeklyCheckinProposal;
+  if (decision === 'reopen') {
+    proposal.status = 'pending';
+    renderPredictiveViews();
+    return;
+  }
+  let customKcal = null;
+  if (decision === 'modified') {
+    customKcal = parseFloat(document.getElementById('weekly-checkin-custom-kcal')?.value);
+    if (!customKcal || customKcal < 1000) {
+      showToast('Inserisci un valore calorico valido (≥ 1200 kcal)', 'err');
+      return;
+    }
+  }
+  try {
+    const confirmed = await confirmWeeklyCheckinDecision(proposal, decision, customKcal);
+    _predictiveState.weeklyCheckinProposal = confirmed;
+    await refreshPredictiveDashboards({ persist: false });
+    showToast(`✅ Target settimanale confermato: ${confirmed?.confirmedTarget?.kcal || proposal.currentTargetKcal} kcal/giorno`);
+  } catch (e) {
+    console.error('handleWeeklyCheckinAction error:', e);
+    showToast('Errore salvataggio check-in settimanale', 'err');
+  }
 };
 
 window.autoFillMissingWithAI = async function(saveImmediately = false) {

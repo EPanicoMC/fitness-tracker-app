@@ -7,6 +7,8 @@ import {
 } from './app.js';
 import { calcMacrosFromText, analyzeFoodImageAI, generateSmartAdviceAI, generateRecoveryAdviceAI, generateAdvisor360AI, saveAICorrection } from './gemini.js';
 import { PHASE_CONFIG, getCurrentPhaseWeek } from './phase-config.js';
+import { getDailyTargets } from './targets.js';
+import { suggestDayCloser } from './day-closer.js';
 import { svgLineChart, movingAverage, linearRegression, statusDot, COLORS } from './widgets.js';
 
 const TODAY = getTodayString();
@@ -938,6 +940,13 @@ function buildFitScore() {
     return;
   }
 
+  const unifiedTargets = getDailyTargets(TODAY, {
+    activeDiet,
+    activeProgram,
+    appSettings,
+    isTrainingDay
+  });
+
   const todayKey = getDayOfWeek(TODAY);
   const result = calcSmartScore({
     meals: plan.meals || [],
@@ -947,13 +956,21 @@ function buildFitScore() {
     isTrainingDay,
     steps: logData.steps || 0,
     stepsGoal: appSettings?.steps_goal || 0,
-    planProtein: plan.protein || 0,
+    planProtein: unifiedTargets.protein || plan.protein || 0,
     actualProtein: tots.protein,
     weeklyLogs: _weeklyLogsCache || [],
     weeklyScore: _weeklyScoreCache,
   });
 
   if (!result) { box.innerHTML = ''; return; }
+
+  const fitConsuntivo = calcFitScore({
+    log: { ...logData, nutrition: { totals: tots } },
+    plan: { ...plan, kcal: unifiedTargets.kcal || plan.kcal, protein: unifiedTargets.protein || plan.protein },
+    isOn: isTrainingDay,
+    objective: activeProgram?.objective || 'recomposizione',
+    stepsGoal: appSettings?.steps_goal || 0
+  });
 
   const { score, label, icon, breakdown } = result;
 
@@ -976,7 +993,7 @@ function buildFitScore() {
   // Draw the split card (Left ring chart, Right metrics list)
   const totalMeals = plan.meals?.length || 0;
   const eatenMealsCount = mealStates.filter(m => m.eaten).length;
-  const targetKcal = plan.kcal || 0;
+  const targetKcal = unifiedTargets.kcal || plan.kcal || 0;
   const actualKcal = Math.round(tots.kcal);
   
   const workoutBreakdown = breakdown.find(b => b.label.toLowerCase().includes('allen'));
@@ -991,7 +1008,7 @@ function buildFitScore() {
   const stepsGoal = appSettings?.steps_goal || 0;
   const actualSteps = logData.steps || 0;
   
-  const targetProtein = plan.protein || 0;
+  const targetProtein = unifiedTargets.protein || plan.protein || 0;
   const actualProtein = Math.round(tots.protein);
 
   const S = 110, R = 44, SW = 7;
@@ -999,7 +1016,13 @@ function buildFitScore() {
   const dash = (score / 100) * C;
 
   box.innerHTML = `
-    <div style="display:flex; gap:16px; align-items:center; width:100%; margin-top:8px; overflow:hidden;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; padding-bottom:6px; border-bottom:1px solid rgba(255,255,255,0.05);">
+      <div>
+        <div style="font-size:12px; font-weight:800; color:#fff;">⏱️ Sei in linea adesso? <span style="font-weight:500; color:var(--t3); font-size:11px;">(SmartScore)</span></div>
+        <div style="font-size:10.5px; color:var(--t3);">Misura se stai rispettando il ritmo previsto per quest'ora del giorno</div>
+      </div>
+    </div>
+    <div style="display:flex; gap:16px; align-items:center; width:100%; margin-top:4px; overflow:hidden;">
       
       <!-- Left Column: Circular chart -->
       <div style="position:relative; width:${S}px; height:${S}px; flex-shrink:0;">
@@ -1057,6 +1080,11 @@ function buildFitScore() {
 
       </div>
     </div>
+    ${fitConsuntivo ? `
+    <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.05); display:flex; justify-content:space-between; align-items:center; font-size:11px; color:var(--t2);">
+      <span>🏁 <strong>Voto della giornata</strong> <span style="color:var(--t3);">(consuntivo totale a fine giornata)</span></span>
+      <span style="font-weight:800; color:#fff;">${fitConsuntivo.score}/100 · ${fitConsuntivo.label}</span>
+    </div>` : ''}
   `;
 }
 
@@ -3374,11 +3402,17 @@ function buildAdvisorContext() {
     if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age--;
   }
 
-  // Target macro
-  const targetKcal = plan?.kcal || 0;
-  const targetProtein = plan?.protein || 0;
-  const targetCarbs = plan?.carbs || 0;
-  const targetFats = plan?.fats || 0;
+  // Target macro unificati
+  const unifiedTargets = getDailyTargets(TODAY, {
+    activeDiet,
+    activeProgram,
+    appSettings,
+    isTrainingDay
+  });
+  const targetKcal = unifiedTargets.kcal || plan?.kcal || 0;
+  const targetProtein = unifiedTargets.protein || plan?.protein || 0;
+  const targetCarbs = unifiedTargets.carbs || plan?.carbs || 0;
+  const targetFats = unifiedTargets.fats || plan?.fats || 0;
 
   // Percentuali raggiungimento
   const kcalPct = targetKcal > 0 ? Math.round((tots.kcal / targetKcal) * 100) : 0;
@@ -3707,6 +3741,51 @@ function renderSmartAdvisorContent(text, insights = []) {
       </div>`;
   }
 
+  // Fase 4C: Ottimizzatore deterministico "Chiudi la giornata"
+  let dayCloserHtml = '';
+  try {
+    const tots = calcTotals();
+    const unifiedTarget = getDailyTargets(TODAY, {
+      activeDiet,
+      activeProgram,
+      appSettings,
+      profile: appSettings?.profile,
+      logEntry: logData,
+      isTrainingDay
+    });
+    const remKcal = Math.max(0, (unifiedTarget.kcal || 0) - (tots.kcal || 0));
+    const remPro = Math.max(0, (unifiedTarget.protein || 0) - (tots.protein || 0));
+    const remCarbs = Math.max(0, (unifiedTarget.carbs || 0) - (tots.carbs || 0));
+    const remFats = Math.max(0, (unifiedTarget.fats || 0) - (tots.fats || 0));
+
+    if (remKcal >= 120 && remKcal <= 950 && remPro >= 12) {
+      const dc = suggestDayCloser({
+        remKcal,
+        remProtein: remPro,
+        remCarbs,
+        remFats,
+        fridgeItems: fridgeItems || [],
+        maxSuggestions: 3
+      });
+      if (dc.needed && dc.suggestions.length > 0) {
+        dayCloserHtml = `
+          <div style="margin-top:12px; padding:10px 12px; background:rgba(124,111,255,0.06); border:1px solid rgba(124,111,255,0.18); border-radius:10px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+              <span style="font-size:10px; font-weight:800; color:var(--accent); text-transform:uppercase; letter-spacing:0.6px;">🍽️ Chiudi la giornata (-${dc.remKcal} kcal · -${dc.remProtein}g pro)</span>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:6px;">
+              ${dc.suggestions.map(s => `
+                <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; padding:6px 8px; background:rgba(255,255,255,0.03); border-radius:8px;">
+                  <span style="color:var(--t1); font-weight:600;">${s.label}</span>
+                  <span style="color:var(--t2); font-size:10px; white-space:nowrap; margin-left:8px;"><b>${s.kcal}</b> kcal · <b style="color:#38bdf8">${s.protein}g</b> P</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>`;
+      }
+    }
+  } catch (_) {}
+
   box.innerHTML = `
     <div class="advisor-card ${statusClass}">
       <div class="advisor-header">
@@ -3719,6 +3798,7 @@ function renderSmartAdvisorContent(text, insights = []) {
       </div>
       ${insightsHtml}
       ${actionsHtml}
+      ${dayCloserHtml}
       <div class="advisor-footer">
         <button onclick="window.refreshSmartAdvisor(false)" style="background:none; border:none; color:var(--t3); font-size:12px; font-weight:700; cursor:pointer; display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:6px; background:rgba(255,255,255,0.03); border:1px solid var(--border); transition: all 0.2s;" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--t3)'">
           <i class="ri-refresh-line" id="advisor-refresh-icon"></i> Aggiorna

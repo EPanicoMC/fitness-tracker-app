@@ -1,4 +1,6 @@
 import { getDayOfWeek } from './app.js';
+import { getDailyTargets } from './targets.js';
+import { isFlagEnabled } from './feature-flags.js';
 
 /**
  * Standard thresholds for deterministic pattern detection.
@@ -46,7 +48,22 @@ export function normalizeDiaryAnalyticsData(dates, logs, programData, dietPlan, 
 
     // Determine target nutrition
     let target = { kcal: 0, protein: 0, carbs: 0, fats: 0, saturatedFat: null };
-    if (dietPlan) {
+    if (isFlagEnabled('targets.unified')) {
+      const dt = getDailyTargets(dateStr, {
+        activeDiet: dietPlan,
+        activeProgram: programData,
+        appSettings: settings,
+        logEntry: log,
+        isTrainingDay
+      });
+      target = {
+        kcal: dt.kcal || 0,
+        protein: dt.protein || 0,
+        carbs: dt.carbs || 0,
+        fats: dt.fats || 0,
+        saturatedFat: dt.saturatedFat ?? null
+      };
+    } else if (dietPlan) {
       const plan = isTrainingDay ? (dietPlan.day_on || dietPlan.day_off) : (dietPlan.day_off || dietPlan.day_on);
       if (plan) {
         target = {

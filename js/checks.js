@@ -7,6 +7,7 @@ import {
   ref, uploadBytes, getDownloadURL, deleteObject
 } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js';
 import { analyzeCheckProgress } from './gemini.js';
+import { computeFusedBodyFat, BODY_COMP_VERSION } from './body-composition.js';
 
 let checks = [];
 let formPhotos = [];
@@ -1036,8 +1037,14 @@ window.saveCheck = async function() {
 
   const id = `check_${date.replace(/-/g,'')}`;
   const prev = checks[0];
+  const initialBfEstimate = computeFusedBodyFat({
+    check: { body_fat, measurements },
+    profile: {}
+  });
   const data = {
+    model_version: BODY_COMP_VERSION,
     date, weight, body_fat, muscle_mass,
+    bf_estimate: initialBfEstimate || null,
     notes: document.getElementById('ck-notes').value.trim(),
     measurements,
     photos: photoUrls,
@@ -1078,6 +1085,14 @@ window.saveCheck = async function() {
       const activeDiet = dietSnap?.docs?.[0]?.data() || null;
       const dailyLogs = logsSnap?.docs?.map(d => d.data()) || [];
 
+      const fusedWithProfile = computeFusedBodyFat({
+        check: { body_fat, measurements },
+        profile
+      });
+      if (fusedWithProfile) {
+        await setDoc(doc(db,'users',getUserId(),'checks',id), { bf_estimate: fusedWithProfile, model_version: BODY_COMP_VERSION }, { merge: true });
+      }
+
       const aiResult = await analyzeCheckProgress({
         newCheck: { date, weight, body_fat, muscle_mass, measurements, photos: photoUrls, notes: data.notes },
         allChecks: checks,
@@ -1087,8 +1102,17 @@ window.saveCheck = async function() {
         activeDiet
       });
       if (aiResult.success) {
-        await setDoc(doc(db,'users',getUserId(),'checks',id), { ai_analysis: aiResult.analysis }, { merge: true });
-        checks = checks.map(c => c.id === id ? { ...c, ai_analysis: aiResult.analysis } : c);
+        const finalBfEstimate = computeFusedBodyFat({
+          check: { body_fat, measurements, ai_analysis: aiResult.analysis },
+          profile
+        });
+        const updatePayload = {
+          ai_analysis: aiResult.analysis,
+          model_version: BODY_COMP_VERSION,
+          ...(finalBfEstimate ? { bf_estimate: finalBfEstimate } : {})
+        };
+        await setDoc(doc(db,'users',getUserId(),'checks',id), updatePayload, { merge: true });
+        checks = checks.map(c => c.id === id ? { ...c, ...updatePayload } : c);
         renderList();
         showToast('🤖 Analisi AI completata!');
       }

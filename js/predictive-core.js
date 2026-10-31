@@ -21,6 +21,15 @@ import { runEnergyBalanceModel, addDaysISO, diffDaysISO } from './energy-model.j
 import { runTrainingModel, DEFAULT_EXERCISE_CATALOG } from './training-model.js';
 import { evaluateCrossRules, buildDeterministicCoachFallback } from './coach-rules.js';
 import { generatePredictiveCoachAI, parseMissingDataWithAI } from './gemini.js';
+import { unifyInsights } from './insight-bus.js';
+import { isFlagEnabled } from './feature-flags.js';
+import { computeWeeklyCheckinProposal, confirmWeeklyCheckinDecision, loadLocalWeeklyCheckins } from './weekly-checkin.js';
+import { classifyBodyCompositionState4w } from './body-composition.js';
+import { evaluateNutritionQuality } from './nutrition-core.js';
+import { computePersonalCorrelations } from './correlations.js';
+import { getDailyTargets } from './targets.js';
+
+export { confirmWeeklyCheckinDecision };
 
 const LOCAL_SNAPSHOT_CACHE_KEY = 'fittracker_predictive_state_v1';
 const LOCAL_COACH_WEEKLY_KEY = 'fittracker_coach_weekly_meta_v1';
@@ -49,10 +58,13 @@ export function normalizeLogsForModels({
         weightKg: null,
         waistCm: null,
         bodyFatPct: null,
+        bodyFat: null,
         intakeKcal: null,
         proteinG: null,
         carbsG: null,
         fatsG: null,
+        drinks: 0,
+        mealsOut: 0,
         intakeComplete: null,
         steps: null,
         sleepHours: null,
@@ -71,7 +83,11 @@ export function normalizeLogsForModels({
     const rec = ensureDay(dt);
     if (ch.weight != null && Number(ch.weight) > 25) rec.weightKg = Number(ch.weight);
     if (ch.waist != null && Number(ch.waist) > 30) rec.waistCm = Number(ch.waist);
-    if (ch.body_fat != null && Number(ch.body_fat) > 2) rec.bodyFatPct = Number(ch.body_fat);
+    const bfVal = ch.bf_estimate?.value ?? ch.body_fat;
+    if (bfVal != null && Number(bfVal) > 2) {
+      rec.bodyFatPct = Number(bfVal);
+      rec.bodyFat = Number(bfVal);
+    }
   }
 
   // 2. Popola da daily_logs (nutrizione, peso giornaliero, passi, sonno, flag giornata completa, workout)
@@ -97,6 +113,14 @@ export function normalizeLogsForModels({
     }
     if (log.anomalous_day === true) {
       rec.anomalous = true;
+    }
+    if (log.drinks != null && Number(log.drinks) > 0) {
+      rec.drinks = Number(log.drinks);
+    } else if (log.nutrition?.totals?.alcoholDrinks != null && Number(log.nutrition.totals.alcoholDrinks) > 0) {
+      rec.drinks = Number(log.nutrition.totals.alcoholDrinks);
+    }
+    if (log.meals_out != null && Number(log.meals_out) > 0) {
+      rec.mealsOut = Number(log.meals_out);
     }
 
     // Estrai kcal e macro da nutrition.totals o calcola dai pasti
@@ -275,6 +299,7 @@ export async function runPredictivePipeline({
   const energyOutput = runEnergyBalanceModel({
     days: normalizedDays,
     profile: profileObj,
+    checks: checksArr,
     todayDate: todayStr
   });
 
@@ -283,6 +308,8 @@ export async function runPredictivePipeline({
   const trainingOutput = runTrainingModel({
     days: normalizedDays,
     exerciseCatalog: customCatalog,
+    profile: profileObj,
+    context: { energyBalance7d: energyOutput.energyBalance7d },
     todayDate: todayStr
   });
 
@@ -297,8 +324,48 @@ export async function runPredictivePipeline({
     ? Math.round(stepDays.reduce((s, d) => s + d.steps, 0) / stepDays.length)
     : null;
 
-  // 4. Motore di regole incrociate deterministico
-  const insights = evaluateCrossRules({
+  // 3b. Moduli Fase 4 (Weekly Check-in, Composizione Corporea 4w, Qualità Nutrizione, Correlazioni Personali)
+  const existingCheckins = loadLocalWeeklyCheckins(uid);
+  const currentIsoWeek = getIsoWeekKey(todayStr);
+  const weeklyCheckinProposal = computeWeeklyCheckinProposal({
+    energyOutput,
+    trainingOutput,
+    profile: profileObj,
+    currentTarget: existingCheckins[currentIsoWeek]?.confirmedTarget || null,
+    existingCheckin: existingCheckins[currentIsoWeek] || null,
+    todayDate: todayStr
+  });
+
+  const bodyCompState4w = classifyBodyCompositionState4w({
+    energyHistory: energyOutput.history,
+    trainingOutput,
+    checks: checksArr,
+    todayDate: todayStr
+  });
+
+  const todayRawLog = logsArr.find(l => (l.date || l.id) === todayStr) || logsArr[logsArr.length - 1] || {};
+  const nutritionQuality = evaluateNutritionQuality({
+    todayLog: todayRawLog,
+    recentLogs7d: logsArr.slice(-7),
+    bodyWeightKg: energyOutput.trendWeight || 75
+  });
+
+  const personalCorrelations = computePersonalCorrelations({
+    days: normalizedDays,
+    energyHistory: energyOutput.history,
+    trainingHistory: trainingOutput.history
+  });
+
+  const unifiedTargets = getDailyTargets(todayStr, {
+    profile: profileObj,
+    appSettings: profileObj,
+    energyOutput,
+    allowAdaptiveFallback: true,
+    weeklyCheckin: existingCheckins[currentIsoWeek] || null
+  });
+
+  // 4. Motore di regole incrociate deterministico + Insight Bus unificato
+  const rawCoachInsights = evaluateCrossRules({
     energyOutput,
     trainingOutput,
     context: {
@@ -307,6 +374,20 @@ export async function runPredictivePipeline({
       stepsGoal: Number(profileObj.steps_goal) || 10000
     }
   });
+
+  const extraBusSources = [];
+  if (isFlagEnabled('nutritionQuality') && Array.isArray(nutritionQuality?.insights)) {
+    extraBusSources.push(...nutritionQuality.insights);
+  }
+  if (isFlagEnabled('personalCorrelations') && personalCorrelations?.topInsight) {
+    extraBusSources.push(personalCorrelations.topInsight);
+  }
+
+  const unifiedBus = unifyInsights(
+    { coachRules: [...rawCoachInsights, ...extraBusSources] },
+    { maxPerView: 3, respectCooldown: isFlagEnabled('insightBus'), nowDate: todayStr }
+  );
+  const insights = isFlagEnabled('insightBus') ? unifiedBus.insights : rawCoachInsights;
 
   // 5. Ultime 4 settimane aggregate
   const weeklySummary4w = computeLast4WeeksSummary(
@@ -324,10 +405,18 @@ export async function runPredictivePipeline({
   });
 
   const result = {
+    model_version: 'predictive@2.0',
     date: todayStr,
     energyOutput,
     trainingOutput,
     insights,
+    unifiedInsights: unifiedBus.insights,
+    suppressedInsights: unifiedBus.suppressed,
+    weeklyCheckinProposal,
+    bodyCompState4w,
+    nutritionQuality,
+    personalCorrelations,
+    unifiedTargets,
     weeklySummary4w,
     deterministicCoach,
     profile: profileObj,
@@ -345,6 +434,11 @@ export async function runPredictivePipeline({
         energyOutput: { ...energyOutput, history: energyOutput.history.slice(-90) },
         trainingOutput: { ...trainingOutput, history: trainingOutput.history.slice(-90) },
         insights,
+        weeklyCheckinProposal,
+        bodyCompState4w,
+        nutritionQuality,
+        personalCorrelations,
+        unifiedTargets,
         weeklySummary4w,
         deterministicCoach,
         computedAt: result.computedAt
@@ -366,13 +460,17 @@ export async function runPredictivePipeline({
  * Salva lo snapshot giornaliero, i parametri calibrati dei modelli e gli insight su Firestore.
  */
 async function persistModelsToFirestore(uid, result) {
-  const { date, energyOutput, trainingOutput, insights } = result;
+  const { date, energyOutput, trainingOutput, insights, bodyCompState4w } = result;
   const snapDoc = {
+    model_version: 'predictive@2.0',
+    energy_model_version: energyOutput.model_version || 'energy@2.0',
+    training_model_version: trainingOutput.model_version || 'training@2.0',
     date,
     trendWeight: energyOutput.trendWeight,
     rawWeight: energyOutput.rawWeight,
     tdeeEstimate: energyOutput.tdeeEstimate,
     tdeeCI: energyOutput.tdeeCI,
+    model_divergence: Boolean(energyOutput.model_divergence || energyOutput.modelDivergence),
     avgIntake7d: energyOutput.avgIntake7d,
     energyBalance7d: energyOutput.energyBalance7d,
     weeklyRateKg: energyOutput.weeklyRateKg,
@@ -381,19 +479,32 @@ async function persistModelsToFirestore(uid, result) {
     recommendedMacros: energyOutput.recommendedMacros,
     etaGoalDate: energyOutput.etaGoalDate,
     confidence: energyOutput.confidence,
+    confidenceScore: energyOutput.confidenceScore ?? null,
+    dataQuality: energyOutput.dataQuality || null,
+    bodyCompState4w: bodyCompState4w?.state || null,
     ctl: trainingOutput.ctl,
     atl: trainingOutput.atl,
     tsb: trainingOutput.tsb,
     acwr: trainingOutput.acwr,
+    monotony: trainingOutput.monotony ?? null,
+    strain: trainingOutput.strain ?? null,
     readiness: trainingOutput.readiness,
+    readinessContributions: trainingOutput.readinessContributions || [],
     predictedPerformance: trainingOutput.predictedPerformance,
     deloadSuggested: trainingOutput.deloadSuggested,
     weeklySetsByMuscle: trainingOutput.weeklySetsByMuscle,
+    muscleVolumeStatus: trainingOutput.muscleVolumeStatus || null,
     updatedAt: new Date().toISOString()
   };
 
   const paramsDoc = {
+    model_version: 'predictive@2.0',
+    energy_model_version: energyOutput.model_version || 'energy@2.0',
+    training_model_version: trainingOutput.model_version || 'training@2.0',
     date,
+    state_usage: 'snapshot_only',
+    state_note: 'Full-replay attivo per coerenza sulle modifiche retroattive; questo stato è salvato solo come snapshot diagnostico e non viene usato come punto di partenza.',
+    model_divergence: Boolean(energyOutput.model_divergence || energyOutput.modelDivergence),
     kalmanState: energyOutput.kalmanState
       ? {
           x: energyOutput.kalmanState.x,
@@ -402,10 +513,14 @@ async function persistModelsToFirestore(uid, result) {
         }
       : null,
     banisterParams: trainingOutput.banisterParams || null,
+    load_conversion: trainingOutput.load_conversion || null,
+    k_hs: trainingOutput.load_conversion?.k_hs ?? null,
+    k_ton: trainingOutput.load_conversion?.k_ton ?? null,
     updatedAt: new Date().toISOString()
   };
 
   const insightsDoc = {
+    model_version: 'rules@2.0',
     date,
     items: insights,
     updatedAt: new Date().toISOString()
@@ -470,6 +585,7 @@ export async function getOrGenerateCoachReport(pipelineResult, {
   // Salva su Firestore `coach_reports`
   if (uid && report.inputHash && typeof navigator !== 'undefined' && navigator.onLine !== false) {
     setDoc(doc(db, 'users', uid, 'coach_reports', report.inputHash), {
+      model_version: 'coach@2.0',
       ...report,
       date: todayStr,
       isoWeek: currentIsoWeek

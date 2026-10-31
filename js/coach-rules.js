@@ -21,6 +21,8 @@
  *     `{ id, area: 'diet'|'training'|'recovery', severity: 'high'|'medium'|'low'|'info', message, evidence, action }`.
  */
 
+import { isFlagEnabled } from './feature-flags.js';
+
 export const RULE_THRESHOLDS = {
   maxWeeklyLossPct: -1.0,        // perdita > 1.0% del peso a settimana
   minProteinGPerKg: 1.6,         // soglia minima Morton et al. 2018
@@ -30,7 +32,8 @@ export const RULE_THRESHOLDS = {
   acwrHighThreshold: 1.5,        // spike ACWR (EWMA 7/28)
   lowAdherencePct: 70,           // aderenza diario < 70%
   goodAdherencePct: 80,          // aderenza ok per confermare un vero plateau
-  lowSleepHours: 6.0             // media sonno 7gg sotto 6 ore
+  lowSleepHours: 6.0,            // media sonno 7gg sotto 6 ore
+  dietBreakMinDaysInCut: 56      // >= 8 settimane di deficit per proporre diet break
 };
 
 /**
@@ -39,7 +42,7 @@ export const RULE_THRESHOLDS = {
  * @param {Object} params
  * @param {Object} params.energyOutput output di `runEnergyBalanceModel`
  * @param {Object} params.trainingOutput output di `runTrainingModel`
- * @param {Object} [params.context] { avgSleep7d, avgSteps7d, stepsGoal }
+ * @param {Object} [params.context] { avgSleep7d, avgSteps7d, stepsGoal, flags, enableDietBreakRule }
  * @returns {Array<{id:string, area:'diet'|'training'|'recovery', severity:'high'|'medium'|'low'|'info', message:string, evidence:Object, action:string}>}
  */
 export function evaluateCrossRules({
@@ -237,6 +240,34 @@ export function evaluateCrossRules({
       },
       action: `Punta ad almeno 7 ore di sonno e sospendi serie a cedimento (RIR 0 / myo-reps) finché la media settimanale non risale sopra 6.0 ore.`
     });
+  }
+
+  // ── REGOLA 9 (4G): Diet Break / Refeed consigliato in deficit prolungato ─────
+  const enableDietBreak = Boolean(context.enableDietBreakRule) || isFlagEnabled('coach.dietBreakRule', context.flags);
+  if (enableDietBreak && energyOutput.goalType === 'cut') {
+    const daysInCut = Number(context.daysInCut ?? history.length);
+    const readiness = Number(trainingOutput.readiness ?? 75);
+    const hasProlongedCut = daysInCut >= RULE_THRESHOLDS.dietBreakMinDaysInCut;
+    const hasFatigueOrStall = isWeightPlateau || readiness < 45 || regressingLifts.length >= 2;
+
+    if (hasProlongedCut && hasFatigueOrStall) {
+      const maintKcal = energyOutput.tdeeEstimate || 2200;
+      const maintCarbsG = Math.max(200, Math.round((maintKcal - (trendWeight * 1.8 * 4) - (trendWeight * 0.8 * 9)) / 4));
+      insights.push({
+        id: 'diet_break_suggested',
+        area: 'diet',
+        severity: readiness < 40 || regressingLifts.length >= 2 ? 'high' : 'medium',
+        message: `Sei in definizione da oltre ${Math.floor(daysInCut / 7)} settimane con segni di adattamento o fatica (${isWeightPlateau ? 'stallo del peso' : `prontezza ${readiness}/100`}).`,
+        evidence: {
+          daysInCut,
+          isWeightPlateau,
+          readiness,
+          regressingLiftsCount: regressingLifts.length,
+          maintenanceKcal: maintKcal
+        },
+        action: `Valuta 7–14 giorni di Diet Break a mantenimento (${maintKcal} kcal/giorno, circa ${maintCarbsG}g di carboidrati) per ripristinare il glicogeno muscolare e la performance.`
+      });
+    }
   }
 
   // Ordina per severità decrescente
