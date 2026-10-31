@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KOVA — Dev Model Evaluation & Flags</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <style>
+    body {
+      background: #0d1117;
+      color: #e6edf3;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      padding: 20px;
+      max-width: 960px;
+      margin: 0 auto;
+    }
+    h1, h2, h3 { color: #58a6ff; margin-top: 0; }
+    .dev-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      padding: 18px;
+      margin-bottom: 18px;
+    }
+    .btn-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+    button {
+      background: #238636;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 8px 14px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 13px;
+    }
+    button.secondary { background: #30363d; }
+    button.warn { background: #9e6a03; }
+    pre {
+      background: #010409;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 12px;
+      overflow-x: auto;
+      font-size: 12px;
+      line-height: 1.45;
+      max-height: 440px;
+    }
+    .flag-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 8px;
+    }
+    .flag-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🔬 KOVA — Model Evaluation Harness & Feature Flags</h1>
+  <p style="color:#8b949e; font-size:14px;">
+    Pagina diagnostica per eseguire il backtest walk-forward (MAE 1g, MAE 28g, Copertura 95%, Stabilità TDEE),
+    verificare i modelli Gemini via <code>ListModels</code> e gestire i Feature Flag in <code>localStorage</code>.
+  </p>
+
+  <div class="dev-card">
+    <h2>🚩 Feature Flags (localStorage)</h2>
+    <div class="btn-row">
+      <button class="secondary" id="btnResetFlags">Ripristina Default (Tutti OFF)</button>
+      <button id="btnEnableRecommended">Attiva Flag Validati</button>
+    </div>
+    <div class="flag-grid" id="flagGrid"></div>
+  </div>
+
+  <div class="dev-card">
+    <h2>📊 Backtest Modelli sui tuoi dati</h2>
+    <div class="btn-row">
+      <button id="btnRunEval">Esegui Harness Completo</button>
+      <button class="secondary" id="btnCompareAllFlags">Confronta Impatto Singoli Flag</button>
+      <button class="secondary" id="btnExportAnon">Esporta Fixture Anonimizzata</button>
+    </div>
+    <pre id="evalOutput">Premi "Esegui Harness Completo" per calcolare le metriche sui tuoi dati locali/Firestore...</pre>
+  </div>
+
+  <div class="dev-card">
+    <h2>🤖 Diagnostica Modelli Gemini (ListModels & Quote RPD)</h2>
+    <div class="btn-row">
+      <button id="btnCheckGemini">Verifica Catena MODELS su API Gemini</button>
+    </div>
+    <pre id="geminiOutput">Premi per interrogare l'endpoint v1beta/models e controllare i contatori giornalieri RPD...</pre>
+  </div>
+
+  <script type="module">
+    import { getAllFlags, setFlag, resetAllFlags } from './js/feature-flags.js';
+    import { evaluateModelsOnHistory, compareFlagCandidate } from './js/model-eval.js';
+    import { loadSmart } from './js/app.js';
+    import { verifyGeminiModelsList, getDailyModelUsage } from './js/gemini.js';
+
+    const flagGrid = document.getElementById('flagGrid');
+    const evalOutput = document.getElementById('evalOutput');
+    const geminiOutput = document.getElementById('geminiOutput');
+
+    function renderFlags() {
+      const flags = getAllFlags();
+      flagGrid.innerHTML = '';
+      for (const [key, val] of Object.entries(flags)) {
+        const div = document.createElement('div');
+        div.className = 'flag-item';
+        div.innerHTML = `
+          <span><code>${key}</code></span>
+          <input type="checkbox" data-flag="${key}" ${val ? 'checked' : ''} />
+        `;
+        div.querySelector('input').addEventListener('change', (e) => {
+          setFlag(key, e.target.checked);
+          renderFlags();
+        });
+        flagGrid.appendChild(div);
+      }
+    }
+
+    document.getElementById('btnResetFlags').addEventListener('click', () => {
+      resetAllFlags();
+      renderFlags();
+    });
+
+    document.getElementById('btnEnableRecommended').addEventListener('click', () => {
+      [
+        'energy.trendKalmanOnly',
+        'energy.normalizedGating',
+        'energy.dynamicRho',
+        'training.homogeneousLoad',
+        'training.e1rmV2',
+        'training.banisterValidation',
+        'training.readinessV2',
+        'training.volumeTargets',
+        'training.doubleProgression',
+        'targets.unified',
+        'recovery.v2',
+        'insightBus',
+        'weeklyCheckin',
+        'bodyComp',
+        'dayCloser',
+        'aiMealCalibration',
+        'nutritionQuality',
+        'correlations',
+        'dietBreak'
+      ].forEach(f => setFlag(f, true));
+      renderFlags();
+    });
+
+    async function loadUserContext() {
+      const [diaryMap, workoutsMap, checksList, settingsDoc] = await Promise.all([
+        loadSmart('diary', 'ft_diary', { mode: 'map' }),
+        loadSmart('workouts', 'ft_workouts', { mode: 'map' }),
+        loadSmart('checks', 'ft_checks', { mode: 'list' }),
+        loadSmart('settings', 'ft_settings', { mode: 'doc', docId: 'app' })
+      ]);
+      return {
+        diaryMap: diaryMap || {},
+        workoutsMap: workoutsMap || {},
+        checksList: Array.isArray(checksList) ? checksList : [],
+        profile: settingsDoc?.profile || {}
+      };
+    }
+
+    document.getElementById('btnRunEval').addEventListener('click', async () => {
+      evalOutput.textContent = 'Caricamento dati ed esecuzione walk-forward...';
+      try {
+        const ctx = await loadUserContext();
+        const res = evaluateModelsOnHistory(ctx);
+        evalOutput.textContent = JSON.stringify(res, null, 2);
+      } catch (err) {
+        evalOutput.textContent = 'Errore: ' + err.message;
+      }
+    });
+
+    document.getElementById('btnCompareAllFlags').addEventListener('click', async () => {
+      evalOutput.textContent = 'Confronto flag in corso...';
+      try {
+        const ctx = await loadUserContext();
+        const candidateFlags = [
+          'energy.trendKalmanOnly',
+          'energy.normalizedGating',
+          'energy.dynamicRho',
+          'energy.stepsCovariate'
+        ];
+        const results = {};
+        for (const f of candidateFlags) {
+          results[f] = compareFlagCandidate(ctx, { [f]: true });
+        }
+        evalOutput.textContent = JSON.stringify(results, null, 2);
+      } catch (err) {
+        evalOutput.textContent = 'Errore: ' + err.message;
+      }
+    });
+
+    document.getElementById('btnExportAnon').addEventListener('click', async () => {
+      try {
+        const ctx = await loadUserContext();
+        const anon = {
+          exportedAt: new Date().toISOString(),
+          profile: {
+            gender: ctx.profile.gender || 'M',
+            age: ctx.profile.age || 30,
+            height: ctx.profile.height || 178,
+            weight: ctx.profile.weight || 78
+          },
+          diaryMap: Object.fromEntries(
+            Object.entries(ctx.diaryMap).map(([d, v]) => [
+              d,
+              {
+                date: d,
+                weight: v.weight ?? null,
+                kcal: v.kcal ?? 0,
+                protein: v.protein ?? 0,
+                carbs: v.carbs ?? 0,
+                fats: v.fats ?? 0,
+                steps: v.steps ?? null,
+                sleep_hours: v.sleep_hours ?? null,
+                sleep_quality: v.sleep_quality ?? null,
+                drinks: v.drinks ?? 0,
+                meals_out: v.meals_out ?? 0,
+                anomalous_day: Boolean(v.anomalous_day)
+              }
+            ])
+          )
+        };
+        evalOutput.textContent = JSON.stringify(anon, null, 2);
+      } catch (err) {
+        evalOutput.textContent = 'Errore: ' + err.message;
+      }
+    });
+
+    document.getElementById('btnCheckGemini').addEventListener('click', async () => {
+      geminiOutput.textContent = 'Verifica in corso...';
+      try {
+        const report = await verifyGeminiModelsList();
+        const usage = getDailyModelUsage();
+        geminiOutput.textContent = JSON.stringify({ modelVerification: report, dailyUsage: usage }, null, 2);
+      } catch (err) {
+        geminiOutput.textContent = 'Errore: ' + err.message;
+      }
+    });
+
+    renderFlags();
+  </script>
+</body>
+</html>
